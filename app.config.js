@@ -106,7 +106,7 @@ module.exports = {
       // Google OAuth (สำหรับ Google Sign-In)
       // วิธีได้ client IDs: ดูขั้นตอนใน README หรือ docs/google-signin-setup.md
       googleWebClientId:     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID     || '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com',
-      googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '', // ← ใส่หลัง setup SHA-1
+      googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com',
       googleIosClientId:     process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID     || '',
       // Google Places
       googlePlacesApiKey: GOOGLE_API_KEY,
