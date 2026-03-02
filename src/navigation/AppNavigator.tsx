@@ -30,6 +30,7 @@ import EmailVerificationScreen from '../screens/auth/EmailVerificationScreen';
 import OTPVerificationScreen from '../screens/auth/OTPVerificationScreen';
 import ChooseRoleScreen from '../screens/auth/ChooseRoleScreen';
 import CompleteRegistrationScreen from '../screens/auth/CompleteRegistrationScreen';
+import OnboardingSurveyScreen from '../screens/auth/OnboardingSurveyScreen';
 
 // Main Screens
 import HomeScreen from '../screens/home/HomeScreen';
@@ -440,6 +441,15 @@ function RootNavigator() {
         component={NearbyJobAlertScreen}
         options={{
           animation: 'slide_from_right',
+        }}
+      />
+      {/* Onboarding Survey - แบบสำรวจหลังสมัคร */}
+      <RootStack.Screen
+        name="OnboardingSurvey"
+        component={OnboardingSurveyScreen}
+        options={{
+          animation: 'slide_from_right',
+          gestureEnabled: false,
         }}
       />
     </RootStack.Navigator>

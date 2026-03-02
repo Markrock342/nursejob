@@ -78,6 +78,75 @@ export function getLicenseTypeLabel(type: string): string {
 }
 
 // ============================================
+// License Number Validation
+// ============================================
+
+/**
+ * ตรวจสอบรูปแบบเลขใบอนุญาตวิชาชีพ
+ * - RN (พยาบาลวิชาชีพ): ว.XXXXX หรือ ว.XXXXXX (5-6 หลัก)
+ * - PN (พยาบาลเทคนิค): ผ.XXXXX หรือ ผ.XXXXXX (5-6 หลัก)
+ * - ผดุงครรภ์: ผด.XXXXX
+ * - ยอมรับรูปแบบเก่า: ตัวอักษร-ตัวเลข (เช่น RN-123456, PN-123456)
+ */
+export const LICENSE_PATTERNS: Record<string, { regex: RegExp; example: string; label: string }> = {
+  nurse: {
+    regex: /^(ว\.\d{5,6}|RN[- ]?\d{5,6})$/i,
+    example: 'ว.12345 หรือ RN-123456',
+    label: 'พยาบาลวิชาชีพ (RN)',
+  },
+  practical_nurse: {
+    regex: /^(ผ\.\d{5,6}|PN[- ]?\d{5,6})$/i,
+    example: 'ผ.12345 หรือ PN-123456',
+    label: 'พยาบาลเทคนิค (PN)',
+  },
+  midwife: {
+    regex: /^(ผด\.\d{5,6}|MW[- ]?\d{5,6})$/i,
+    example: 'ผด.12345 หรือ MW-123456',
+    label: 'พยาบาลผดุงครรภ์',
+  },
+  other: {
+    regex: /^.{3,20}$/,
+    example: 'ระบุเลขใบอนุญาต',
+    label: 'อื่นๆ',
+  },
+};
+
+export interface LicenseValidationResult {
+  valid: boolean;
+  error?: string;
+  normalizedNumber?: string;
+}
+
+export function validateLicenseNumber(
+  licenseNumber: string,
+  licenseType: string
+): LicenseValidationResult {
+  const trimmed = licenseNumber.trim();
+  
+  if (!trimmed) {
+    return { valid: false, error: 'กรุณากรอกเลขใบอนุญาต' };
+  }
+
+  const pattern = LICENSE_PATTERNS[licenseType];
+  if (!pattern) {
+    // Unknown type — just check length
+    if (trimmed.length < 3 || trimmed.length > 20) {
+      return { valid: false, error: 'เลขใบอนุญาตต้องมี 3-20 ตัวอักษร' };
+    }
+    return { valid: true, normalizedNumber: trimmed };
+  }
+
+  if (!pattern.regex.test(trimmed)) {
+    return {
+      valid: false,
+      error: `รูปแบบไม่ถูกต้อง ตัวอย่าง: ${pattern.example}`,
+    };
+  }
+
+  return { valid: true, normalizedNumber: trimmed };
+}
+
+// ============================================
 // Submit Verification Request
 // ============================================
 

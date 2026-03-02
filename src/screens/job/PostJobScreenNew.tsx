@@ -282,7 +282,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.centeredView}>
-          <Text style={styles.centeredIcon}>📝</Text>
+          <Ionicons name="document-text-outline" size={64} color={colors.border} />
           <Text style={[styles.centeredTitle, { color: colors.text }]}>เข้าสู่ระบบก่อนโพสต์</Text>
           <Text style={[styles.centeredSubtitle, { color: colors.textSecondary }]}>
             กรุณาเข้าสู่ระบบเพื่อลงประกาศ

@@ -941,6 +941,7 @@ export default function HomeScreen({ navigation }: Props) {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={{ backgroundColor: '#0EA5E9' }}
           contentContainerStyle={styles.categoryTabs}
         >
           {CATEGORY_TABS.map((tab) => {
@@ -1818,10 +1819,11 @@ const styles = StyleSheet.create({
   // ── Category Tabs ─────────────────────────────────────────────────
   categoryTabs: {
     flexDirection: 'row' as const,
-    paddingHorizontal: 12,
+    paddingLeft: 4,
+    paddingRight: 12,
     paddingTop: 4,
     paddingBottom: 10,
-    backgroundColor: '#0284C7',
+    backgroundColor: '#0EA5E9',
     gap: 8,
   },
   categoryTab: {

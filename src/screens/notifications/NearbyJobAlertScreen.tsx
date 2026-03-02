@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 
 import { db } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -32,7 +32,7 @@ const RADIUS_OPTIONS = [1, 3, 5, 10, 20, 50];
 // ─── Main Component ───────────────────────────
 export default function NearbyJobAlertScreen() {
   const navigation = useNavigation() as any;
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { colors } = useTheme();
 
   const [enabled, setEnabled] = useState(false);
@@ -55,6 +55,21 @@ export default function NearbyJobAlertScreen() {
       return;
     }
     try {
+      // อ่านจาก user context ก่อน (เร็วกว่า และเป็นข้อมูลล่าสุดที่ save ไว้)
+      const contextAlert = user.nearbyJobAlert;
+      if (contextAlert) {
+        setEnabled(Boolean(contextAlert.enabled));
+        setRadiusKm(contextAlert.radiusKm ?? 5);
+        if (contextAlert.lat && contextAlert.lng) {
+          setLat(contextAlert.lat);
+          setLng(contextAlert.lng);
+          reverseGeocode(contextAlert.lat, contextAlert.lng);
+        }
+        setIsLoading(false);
+        return; // ไม่ต้อง fetch Firestore แล้ว
+      }
+
+      // Fallback: อ่านจาก Firestore ถ้า context ยังไม่มีข้อมูล
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
         const data = snap.data();
@@ -128,7 +143,8 @@ export default function NearbyJobAlertScreen() {
     setIsSaving(true);
     try {
       const geohash4 = lat && lng ? encodeGeohash(lat, lng, 4) : '';
-      await updateDoc(doc(db, 'users', user.uid), {
+      // updateUser เขียน Firestore + sync AuthContext + AsyncStorage ทันที
+      await updateUser({
         nearbyJobAlert: {
           enabled,
           radiusKm,

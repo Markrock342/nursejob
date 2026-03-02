@@ -33,7 +33,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "@sentry/react-native",
+        {
+          "organization": "nursego",
+          "project": "nursego-app"
+        }
+      ]
     ],
     "extra": {
       "longdoApiKey": "42cbc4a02c0bc712bafa5e0b44ae2cd7",

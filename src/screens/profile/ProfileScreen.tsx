@@ -371,7 +371,7 @@ export default function ProfileScreen({ navigation }: Props) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.guestContainer}>
-          <Text style={styles.guestIcon}>👤</Text>
+          <Ionicons name="person-circle-outline" size={80} color={colors.border} />
           <Text style={styles.guestTitle}>ยังไม่ได้เข้าสู่ระบบ</Text>
           <Text style={styles.guestDescription}>
             เข้าสู่ระบบเพื่อจัดการโปรไฟล์และดูประวัติการสมัครงาน

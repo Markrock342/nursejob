@@ -78,7 +78,13 @@ export interface UserProfile {
   displayName: string;
   photoURL?: string | null;
   phone?: string;
-  role: 'nurse' | 'hospital' | 'admin';
+  role: 'user' | 'nurse' | 'hospital' | 'admin';
+  // Onboarding
+  onboardingCompleted?: boolean;
+  staffType?: string; // primary staff type (for nurse)
+  staffTypes?: string[]; // multiple staff types (for nurse)
+  interestedStaffTypes?: string[]; // for hospital/user — what they're looking for
+  preferredProvince?: string;
   licenseNumber?: string;
   licenseVerified?: boolean;
   experience?: number;
@@ -113,6 +119,14 @@ export interface UserProfile {
   updatedAt?: Date | Timestamp;
   lastActiveAt?: Date;
   fcmToken?: string; // For push notifications
+  nearbyJobAlert?: {
+    enabled: boolean;
+    radiusKm: number;
+    lat: number;
+    lng: number;
+    geohash4: string;
+    updatedAt?: Date;
+  };
 }
 
 // Job Types - บอร์ดหาคนแทน
@@ -357,6 +371,7 @@ export type RootStackParamList = {
   };
   MapJobs: undefined; // แผนที่งานใกล้ตัว
   NearbyJobAlert: undefined; // ตั้งค่าแจ้งเตือนงานใกล้ตัว
+  OnboardingSurvey: undefined; // แบบสำรวจเริ่มต้น
 };
 
 export type AuthStackParamList = {

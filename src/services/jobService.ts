@@ -237,9 +237,80 @@ export async function getJobsNearby(
   }
 }
 
+// ==========================================
+// Anti-scam & Rate limit helpers
+// ==========================================
+
+const MIN_RATE_BAHT = 300;   // ค่าเวรต่ำสุดที่สมเหตุสมผล (บาท/เวร)
+const MAX_POSTS_PER_HOUR = 5; // โพสต์ได้ไม่เกิน 5 ครั้ง/ชม. ต่อ user
+const SUSPICIOUS_KEYWORDS = ['โอนเงิน', 'ค่ามัดจำ', 'line@', 'สมัครฟรี', 'รายได้เสริม', 'mlm'];
+
+export interface PostValidationResult {
+  valid: boolean;
+  warnings: string[];
+  blocked: boolean;
+  reason?: string;
+}
+
+/** ตรวจ rate limit: ดึงจำนวนโพสต์ของ user ใน 1 ชม. ล่าสุด */
+async function checkRateLimit(posterId: string): Promise<boolean> {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const q = query(
+    collection(db, JOBS_COLLECTION),
+    where('posterId', '==', posterId),
+    where('createdAt', '>=', Timestamp.fromDate(oneHourAgo))
+  );
+  const snap = await getDocs(q);
+  return snap.size < MAX_POSTS_PER_HOUR;
+}
+
+/** ตรวจเนื้อหา + ค่าตอบแทน */
+export function validateJobPost(jobData: Partial<JobPost>): PostValidationResult {
+  const warnings: string[] = [];
+  let blocked = false;
+  let reason: string | undefined;
+
+  // 1. ค่าตอบแทนต่ำผิดปกติ
+  if (jobData.shiftRate && jobData.shiftRate > 0 && jobData.shiftRate < MIN_RATE_BAHT) {
+    warnings.push(`ค่าตอบแทน ${jobData.shiftRate} บาท ต่ำกว่าปกติ (ขั้นต่ำแนะนำ ${MIN_RATE_BAHT} บาท)`);
+  }
+
+  // 2. Keyword scam
+  const fullText = `${jobData.title || ''} ${jobData.description || ''}`.toLowerCase();
+  const foundKeywords = SUSPICIOUS_KEYWORDS.filter(kw => fullText.includes(kw));
+  if (foundKeywords.length > 0) {
+    warnings.push(`พบคำที่อาจเป็นการหลอกลวง: ${foundKeywords.join(', ')}`);
+    if (foundKeywords.length >= 2) {
+      blocked = true;
+      reason = 'เนื้อหาโพสต์มีลักษณะหลอกลวง กรุณาแก้ไขแล้วลองใหม่';
+    }
+  }
+
+  // 3. Title / description too short
+  if ((jobData.title || '').trim().length < 5) {
+    warnings.push('หัวข้อสั้นเกินไป กรุณาระบุรายละเอียดเพิ่มเติม');
+  }
+
+  return { valid: !blocked, warnings, blocked, reason };
+}
+
 // Create new job post
 export async function createJob(jobData: Partial<JobPost>): Promise<string> {
   try {
+    // Rate limit check
+    if (jobData.posterId) {
+      const allowed = await checkRateLimit(jobData.posterId);
+      if (!allowed) {
+        throw new Error('คุณโพสต์บ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่');
+      }
+    }
+
+    // Anti-scam validation
+    const validation = validateJobPost(jobData);
+    if (validation.blocked) {
+      throw new Error(validation.reason || 'ไม่สามารถโพสต์ได้');
+    }
+
     // Clean undefined values — Firestore rejects undefined fields
     const cleanData: Record<string, any> = {};
     for (const [key, value] of Object.entries(jobData)) {

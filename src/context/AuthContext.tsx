@@ -16,6 +16,7 @@ import {
   loginWithGoogle as loginWithGoogleService,
   loginAsAdmin as loginAsAdminService,
   loginWithPhoneOTP,
+  findUserByPhone,
   isAdminEmail,
   findEmailByUsername,
   validateAdminCredentials,
@@ -87,6 +88,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // ✅ Refs to prevent race conditions and memory leaks
   const isMountedRef = useRef(true);
   const profileFetchInProgressRef = useRef(false);
+  const isInitializedRef = useRef(false); // ref version เพื่อใช้ใน async callbacks
 
   // Listen for auth state changes
   useEffect(() => {
@@ -117,14 +119,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
           
           profileFetchInProgressRef.current = true;
-          const profile = await getUserProfile(firebaseUser.uid);
-          
+          let profile = await getUserProfile(firebaseUser.uid);
+          // Fallback: ถ้า profile ไม่เจอด้วย uid (เช่น sign-in ด้วย phone)
+          // ให้ look up ด้วยเบอร์โทรแทน
+          if (!profile && firebaseUser.phoneNumber) {
+            profile = await findUserByPhone(firebaseUser.phoneNumber);
+          }
           // ⚠️ Only update state if still mounted
           if (isMountedRef.current) {
-            setUser(profile);
-            // Cache user data
-            if (profile) {
-              await AsyncStorage.setItem('user', JSON.stringify(profile));
+            // Merge Firestore profile with AsyncStorage cache:
+            // ป้องกัน nearbyJobAlert หายเมื่อ Firestore อ่านข้อมูลเก่า
+            let mergedProfile = profile;
+            try {
+              const cachedStr = await AsyncStorage.getItem('user');
+              const cachedUser = cachedStr ? JSON.parse(cachedStr) : null;
+              if (mergedProfile && cachedUser) {
+                // ถ้า Firestore ไม่มี nearbyJobAlert แต่ cache มี → ใช้ค่าจาก cache
+                if (!mergedProfile.nearbyJobAlert && cachedUser.nearbyJobAlert) {
+                  mergedProfile = { ...mergedProfile, nearbyJobAlert: cachedUser.nearbyJobAlert };
+                }
+                // ถ้า cache มี nearbyJobAlert ที่ enabled แต่ Firestore มี disabled → เชื่อ cache
+                // (กรณี Firestore อ่านจาก offline cache เก่าก่อนที่ write จะ sync)
+                if (
+                  cachedUser.nearbyJobAlert?.enabled === true &&
+                  mergedProfile.nearbyJobAlert?.enabled === false
+                ) {
+                  mergedProfile = { ...mergedProfile, nearbyJobAlert: cachedUser.nearbyJobAlert };
+                }
+              }
+            } catch (_) {}
+
+            setUser(mergedProfile);
+            if (mergedProfile) {
+              await AsyncStorage.setItem('user', JSON.stringify(mergedProfile));
             }
           }
         } catch (err) {
@@ -143,6 +170,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       
       if (isMountedRef.current) {
+        isInitializedRef.current = true;
         setIsInitialized(true);
       }
     });
@@ -190,8 +218,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const cached = await AsyncStorage.getItem('user');
       if (cached) {
         const cachedUser = JSON.parse(cached);
-        // Only use cache if still loading
-        if (!isInitialized) {
+        // Only use cache if still loading (use ref to avoid stale closure)
+        if (!isInitializedRef.current) {
           setUser(cachedUser);
         }
       }

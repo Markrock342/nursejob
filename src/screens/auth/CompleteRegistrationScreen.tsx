@@ -11,7 +11,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -246,11 +245,15 @@ const { register, isLoading, clearError, user } = useAuth();
       <SuccessModal
         visible={showSuccessModal}
         title="สมัครสมาชิกสำเร็จ!"
-        message="คุณสามารถเข้าสู่ระบบได้แล้ว"
-        buttonText="เข้าสู่ระบบ"
+        message="มาตั้งค่าเบื้องต้นก่อนเริ่มใช้งานกันเลย"
+        buttonText="เริ่มเลย"
         onClose={() => {
           setShowSuccessModal(false);
-          navigation.replace('Login');
+          // Navigate to onboarding survey in RootStack
+          navigation.getParent()?.reset({
+            index: 0,
+            routes: [{ name: 'OnboardingSurvey' as any }],
+          });
         }}
       />
 

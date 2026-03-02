@@ -178,13 +178,32 @@ export function ChatListScreen({ navigation }: any) {
   const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid) {
+      setIsLoading(false);
+      return;
+    }
     const unsub = subscribeToConversations(user.uid, (convs: any[]) => {
       setConversations(convs);
       setIsLoading(false);
     });
     return unsub;
   }, [user?.uid]);
+
+  // Not logged in
+  if (!user) {
+    return (
+      <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top']}>
+        <View style={[styles.chatHeader, { backgroundColor: colors.primary }]}>
+          <Text style={styles.chatHeaderTitle}>ข้อความ</Text>
+        </View>
+        <View style={styles.centered}>
+          <Ionicons name="chatbubble-outline" size={56} color={colors.border} />
+          <Text style={{ color: colors.textSecondary, marginTop: 16, fontSize: 16, fontWeight: '600' }}>ยังไม่ได้เข้าสู่ระบบ</Text>
+          <Text style={{ color: colors.textMuted, marginTop: 8, fontSize: 13, textAlign: 'center', paddingHorizontal: 32 }}>เข้าสู่ระบบเพื่อดูข้อความสนทนาของคุณ</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const visible = conversations.filter(
     c =>

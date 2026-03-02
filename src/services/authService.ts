@@ -29,6 +29,12 @@ export interface UserProfile {
   role: 'user' | 'nurse' | 'hospital' | 'admin'; // user = ผู้ใช้ทั่วไป, nurse = พยาบาล (verified)
   isAdmin: boolean; // Admin flag
   isVerified?: boolean; // สถานะการยืนยันตัวตน (true = พยาบาลที่ผ่านการ verify)
+  // Onboarding
+  onboardingCompleted?: boolean;
+  staffType?: string;
+  staffTypes?: string[];
+  interestedStaffTypes?: string[];
+  preferredProvince?: string;
   emailVerified?: boolean; // สถานะการยืนยัน email
   licenseNumber?: string; // เลขใบประกอบวิชาชีพ (verified)
   pendingLicenseNumber?: string; // เลขที่รอตรวจสอบ
@@ -36,6 +42,15 @@ export interface UserProfile {
   experience?: number;
   bio?: string;
   skills?: string[];
+  location?: {
+    province: string;
+    district: string;
+  };
+  availability?: {
+    isAvailable: boolean;
+    preferredShifts: string[];
+    preferredDays: string[];
+  };
   createdAt: Date;
   updatedAt?: Date;
   // การแจ้งเตือนงานใกล้ตัว

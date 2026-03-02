@@ -19,6 +19,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as Sentry from '@sentry/react-native';
 
 // Context Providers
 import { AuthProvider } from './src/context/AuthContext';
@@ -35,6 +36,18 @@ import { getEvaTheme } from './src/theme/uiKitten';
 // Navigation
 import AppNavigator from './src/navigation/AppNavigator';
 import SplashScreen from './src/components/common/SplashScreen';
+
+// ============================================
+// Sentry Crash Tracking
+// ============================================
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
+  // Set tracesSampleRate to 1.0 to capture 100% of transactions for tracing.
+  tracesSampleRate: __DEV__ ? 1.0 : 0.2,
+  // Disable in development
+  enabled: !__DEV__,
+  environment: __DEV__ ? 'development' : 'production',
+});
 
 // ============================================
 // APP CONTENT WITH THEME
@@ -67,7 +80,7 @@ function AppContent() {
 // ============================================
 // MAIN APP COMPONENT
 // ============================================
-export default function App() {
+export default Sentry.wrap(function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -80,7 +93,7 @@ export default function App() {
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
-}
+});
 
 function ThemedApplication({ children }: { children: React.ReactNode }) {
   const { paletteId, isDark } = useTheme();
