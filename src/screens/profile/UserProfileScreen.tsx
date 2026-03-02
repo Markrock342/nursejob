@@ -20,9 +20,10 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme
 import { useTheme } from '../../context/ThemeContext';
 import { Loading, EmptyState, Avatar, KittenButton as Button } from '../../components/common';
 import { JobCard } from '../../components/job/JobCard';
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { JobPost } from '../../types';
+import { getUserPosts } from '../../services/jobService';
 
 // ============================================
 // Types
@@ -142,36 +143,11 @@ export default function UserProfileScreen() {
   // Fetch user's posts
   const fetchUserPosts = useCallback(async () => {
     try {
-      const postsQuery = query(
-        collection(db, 'jobs'),
-        where('posterId', '==', userId),
-        where('status', 'in', ['active', 'urgent']),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      );
-      
-      const snapshot = await getDocs(postsQuery);
-      const posts = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          title: data.title || 'หาคนแทน',
-          posterName: data.posterName || 'ไม่ระบุ',
-          posterId: data.posterId || '',
-          posterPhoto: data.posterPhoto,
-          department: data.department || 'ทั่วไป',
-          shiftRate: data.shiftRate || 0,
-          rateType: data.rateType || 'shift',
-          shiftDate: data.shiftDate?.toDate?.() || new Date(),
-          shiftTime: data.shiftTime || '',
-          location: data.location || {},
-          createdAt: data.createdAt?.toDate?.() || new Date(),
-          status: data.status || 'active',
-        } as JobPost;
-      });
-      
-      setUserPosts(posts);
+      // getUserPosts uses the correct 'shifts' collection with proper index
+      const posts = await getUserPosts(userId);
+      // Only show active/urgent posts on public profile
+      const filtered = posts.filter(p => p.status === 'active' || p.status === 'urgent');
+      setUserPosts(filtered);
     } catch (err) {
       console.error('Error fetching user posts:', err);
       setUserPosts([]);

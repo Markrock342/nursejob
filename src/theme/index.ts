@@ -1,47 +1,66 @@
 // ============================================
-// THEME - Colors & Constants
+// THEME - NurseGo Design System v2
+// Modern Healthcare Startup · 2026
 // ============================================
 
 export const COLORS = {
-  // Primary
-  primary: '#4A90D9',
-  primaryDark: '#2E6CB5',
-  primaryLight: '#7AB5E8',
-  primaryBackground: '#EBF4FC',
-  
-  // Secondary
-  secondary: '#5BC0BE',
-  secondaryDark: '#3A9997',
-  secondaryLight: '#8DD4D2',
-  
-  // Accent
-  accent: '#FF6B6B',
-  accentDark: '#E55555',
-  accentLight: '#FF9999',
-  
+  // ------------------------------------------
+  // Brand — Sky Blue (trust + medical)
+  // ------------------------------------------
+  primary: '#0EA5E9',
+  primaryDark: '#0284C7',
+  primaryLight: '#38BDF8',
+  primaryBackground: '#F0F9FF',
+
+  // ------------------------------------------
+  // Secondary — Emerald (healthcare + growth)
+  // ------------------------------------------
+  secondary: '#10B981',
+  secondaryDark: '#059669',
+  secondaryLight: '#34D399',
+  secondaryBackground: '#ECFDF5',
+
+  // ------------------------------------------
+  // Accent — Amber (CTAs + important)
+  // ------------------------------------------
+  accent: '#F59E0B',
+  accentDark: '#D97706',
+  accentLight: '#FCD34D',
+  accentBackground: '#FFFBEB',
+
+  // ------------------------------------------
   // Base
+  // ------------------------------------------
   white: '#FFFFFF',
   black: '#000000',
-  
+
+  // ------------------------------------------
   // Backgrounds
-  background: '#F5F7FA',
-  backgroundSecondary: '#F0F2F5',
+  // ------------------------------------------
+  background: '#F8FAFC',
+  backgroundSecondary: '#F1F5F9',
   surface: '#FFFFFF',
   card: '#FFFFFF',
-  
-  // Text
-  text: '#1A1A2E',
-  textSecondary: '#6B7280',
-  textLight: '#9CA3AF',
+
+  // ------------------------------------------
+  // Text (Slate scale)
+  // ------------------------------------------
+  text: '#0F172A',
+  textSecondary: '#475569',
+  textLight: '#94A3B8',
   textInverse: '#FFFFFF',
-  textMuted: '#B0B0B0',
-  
+  textMuted: '#CBD5E1',
+
+  // ------------------------------------------
   // Borders
-  border: '#E5E7EB',
-  borderLight: '#F3F4F6',
-  divider: '#F3F4F6',
-  
+  // ------------------------------------------
+  border: '#E2E8F0',
+  borderLight: '#F1F5F9',
+  divider: '#F1F5F9',
+
+  // ------------------------------------------
   // Status
+  // ------------------------------------------
   success: '#10B981',
   successLight: '#D1FAE5',
   warning: '#F59E0B',
@@ -52,22 +71,31 @@ export const COLORS = {
   dangerLight: '#FEE2E2',
   info: '#3B82F6',
   infoLight: '#DBEAFE',
-  
-  // Special
-  urgent: '#FF4757',
-  verified: '#2ED573',
-  premium: '#FFD700',
+
+  // ------------------------------------------
+  // Marketplace — Special states
+  // ------------------------------------------
+  urgent: '#EF4444',       // งานด่วน
+  urgentBg: '#FEF2F2',
+  verified: '#10B981',     // ยืนยันตัวตน
+  verifiedBg: '#ECFDF5',
+  premium: '#F59E0B',      // Premium badge
+  premiumBg: '#FFFBEB',
   online: '#22C55E',
-  offline: '#9CA3AF',
-  
-  // Social
-  google: '#DB4437',
-  facebook: '#4267B2',
+  offline: '#94A3B8',
+
+  // ------------------------------------------
+  // Social Login
+  // ------------------------------------------
+  google: '#EA4335',
+  facebook: '#1877F2',
   line: '#00B900',
-  
+
+  // ------------------------------------------
   // Overlay
-  overlay: 'rgba(0, 0, 0, 0.5)',
-  overlayLight: 'rgba(0, 0, 0, 0.3)',
+  // ------------------------------------------
+  overlay: 'rgba(15, 23, 42, 0.6)',
+  overlayLight: 'rgba(15, 23, 42, 0.35)',
 } as const;
 
 export const SPACING = {

@@ -2,27 +2,60 @@
 // NOTIFICATION SERVICE - Push Notifications
 // ============================================
 
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import Constants from 'expo-constants';
 
-// Configure notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Guarded, synchronous require to avoid crashing in Expo Go when native module
+// is not included. If not available, `Notifications` will be `null` and all
+// functions become safe no-ops or return null.
+let Notifications: any | null = undefined;
+function getNotificationsSync() {
+  if (Notifications !== undefined) return Notifications;
+  try {
+    // use require so Metro doesn't include an unresolved import at bundle time
+    // when running in Expo Go without the native module.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    Notifications = require('expo-notifications');
+  } catch (e) {
+    Notifications = null;
+    console.warn('expo-notifications not available in this environment. Notification functions will be no-ops.');
+  }
+  return Notifications;
+}
+import { doc, updateDoc } from 'firebase/firestore';
+import app, { db } from '../config/firebase';
+
+// Ensure Firebase is initialized (for push notification context)
+if (!app) {
+  throw new Error('FirebaseApp is not initialized. Make sure to call initializeApp before using notificationService.');
+}
+
+// Configure notification behavior if available
+const _Notifications = getNotificationsSync();
+if (_Notifications) {
+  try {
+    _Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+  } catch (e) {
+    console.warn('Failed to configure notification handler:', e);
+  }
+}
 
 // ==========================================
 // Register for Push Notifications
 // ==========================================
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
+  const N = getNotificationsSync();
+  if (!N) return null; // Not available in this environment
+
   let token: string | null = null;
 
   // Skip on web - push notifications not fully supported
@@ -38,11 +71,11 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   }
 
   // Check and request permissions
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  const { status: existingStatus } = await N.getPermissionsAsync();
   let finalStatus = existingStatus;
 
   if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
+    const { status } = await N.requestPermissionsAsync();
     finalStatus = status;
   }
 
@@ -52,47 +85,59 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   }
 
   try {
-    // Get Expo push token
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: 'nursejob-th', // Firebase/Expo project ID (NurseGo)
-    });
+    // Attempt to derive a projectId from environment or app config if provided.
+    // Prefer `EXPO_PUBLIC_PROJECT_ID` (EAS public env) then fall back to expo constants.
+    let manifestExtraProjectId = undefined;
+    if (Constants?.manifest && typeof Constants.manifest === 'object' && 'extra' in Constants.manifest) {
+      manifestExtraProjectId = (Constants.manifest as any).extra?.projectId;
+    }
+    const envProjectId = process.env.EXPO_PUBLIC_PROJECT_ID || manifestExtraProjectId || (Constants?.expoConfig?.extra as any)?.projectId;
+    const options: any = {};
+    if (envProjectId) options.projectId = envProjectId;
+
+    // Get Expo push token (omit projectId if not available to avoid invalid UUID errors)
+    const tokenData = await N.getExpoPushTokenAsync(Object.keys(options).length ? options : undefined);
     token = tokenData.data;
     console.log('Push token:', token);
-  } catch (error) {
+  } catch (error: any) {
+    // If the server complains about projectId being invalid, log a helpful hint
+    if (error?.message?.includes?.('projectId')) {
+      console.warn('Failed to get Expo push token: invalid or missing projectId. Remove hard-coded projectId or set EXPO_PUBLIC_PROJECT_ID.');
+    }
     console.error('Error getting push token:', error);
     return null;
   }
 
   // Configure Android channel
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
+    await N.setNotificationChannelAsync('default', {
       name: 'default',
-      importance: Notifications.AndroidImportance.MAX,
+      importance: N.AndroidImportance?.MAX ?? 4,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#FF6B6B',
     });
 
     // Create separate channels for different notification types
-    await Notifications.setNotificationChannelAsync('messages', {
+    await N.setNotificationChannelAsync('messages', {
       name: 'ข้อความ',
       description: 'การแจ้งเตือนข้อความใหม่',
-      importance: Notifications.AndroidImportance.HIGH,
+      importance: N.AndroidImportance?.HIGH ?? 3,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#4ECDC4',
       sound: 'default',
     });
 
-    await Notifications.setNotificationChannelAsync('jobs', {
+    await N.setNotificationChannelAsync('jobs', {
       name: 'งานใหม่',
       description: 'การแจ้งเตือนเมื่อมีงานใหม่',
-      importance: Notifications.AndroidImportance.DEFAULT,
+      importance: N.AndroidImportance?.DEFAULT ?? 2,
       lightColor: '#FF6B6B',
     });
 
-    await Notifications.setNotificationChannelAsync('applications', {
+    await N.setNotificationChannelAsync('applications', {
       name: 'ผู้สมัครงาน',
       description: 'การแจ้งเตือนเมื่อมีผู้สนใจงาน',
-      importance: Notifications.AndroidImportance.HIGH,
+      importance: N.AndroidImportance?.HIGH ?? 3,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#45B7D1',
     });
@@ -126,7 +171,9 @@ export async function sendLocalNotification(
   data?: Record<string, unknown>,
   channelId: string = 'default'
 ): Promise<void> {
-  await Notifications.scheduleNotificationAsync({
+  const N = getNotificationsSync();
+  if (!N) return;
+  await N.scheduleNotificationAsync({
     content: {
       title,
       body,
@@ -189,32 +236,42 @@ export async function sendApplicationNotification(
 // Notification Listeners
 // ==========================================
 export function addNotificationReceivedListener(
-  callback: (notification: Notifications.Notification) => void
+  callback: (notification: any) => void
 ) {
-  return Notifications.addNotificationReceivedListener(callback);
+  const N = getNotificationsSync();
+  if (!N) return { remove: () => {} };
+  return N.addNotificationReceivedListener(callback);
 }
 
 export function addNotificationResponseListener(
-  callback: (response: Notifications.NotificationResponse) => void
+  callback: (response: any) => void
 ) {
-  return Notifications.addNotificationResponseReceivedListener(callback);
+  const N = getNotificationsSync();
+  if (!N) return { remove: () => {} };
+  return N.addNotificationResponseReceivedListener(callback);
 }
 
 // ==========================================
 // Get Badge Count
 // ==========================================
 export async function getBadgeCount(): Promise<number> {
-  return await Notifications.getBadgeCountAsync();
+  const N = getNotificationsSync();
+  if (!N) return 0;
+  return await N.getBadgeCountAsync();
 }
 
 export async function setBadgeCount(count: number): Promise<void> {
-  await Notifications.setBadgeCountAsync(count);
+  const N = getNotificationsSync();
+  if (!N) return;
+  await N.setBadgeCountAsync(count);
 }
 
 // ==========================================
 // Clear All Notifications
 // ==========================================
 export async function clearAllNotifications(): Promise<void> {
-  await Notifications.dismissAllNotificationsAsync();
+  const N = getNotificationsSync();
+  if (!N) return;
+  await N.dismissAllNotificationsAsync();
   await setBadgeCount(0);
 }

@@ -9,7 +9,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Share,
   Linking,
   Platform,
@@ -19,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { KittenButton as Button, Avatar, Badge, Card, ModalContainer, BackButton, ConfirmModal, SuccessModal, ErrorModal } from '../../components/common';
+import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import ReportModal from '../../components/report/ReportModal';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -91,20 +91,22 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [alert, setAlert] = useState<AlertState>(initialAlertState);
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
   
   // New states for improved flow
   const [applicantsCount, setApplicantsCount] = useState(0);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showContactSuccessModal, setShowContactSuccessModal] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const [jobStatus, setJobStatus] = useState(job.status);
+  const [jobStatus, setJobStatus] = useState(job?.status ?? 'active');
   const [posterPlan, setPosterPlan] = useState<'free' | 'premium'>('free');
 
   // Check if user is logged in
   const isLoggedIn = isAuthenticated && user;
   
   // Check if user is the owner of this job
-  const isOwner = user && (user.uid === job.posterId || user.id === job.posterId);
+  const isOwner = user && job && (user.uid === job.posterId || user.id === job.posterId);
 
   // Increment view count when screen loads
   useEffect(() => {
@@ -146,7 +148,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const handleContact = () => {
     requireAuth(() => {
       if (hasContacted) {
-        Alert.alert('แจ้งเตือน', 'คุณได้ติดต่อเรื่องงานนี้ไปแล้ว');
+        setAlert(createAlert.info('แจ้งเตือน', 'คุณได้ติดต่อเรื่องงานนี้ไปแล้ว') as AlertState);
         return;
       }
       setShowContactModal(true);
@@ -170,7 +172,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       // Show success modal with contact options
       setShowContactSuccessModal(true);
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่');
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่') as AlertState);
     } finally {
       setIsContacting(false);
     }
@@ -183,9 +185,9 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       await updateJobStatus(job.id, 'closed');
       setJobStatus('closed');
       setShowCloseModal(false);
-      Alert.alert('สำเร็จ', 'ปิดรับสมัครเรียบร้อยแล้ว');
+      setAlert(createAlert.success('ปิดรับสมัครแล้ว', 'ประกาศจะไม่แสดงในหน้าแรกอีกต่อไป') as AlertState);
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่');
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่') as AlertState);
     } finally {
       setIsClosing(false);
     }
@@ -196,9 +198,9 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     try {
       await updateJobStatus(job.id, 'active');
       setJobStatus('active');
-      Alert.alert('สำเร็จ', 'เปิดรับสมัครอีกครั้งแล้ว');
+      setAlert(createAlert.success('เปิดรับสมัครอีกครั้งแล้ว', 'ประกาศแสดงในหน้าแรกแล้ว') as AlertState);
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่');
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่') as AlertState);
     }
   };
 
@@ -212,7 +214,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     if (job.contactPhone) {
       callPhone(job.contactPhone);
     } else {
-      Alert.alert('ไม่มีเบอร์โทร', 'ประกาศนี้ไม่ได้ระบุเบอร์โทรติดต่อ');
+      setAlert(createAlert.info('ไม่มีเบอร์โทร', 'ประกาศนี้ไม่ได้ระบุเบอร์โทรติดต่อ') as AlertState);
     }
   };
 
@@ -221,7 +223,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     if (job.contactLine) {
       openLine(job.contactLine);
     } else {
-      Alert.alert('ไม่มี LINE ID', 'ประกาศนี้ไม่ได้ระบุ LINE ID');
+      setAlert(createAlert.info('ไม่มี LINE ID', 'ประกาศนี้ไม่ได้ระบุ LINE ID') as AlertState);
     }
   };
 
@@ -248,7 +250,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     if (searchTerm) {
       openMapsDirections(searchTerm);
     } else {
-      Alert.alert('ไม่มีที่อยู่', 'ประกาศนี้ไม่ได้ระบุที่ตั้ง');
+      setAlert(createAlert.info('ไม่มีที่อยู่', 'ประกาศนี้ไม่ได้ระบุที่ตั้ง') as AlertState);
     }
   };
 
@@ -270,10 +272,6 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const handleSave = () => {
     requireAuth(() => {
       setIsSaved(!isSaved);
-      Alert.alert(
-        isSaved ? 'ยกเลิกบันทึกแล้ว' : 'บันทึกแล้ว',
-        isSaved ? 'ยกเลิกการบันทึกแล้ว' : 'บันทึกไว้แล้ว'
-      );
     });
   };
 
@@ -284,7 +282,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       
       // Don't allow chatting with yourself
       if (user.uid === job.posterId || user.id === job.posterId) {
-        Alert.alert('ไม่สามารถแชทได้', 'คุณไม่สามารถแชทกับตัวเองได้');
+        setAlert(createAlert.warning('ไม่สามารถแชทได้', 'คุณไม่สามารถแชทกับตัวเองได้') as AlertState);
         return;
       }
       
@@ -352,12 +350,23 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const handleMarkAsFilled = async () => {
     try {
       await updateJob(job.id, { status: 'closed' });
-      Alert.alert('สำเร็จ', 'ปิดรับสมัครแล้ว');
+      setAlert(createAlert.success('ปิดรับสมัครแล้ว', '') as AlertState);
       navigation.goBack();
     } catch (error) {
-      Alert.alert('เกิดข้อผิดพลาด', 'กรุณาลองใหม่');
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', 'กรุณาลองใหม่') as AlertState);
     }
   };
+
+  // Guard: job not passed in route params
+  if (!job) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: colors.textSecondary }}>ไม่พบข้อมูลประกาศ</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
@@ -367,18 +376,18 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           {/* Back & Actions */}
           <View style={styles.headerTop}>
             <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-              <Text style={styles.backIcon}>←</Text>
+              <Ionicons name="arrow-back" size={22} color="#fff" />
             </TouchableOpacity>
             <View style={styles.headerActions}>
               <TouchableOpacity style={styles.actionButton} onPress={handleSave}>
-                <Text style={styles.actionIcon}>{isSaved ? '❤️' : '🤍'}</Text>
+                <Ionicons name={isSaved ? 'heart' : 'heart-outline'} size={22} color={isSaved ? '#FF6B6B' : '#fff'} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-                <Text style={styles.actionIcon}>↗️</Text>
+                <Ionicons name="share-social-outline" size={22} color="#fff" />
               </TouchableOpacity>
               {!isOwner && (
                 <TouchableOpacity style={styles.actionButton} onPress={handleReportJob}>
-                  <Ionicons name="flag-outline" size={20} color={colors.warning} />
+                  <Ionicons name="flag-outline" size={20} color="rgba(255,255,255,0.85)" />
                 </TouchableOpacity>
               )}
             </View>
@@ -595,12 +604,14 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
       {/* Bottom Action */}
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) + SPACING.md }]}>
-        <View style={styles.bottomRate}>
-          <Text style={styles.bottomRateLabel}>ค่าตอบแทน</Text>
-          <Text style={styles.bottomRateValue}>
-            {formatShiftRate(job.shiftRate, job.rateType)}
-          </Text>
-        </View>
+        {!isOwner && (
+          <View style={styles.bottomRate}>
+            <Text style={styles.bottomRateLabel}>ค่าตอบแทน</Text>
+            <Text style={styles.bottomRateValue}>
+              {formatShiftRate(job.shiftRate, job.rateType)}
+            </Text>
+          </View>
+        )}
         
         {!isOwner && (
           <View style={styles.bottomButtons}>
@@ -633,45 +644,43 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               style={styles.applicantsButton}
               onPress={handleViewApplicants}
             >
-              <Ionicons name="people-outline" size={20} color={colors.primary} />
+              <Ionicons name="people-outline" size={18} color={colors.primary} />
               <Text style={[styles.applicantsButtonText, { color: colors.primary }]}>
                 ผู้สนใจ ({applicantsCount})
               </Text>
             </TouchableOpacity>
-            
-            {/* Close/Reopen or Edit */}
-            {jobStatus === 'closed' ? (
-              <Button
-                title="เปิดรับสมัครอีกครั้ง"
-                variant="outline"
-                onPress={handleReopenJob}
-                style={{ flex: 1, marginRight: SPACING.sm }}
+
+            {/* Close/Reopen */}
+            <TouchableOpacity
+              style={[
+                styles.ownerActionBtn,
+                { backgroundColor: jobStatus === 'closed' ? colors.primary : colors.surface,
+                  borderColor: jobStatus === 'closed' ? colors.primary : colors.border }
+              ]}
+              onPress={jobStatus === 'closed' ? handleReopenJob : () => setShowCloseModal(true)}
+            >
+              <Ionicons
+                name={jobStatus === 'closed' ? 'refresh-outline' : 'checkmark-circle-outline'}
+                size={18}
+                color={jobStatus === 'closed' ? '#fff' : colors.textSecondary}
               />
-            ) : (
-              <Button
-                title="ปิดรับสมัคร"
-                variant="secondary"
-                onPress={() => setShowCloseModal(true)}
-                style={{ flex: 1, marginRight: SPACING.sm }}
-              />
-            )}
-            
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.ownerActionBtnText,
+                  { color: jobStatus === 'closed' ? '#fff' : colors.textSecondary }
+                ]}
+              >
+                {jobStatus === 'closed' ? 'เปิดอีกครั้ง' : 'ปิดรับ'}
+              </Text>
+            </TouchableOpacity>
+
             {/* More Options */}
             <TouchableOpacity
               style={styles.moreButton}
-              onPress={() => {
-                Alert.alert(
-                  'ตัวเลือก',
-                  '',
-                  [
-                    { text: 'แก้ไขประกาศ', onPress: handleEdit },
-                    { text: 'ลบประกาศ', onPress: () => setShowDeleteModal(true), style: 'destructive' },
-                    { text: 'ยกเลิก', style: 'cancel' },
-                  ]
-                );
-              }}
+              onPress={() => setShowOptionsModal(true)}
             >
-              <Ionicons name="ellipsis-horizontal" size={24} color={colors.textSecondary} />
+              <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         )}
@@ -838,6 +847,55 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         onConfirm={handleCloseJob}
         onCancel={() => setShowCloseModal(false)}
         type="warning"
+      />
+
+      {/* Options Bottom Sheet for Owner */}
+      <ModalContainer
+        visible={showOptionsModal}
+        onClose={() => setShowOptionsModal(false)}
+        title="จัดการประกาศ"
+      >
+        <View style={{ paddingBottom: 8 }}>
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => { setShowOptionsModal(false); handleEdit(); }}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: '#EFF6FF' }]}>
+              <Ionicons name="create-outline" size={22} color="#3B82F6" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>แก้ไขประกาศ</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>เปลี่ยนรายละเอียดประกาศ</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <View style={styles.optionDivider} />
+
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => { setShowOptionsModal(false); setShowDeleteModal(true); }}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: '#FEF2F2' }]}>
+              <Ionicons name="trash-outline" size={22} color="#EF4444" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: '#EF4444' }]}>ลบประกาศ</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>ลบประกาศออกจากระบบถาวร</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      </ModalContainer>
+
+      {/* CustomAlert */}
+      <CustomAlert
+        visible={alert.visible}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+        buttons={alert.buttons}
+        onClose={() => setAlert(initialAlertState)}
       />
     </SafeAreaView>
   );
@@ -1030,6 +1088,35 @@ const styles = StyleSheet.create({
   viewsText: {
     fontSize: FONT_SIZES.sm,
     color: COLORS.textMuted,
+  },
+
+  // Options modal
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    gap: 14,
+  },
+  optionIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionLabel: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+  },
+  optionSub: {
+    fontSize: FONT_SIZES.sm,
+    marginTop: 2,
+  },
+  optionDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 2,
   },
 
   // Bottom bar
@@ -1261,22 +1348,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    gap: SPACING.sm,
+    gap: 8,
   },
   applicantsButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1.5,
     borderColor: COLORS.primary,
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    gap: 4,
+    flexShrink: 0,
   },
   applicantsButtonText: {
-    marginLeft: SPACING.xs,
     fontWeight: '600',
     fontSize: FONT_SIZES.sm,
+  },
+  ownerActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1.5,
+    gap: 4,
+    minWidth: 80,
+  },
+  ownerActionBtnText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+    flexShrink: 1,
   },
   moreButton: {
     width: 44,

@@ -218,7 +218,7 @@ export default function VerificationScreen({ navigation }: Props) {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
           <View style={{ width: 24 }} />
@@ -271,7 +271,7 @@ export default function VerificationScreen({ navigation }: Props) {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
           <View style={{ width: 24 }} />
@@ -317,7 +317,7 @@ export default function VerificationScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
         <View style={{ width: 24 }} />
@@ -424,21 +424,21 @@ export default function VerificationScreen({ navigation }: Props) {
         </Card>
 
         {/* Privacy Notice */}
-        <Card style={[styles.section, styles.privacyCard]}>
+              และใช้เพื่อการตรวจสอบเท่านั้น
+        <Card style={{...styles.section, ...styles.privacyCard}}>
           <View style={styles.privacyContent}>
             <Ionicons name="lock-closed-outline" size={24} color={colors.primary} />
             <Text style={styles.privacyText}>
-              ข้อมูลและเอกสารของคุณจะถูกเก็บรักษาอย่างปลอดภัย{'\n'}
+              ข้อมูลและเอกสารของคุณจะถูกเก็บรักษาอย่างปลอดภัย
+        {/* Submit Button */}
               และใช้เพื่อการตรวจสอบเท่านั้น
             </Text>
           </View>
         </Card>
-
-        {/* Submit Button */}
         <Button
           title={isSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอยืนยัน'}
           onPress={handleSubmit}
-          isLoading={isSubmitting}
+          loading={isSubmitting}
           style={{ marginVertical: SPACING.lg }}
         />
       </ScrollView>
@@ -514,7 +514,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: FONT_SIZES.lg,
     fontWeight: '600',
-    color: COLORS.textPrimary,
+    color: COLORS.text,
   },
   content: {
     flex: 1,
@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: FONT_SIZES.lg,
     fontWeight: '600',
-    color: COLORS.textPrimary,
+    color: COLORS.text,
     marginBottom: SPACING.md,
   },
   inputLabel: {
@@ -587,7 +587,7 @@ const styles = StyleSheet.create({
   },
   selectButtonText: {
     fontSize: FONT_SIZES.md,
-    color: COLORS.textPrimary,
+    color: COLORS.text,
   },
   
   // Upload
@@ -672,7 +672,7 @@ const styles = StyleSheet.create({
   licenseValue: {
     fontSize: FONT_SIZES.sm,
     fontWeight: '600',
-    color: COLORS.textPrimary,
+    color: COLORS.text,
   },
   
   // Pending State
@@ -705,7 +705,7 @@ const styles = StyleSheet.create({
   pendingCardTitle: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
-    color: COLORS.textPrimary,
+    color: COLORS.text,
     marginBottom: SPACING.sm,
     paddingBottom: SPACING.sm,
     borderBottomWidth: 1,
@@ -726,7 +726,7 @@ const styles = StyleSheet.create({
   modalItemText: {
     flex: 1,
     fontSize: FONT_SIZES.md,
-    color: COLORS.textPrimary,
+    color: COLORS.text,
   },
   modalItemTextSelected: {
     color: COLORS.primary,

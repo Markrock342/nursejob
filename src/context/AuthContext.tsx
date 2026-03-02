@@ -3,7 +3,7 @@
 // ============================================
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { 
   loginUser, 
@@ -21,6 +21,7 @@ import {
   validateAdminCredentials,
   isEmailVerified,
   sendVerificationEmail,
+  updateOnlineStatus,
   UserProfile,
 } from '../services/authService';
 import { getErrorMessage } from '../utils/helpers';
@@ -155,6 +156,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
       unsubscribe();
     };
   }, []);
+
+  // ============================================
+  // Online Status via AppState
+  // ============================================
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    // Mark online when this effect runs (user just logged in or re-mounted)
+    updateOnlineStatus(user.uid, true);
+
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (!user?.uid) return;
+      if (nextState === 'active') {
+        updateOnlineStatus(user.uid, true);
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        updateOnlineStatus(user.uid, false);
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      // Mark offline when effect cleans up (logout / unmount)
+      updateOnlineStatus(user.uid, false);
+      subscription.remove();
+    };
+  }, [user?.uid]);
 
   // Load cached user for faster startup
   const loadCachedUser = async () => {

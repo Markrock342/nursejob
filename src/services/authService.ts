@@ -5,13 +5,18 @@ import {
   onAuthStateChanged,
   updateProfile,
   signInWithCredential,
+  linkWithCredential,
   GoogleAuthProvider,
+  EmailAuthProvider,
   sendEmailVerification,
+  sendPasswordResetEmail,
+  deleteUser,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { ADMIN_CONFIG, validateAdminConfig } from '../config/adminConfig';
+import * as ExpoCrypto from 'expo-crypto';
 
 export interface UserProfile {
   id: string;
@@ -25,12 +30,24 @@ export interface UserProfile {
   isAdmin: boolean; // Admin flag
   isVerified?: boolean; // สถานะการยืนยันตัวตน (true = พยาบาลที่ผ่านการ verify)
   emailVerified?: boolean; // สถานะการยืนยัน email
-  licenseNumber?: string; // เลขใบประกอบวิชาชีพ
+  licenseNumber?: string; // เลขใบประกอบวิชาชีพ (verified)
+  pendingLicenseNumber?: string; // เลขที่รอตรวจสอบ
+  licenseVerificationStatus?: 'pending' | 'approved' | 'rejected'; // สถานะการตรวจสอบใบประกอบวิชาชีพ
   experience?: number;
   bio?: string;
   skills?: string[];
   createdAt: Date;
   updatedAt?: Date;
+  // การแจ้งเตือนงานใกล้ตัว
+  nearbyJobAlert?: {
+    enabled: boolean;
+    radiusKm: number; // 1, 3, 5, 10, 20, 50
+    lat: number;
+    lng: number;
+    geohash4: string; // geohash precision 4 สำหรับ query
+    updatedAt?: Date;
+  };
+  pushToken?: string; // Expo push token
 }
 
 // ==========================================
@@ -50,29 +67,12 @@ if (!adminConfigValidation.valid) {
   console.warn(adminConfigValidation.error);
 }
 
-// ==========================================
-// Admin Credentials - SHA-256 hash (ไม่ใช่ plaintext)
-// ==========================================
-// Helper: SHA-256 hash function
+// SHA-256 via expo-crypto — works on iOS, Android (Hermes), and Web
 async function sha256(message: string): Promise<string> {
-  // ใช้ Web Crypto API (ทำงานได้ทั้ง React Native แล้ว Web)
-  const encoder = new TextEncoder();
-  const data = encoder.encode(message);
-  try {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  } catch {
-    // Fallback: simple hash สำหรับ environment ที่ไม่มี crypto.subtle
-    let hash = 0;
-    const str = message;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(16).padStart(16, '0');
-  }
+  return ExpoCrypto.digestStringAsync(
+    ExpoCrypto.CryptoDigestAlgorithm.SHA256,
+    message,
+  );
 }
 
 // ตรวจสอบ admin credentials (async เพื่อใช้ hashing)
@@ -107,18 +107,19 @@ const USERS_COLLECTION = 'users';
 // ==========================================
 
 // Register new user
+// ถ้า auth.currentUser มีอยู่แล้ว (phone-auth session จาก OTP) → link email/password
+// ถ้ายังไม่มี → createUserWithEmailAndPassword ตามปกติ
 export async function registerUser(
   email: string, 
   password: string, 
   displayName: string,
-  role: 'user' | 'nurse' | 'hospital' = 'user', // Default เป็น user (ผู้ใช้ทั่วไป)
+  role: 'user' | 'nurse' | 'hospital' = 'user',
   username?: string,
   phone?: string
 ): Promise<UserProfile> {
   try {
     // Check if username already exists (if provided)
     if (username) {
-      const { collection, query, where, getDocs } = await import('firebase/firestore');
       const usernameQuery = query(
         collection(db, USERS_COLLECTION),
         where('username', '==', username.toLowerCase())
@@ -129,9 +130,21 @@ export async function registerUser(
       }
     }
 
-    // Create Firebase Auth user
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
+    const isAdmin = isAdminEmail(email);
+    const finalRole = isAdmin ? 'admin' : role;
+    let user: FirebaseUser;
+
+    if (auth.currentUser && auth.currentUser.providerData.some(p => p.providerId === 'phone')) {
+      // ===== PHONE-FIRST FLOW =====
+      // User signed in via Phone OTP → link email+password credential
+      const emailCredential = EmailAuthProvider.credential(email, password);
+      const linked = await linkWithCredential(auth.currentUser, emailCredential);
+      user = linked.user;
+    } else {
+      // ===== STANDARD FLOW =====
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      user = userCredential.user;
+    }
 
     // Update display name
     await updateProfile(user, { displayName });
@@ -139,44 +152,34 @@ export async function registerUser(
     // Send email verification
     await sendEmailVerification(user);
 
-    // Check if admin
-    const isAdmin = isAdminEmail(email);
-    const finalRole = isAdmin ? 'admin' : role;
-
-    // Create user profile in Firestore
+    // Create / overwrite user profile in Firestore
     const userProfile: Omit<UserProfile, 'id'> = {
       uid: user.uid,
       email,
       displayName,
       username: username || undefined,
-      phone: phone || undefined,
+      phone: phone || user.phoneNumber || undefined,
       role: finalRole,
       isAdmin,
-      isVerified: false, // ผู้ใช้ใหม่ยังไม่ verified
-      emailVerified: false, // ยังไม่ยืนยัน email
+      isVerified: false,
+      emailVerified: false,
       createdAt: new Date(),
     };
 
     await setDoc(doc(db, USERS_COLLECTION, user.uid), {
       ...userProfile,
       createdAt: serverTimestamp(),
-    });
+    }, { merge: true });
 
-    return {
-      id: user.uid,
-      ...userProfile,
-    };
+    return { id: user.uid, ...userProfile };
   } catch (error: any) {
     console.error('Error registering user:', error);
     
-    // Translate Firebase errors to Thai
-    if (error.code === 'auth/email-already-in-use') {
-      throw new Error('อีเมลนี้ถูกใช้งานแล้ว');
-    } else if (error.code === 'auth/weak-password') {
-      throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
-    } else if (error.code === 'auth/invalid-email') {
-      throw new Error('รูปแบบอีเมลไม่ถูกต้อง');
-    }
+    if (error.code === 'auth/email-already-in-use') throw new Error('อีเมลนี้ถูกใช้งานแล้ว');
+    if (error.code === 'auth/weak-password') throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+    if (error.code === 'auth/invalid-email') throw new Error('รูปแบบอีเมลไม่ถูกต้อง');
+    if (error.code === 'auth/provider-already-linked') throw new Error('อีเมลนี้ถูกเชื่อมโยงกับบัญชีอื่นแล้ว');
+    if (error.code === 'auth/credential-already-in-use') throw new Error('อีเมลนี้ถูกใช้งานแล้ว');
     throw error;
   }
 }
@@ -291,7 +294,6 @@ export async function loginWithGoogle(idToken: string): Promise<UserProfile> {
 // Find user email by username
 export async function findEmailByUsername(username: string): Promise<string | null> {
   try {
-    const { collection, query, where, getDocs } = await import('firebase/firestore');
     const usersRef = collection(db, USERS_COLLECTION);
     const q = query(usersRef, where('username', '==', username.toLowerCase()));
     const querySnapshot = await getDocs(q);
@@ -418,7 +420,6 @@ export function getCurrentUser(): FirebaseUser | null {
 // Reset password
 export async function resetPassword(email: string): Promise<void> {
   try {
-    const { sendPasswordResetEmail } = await import('firebase/auth');
     await sendPasswordResetEmail(auth, email);
   } catch (error: any) {
     console.error('Error resetting password:', error);
@@ -440,11 +441,9 @@ export async function deleteUserAccount(): Promise<void> {
     }
 
     // Delete user document from Firestore
-    const { deleteDoc } = await import('firebase/firestore');
     await deleteDoc(doc(db, USERS_COLLECTION, user.uid));
 
     // Delete Firebase Auth user
-    const { deleteUser } = await import('firebase/auth');
     await deleteUser(user);
   } catch (error: any) {
     console.error('Error deleting account:', error);
@@ -515,8 +514,6 @@ export async function refreshEmailVerificationStatus(): Promise<boolean> {
 // Find user profile by phone number
 export async function findUserByPhone(phone: string): Promise<UserProfile | null> {
   try {
-    const { collection, query, where, getDocs } = await import('firebase/firestore');
-    
     // Clean phone number - remove all non-digits and normalize
     let cleanPhone = phone.replace(/\D/g, '');
     if (cleanPhone.startsWith('66')) {

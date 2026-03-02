@@ -362,6 +362,13 @@ export default function SettingsScreen() {
             value={settings.notifications.marketing}
             onValueChange={(v) => updateNotification('marketing', v)}
           />
+          <SettingRow
+            icon="location"
+            title="งานใกล้ฉัน"
+            subtitle="แจ้งเตือนเมื่อมีคนโพสต์งานในรัศมีที่กำหนด"
+            onPress={() => (navigation as any).navigate('NearbyJobAlert')}
+            showArrow
+          />
         </View>
 
         {/* Privacy */}

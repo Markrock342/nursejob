@@ -24,7 +24,7 @@ import { sendOTP, verifyOTP } from '../../services/otpService';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, POSITIONS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { getUserShiftContacts } from '../../services/jobService';
+import { getUserShiftContacts, deleteShiftContact } from '../../services/jobService';
 import { getUserSubscription } from '../../services/subscriptionService';
 import { getFavoritesCount } from '../../services/favoritesService';
 import { getUnreadNotificationsCount } from '../../services/notificationsService';
@@ -58,6 +58,8 @@ export default function ProfileScreen({ navigation }: Props) {
 
   // State
   const [contacts, setContacts] = useState<ShiftContact[]>([]);
+  const [showAllContacts, setShowAllContacts] = useState(false);
+  const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -65,12 +67,12 @@ export default function ProfileScreen({ navigation }: Props) {
   const [favoritesCount, setFavoritesCount] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   // OTP states
-  const [showOTPModal, setShowOTPModal] = useState(false);
   const [otpValue, setOtpValue] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
   const [otpLoading, setOtpLoading] = useState(false);
-  const [pendingProfile, setPendingProfile] = useState<any>(null);
   const [otpError, setOtpError] = useState('');
+  // Phone OTP inline step: 'idle' | 'sending' | 'verify' | 'verified'
+  const [phoneStep, setPhoneStep] = useState<'idle' | 'sending' | 'verify' | 'verified'>('idle');
+  const [otpResendCountdown, setOtpResendCountdown] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<UserVerificationStatus | null>(null);
   const [userPlan, setUserPlan] = useState<'free' | 'premium'>('free');
   const [editForm, setEditForm] = useState({
@@ -138,8 +140,49 @@ export default function ProfileScreen({ navigation }: Props) {
         experience: user.experience?.toString() || '',
         bio: user.bio || '',
       });
+      // Reset OTP/phone state on open
+      setPhoneStep('idle');
+      setOtpValue('');
+      setOtpError('');
+      setOtpResendCountdown(0);
     }
   }, [showEditModal, user]);
+
+  // Delete contact from history
+  const handleDeleteContact = (contactId: string, jobTitle: string) => {
+    Alert.alert(
+      'ลบออกจากประวัติ',
+      `ต้องการลบ "${jobTitle}" ออกจากประวัติการติดต่อ?`,
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'ลบ',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingContactId(contactId);
+            try {
+              await deleteShiftContact(contactId);
+              setContacts(prev => prev.filter(c => c.id !== contactId));
+            } catch (e) {
+              Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถลบได้ กรุณาลองใหม่');
+            } finally {
+              setDeletingContactId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Get status config for contact history
+  const getContactStatusConfig = (status: string) => {
+    switch (status) {
+      case 'confirmed': return { label: 'ยืนยันแล้ว', color: '#10B981', bg: '#ECFDF5', icon: 'checkmark-circle' as const };
+      case 'cancelled': return { label: 'ยกเลิก', color: '#EF4444', bg: '#FEF2F2', icon: 'close-circle' as const };
+      case 'expired': return { label: 'โพสต์ถูกลบ', color: '#94A3B8', bg: '#F1F5F9', icon: 'archive-outline' as const };
+      default: return { label: 'สนใจ', color: '#F59E0B', bg: '#FFFBEB', icon: 'star-outline' as const };
+    }
+  };
 
   // Handle logout - show modal
   const handleLogout = () => {
@@ -195,66 +238,105 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
-  // Handle save profile
-  // Save profile with OTP verification if phone changed
-  const handleSaveProfile = async () => {
-    if (editForm.phone !== user?.phone) {
-      // Phone changed, start OTP flow
-      setOtpLoading(true);
-      setOtpError('');
-      try {
-        await sendOTP(editForm.phone);
-        setOtpSent(true);
-        setShowOTPModal(true);
-        setPendingProfile({
-          displayName: editForm.displayName,
-          phone: editForm.phone,
-          licenseNumber: editForm.licenseNumber,
-          experience: parseInt(editForm.experience) || 0,
-          bio: editForm.bio,
-        });
-      } catch (error: any) {
-        setOtpError(error.message || 'ส่งรหัส OTP ไม่สำเร็จ');
-      } finally {
-        setOtpLoading(false);
-      }
+  // Start OTP countdown timer
+  const startOtpCountdown = (seconds = 60) => {
+    setOtpResendCountdown(seconds);
+    const interval = setInterval(() => {
+      setOtpResendCountdown(prev => {
+        if (prev <= 1) { clearInterval(interval); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Send OTP for phone verification
+  const handleSendPhoneOTP = async () => {
+    const phone = editForm.phone.trim();
+    if (!phone || phone.length < 9) {
+      setOtpError('กรุณากรอกเบอร์โทรศัพท์ให้ถูกต้อง');
       return;
     }
-    // Phone not changed, update directly
+    setPhoneStep('sending');
+    setOtpError('');
     try {
-      await updateUser({
+      await sendOTP(phone);
+      setPhoneStep('verify');
+      setOtpValue('');
+      startOtpCountdown(60);
+    } catch (error: any) {
+      setPhoneStep('idle');
+      setOtpError(error.message || 'ส่งรหัส OTP ไม่สำเร็จ');
+    }
+  };
+
+  // Verify OTP code
+  const handleVerifyOTP = async () => {
+    if (!otpValue || otpValue.length < 4) {
+      setOtpError('กรุณากรอกรหัส OTP ให้ครบถ้วน');
+      return;
+    }
+    setOtpLoading(true);
+    setOtpError('');
+    try {
+      await verifyOTP(editForm.phone, otpValue);
+      setPhoneStep('verified');
+      setOtpError('');
+    } catch (error: any) {
+      setOtpError(error.message || 'รหัส OTP ไม่ถูกต้อง กรุณาลองใหม่');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // Handle save profile
+  const handleSaveProfile = async () => {
+    const phoneChanged = editForm.phone.trim() !== (user?.phone || '').trim();
+    const licenseChanged = editForm.licenseNumber.trim() !== (user?.licenseNumber || '').trim() && editForm.licenseNumber.trim() !== '';
+
+    // Phone changed but not verified yet → trigger OTP
+    if (phoneChanged && phoneStep !== 'verified') {
+      await handleSendPhoneOTP();
+      return;
+    }
+
+    try {
+      const updates: any = {
         displayName: editForm.displayName,
-        phone: editForm.phone,
-        licenseNumber: editForm.licenseNumber,
         experience: parseInt(editForm.experience) || 0,
         bio: editForm.bio,
-      });
+      };
+
+      // Only update phone if verified (or unchanged)
+      if (!phoneChanged || phoneStep === 'verified') {
+        updates.phone = editForm.phone;
+      }
+
+      // License: save as pending for review, not directly active
+      if (licenseChanged) {
+        updates.pendingLicenseNumber = editForm.licenseNumber.trim();
+        updates.licenseVerificationStatus = 'pending';
+      }
+
+      await updateUser(updates);
       setShowEditModal(false);
-      Alert.alert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อยแล้ว');
+      setPhoneStep('idle');
+
+      if (licenseChanged) {
+        Alert.alert(
+          '✅ บันทึกสำเร็จ',
+          'ข้อมูลถูกบันทึกแล้ว\n\nเลขใบประกอบวิชาชีพที่กรอกใหม่จะรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์',
+          [{ text: 'รับทราบ' }]
+        );
+      } else {
+        Alert.alert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อยแล้ว');
+      }
     } catch (error: any) {
       Alert.alert('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถบันทึกข้อมูลได้');
     }
   };
 
-  // Confirm OTP and update profile
-  const handleConfirmOTP = async () => {
-    setOtpLoading(true);
-    setOtpError('');
-    try {
-      await verifyOTP(editForm.phone, otpValue);
-      // OTP correct, update profile
-      await updateUser(pendingProfile);
-      setShowEditModal(false);
-      setShowOTPModal(false);
-      setOtpValue('');
-      setPendingProfile(null);
-      Alert.alert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อยแล้ว');
-    } catch (error: any) {
-      setOtpError(error.message || 'รหัส OTP ไม่ถูกต้อง');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
+  // Legacy OTP confirm (kept for backward compat)
+  const handleConfirmOTP = handleVerifyOTP;
 
   // Get status badge
   const getStatusBadge = (status: string) => {
@@ -400,61 +482,121 @@ export default function ProfileScreen({ navigation }: Props) {
           </View>
         </Card>
 
-        {/* Shift Contact History Modern */}
+        {/* Shift Contact History */}
         <View style={{ marginBottom: 18 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>ประวัติการติดต่องาน</Text>
-            <Text style={{ color: colors.textMuted, fontSize: 13 }}>{contacts.length} รายการ</Text>
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>ประวัติการติดต่องาน</Text>
+              {contacts.length > 0 && (
+                <View style={{ backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 }}>
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{contacts.length}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '600' }}>
+              ครั้งล่าสุด {contacts.length > 0 ? formatRelativeTime(contacts[0]?.contactedAt) : '-'}
+            </Text>
           </View>
+
           {isLoading ? (
             <Loading text="กำลังโหลด..." />
           ) : contacts.length === 0 ? (
-            <Card style={{ alignItems: 'center', paddingVertical: 32 }}>
+            <Card style={{ alignItems: 'center', paddingVertical: 28, borderRadius: 16 }}>
               <Ionicons name="document-text-outline" size={36} color={colors.textMuted} style={{ marginBottom: 8 }} />
               <Text style={{ color: colors.textMuted, fontSize: 15 }}>ยังไม่มีประวัติการติดต่อ</Text>
-              <Button
-                onPress={() => navigation.getParent()?.navigate('Main', { screen: 'Home' })}
-                variant="outline"
-                size="small"
-                style={{ marginTop: 12 }}
-              >
-                <Ionicons name="search-outline" size={16} color={colors.primary} style={{ marginRight: 4 }} />
-                <Text style={{ color: colors.primary, fontWeight: '600' }}>ค้นหางาน</Text>
-              </Button>
             </Card>
           ) : (
-            contacts.map((contact) => (
-                <Card
-                key={contact.id}
-                style={{ marginBottom: 10, borderRadius: 12, padding: 14 }}
-                onPress={() => {
-                  if (contact.job) {
-                    const job = contact.job;
-                    const serializedJob = {
-                      ...job,
-                      shiftDate: job.shiftDate
-                        ? (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : job.shiftDate)
-                        : undefined,
-                      shiftDateEnd: (job as any).shiftDateEnd
-                        ? ((job as any).shiftDateEnd instanceof Date ? (job as any).shiftDateEnd.toISOString() : (job as any).shiftDateEnd)
-                        : undefined,
-                    } as any;
-                    (navigation as any).navigate('JobDetail', { job: serializedJob });
-                  }
-                }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <View>
-                    <Text style={{ fontWeight: 'bold', color: colors.text, fontSize: 15 }}>{contact.job?.title || 'เวร'}</Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 13 }}>{contact.job?.posterName || 'ผู้โพสต์'}</Text>
-                  </View>
-                  {getStatusBadge(contact.status)}
-                </View>
-                <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>
-                  ติดต่อเมื่อ {formatRelativeTime(contact.contactedAt)}
-                </Text>
-              </Card>
-            ))
+            <>
+              {(showAllContacts ? contacts : contacts.slice(0, 5)).map((contact) => {
+                const statusConfig = getContactStatusConfig(contact.status);
+                const isDeleting = deletingContactId === contact.id;
+                return (
+                  <TouchableOpacity
+                    key={contact.id}
+                    activeOpacity={0.85}
+                    onLongPress={() => handleDeleteContact(contact.id, contact.job?.title || 'งานนี้')}
+                    onPress={() => {
+                      if (contact.status === 'expired' || !contact.job) return;
+                      const job = contact.job;
+                      const serializedJob = {
+                        ...job,
+                        shiftDate: job.shiftDate
+                          ? (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : job.shiftDate)
+                          : undefined,
+                      } as any;
+                      (navigation as any).navigate('JobDetail', { job: serializedJob });
+                    }}
+                    style={[
+                      {
+                        backgroundColor: colors.surface,
+                        borderRadius: 14,
+                        padding: 14,
+                        marginBottom: 8,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: contact.status === 'expired' ? '#E2E8F0' : statusConfig.bg,
+                        opacity: isDeleting ? 0.5 : contact.status === 'expired' ? 0.65 : 1,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.04,
+                        shadowRadius: 6,
+                        elevation: 2,
+                      },
+                    ]}
+                  >
+                    {/* Status icon */}
+                    <View style={[{ width: 42, height: 42, borderRadius: 21, backgroundColor: statusConfig.bg, alignItems: 'center', justifyContent: 'center', marginRight: 12 }]}>
+                      <Ionicons name={statusConfig.icon} size={22} color={statusConfig.color} />
+                    </View>
+
+                    {/* Info */}
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={{ fontWeight: '700', color: colors.text, fontSize: 14, marginBottom: 2 }}>
+                        {contact.job?.title || 'เวร (ถูกลบแล้ว)'}
+                      </Text>
+                      <Text numberOfLines={1} style={{ color: colors.textMuted, fontSize: 12 }}>
+                        {contact.status === 'expired' ? 'โพสต์นี้ถูกลบไปแล้ว' : (contact.job?.posterName || 'ผู้โพสต์')}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                        {formatRelativeTime(contact.contactedAt)}
+                      </Text>
+                    </View>
+
+                    {/* Status badge */}
+                    <View style={{ marginLeft: 8, alignItems: 'flex-end', gap: 4 }}>
+                      <View style={{ backgroundColor: statusConfig.bg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                        <Text style={{ color: statusConfig.color, fontSize: 11, fontWeight: '700' }}>{statusConfig.label}</Text>
+                      </View>
+                      <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+
+              {/* Show more / less */}
+              {contacts.length > 5 && (
+                <TouchableOpacity
+                  onPress={() => setShowAllContacts(!showAllContacts)}
+                  style={{ alignItems: 'center', paddingVertical: 10, flexDirection: 'row', justifyContent: 'center', gap: 4 }}
+                >
+                  <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 14 }}>
+                    {showAllContacts ? 'แสดงน้อยลง' : `ดูทั้งหมด (${contacts.length})`}
+                  </Text>
+                  <Ionicons
+                    name={showAllContacts ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={colors.primary}
+                  />
+                </TouchableOpacity>
+              )}
+
+              {/* Hint */}
+              <Text style={{ color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 4 }}>
+                กดค้างเพื่อลบออกจากประวัติ
+              </Text>
+            </>
           )}
         </View>
 
@@ -544,123 +686,286 @@ export default function ProfileScreen({ navigation }: Props) {
         <View style={{ height: SPACING.xl * 2 }} />
       </ScrollView>
 
-      {/* Edit Profile Modal */}
+      {/* ─── Edit Profile Modal ─── */}
       <ModalContainer
         visible={showEditModal}
-        onClose={() => setShowEditModal(false)}
+        onClose={() => { setShowEditModal(false); setPhoneStep('idle'); }}
         title="แก้ไขโปรไฟล์"
         fullScreen={true}
       >
-        <ScrollView style={styles.editModalContent}>
-          <Input
-            label="ชื่อ-นามสกุล"
-            value={editForm.displayName}
-            onChangeText={(text) => setEditForm({ ...editForm, displayName: text })}
-            placeholder="ชื่อจริง นามสกุล"
-            icon={<Text>👤</Text>}
-          />
+        <ScrollView style={styles.editModalContent} showsVerticalScrollIndicator={false}>
 
-          <Input
-            label="เบอร์โทรศัพท์"
-            value={editForm.phone}
-            onChangeText={(text) => setEditForm({ ...editForm, phone: text })}
-            placeholder="0xx-xxx-xxxx"
-            keyboardType="phone-pad"
-            icon={<Text>📱</Text>}
-          />
+          {/* ── SECTION: ข้อมูลส่วนตัว ── */}
+          <View style={profileEditStyles.section}>
+            <View style={profileEditStyles.sectionHeader}>
+              <View style={[profileEditStyles.sectionDot, { backgroundColor: colors.primary }]} />
+              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>ข้อมูลส่วนตัว</Text>
+            </View>
 
-          <Input
-            label="เลขใบประกอบวิชาชีพ"
-            value={editForm.licenseNumber}
-            onChangeText={(text) => setEditForm({ ...editForm, licenseNumber: text })}
-            placeholder="เลขที่ใบอนุญาต"
-            icon={<Text>🏥</Text>}
-          />
+            {/* ชื่อ-นามสกุล */}
+            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={profileEditStyles.fieldIcon}>
+                <Ionicons name="person-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={profileEditStyles.fieldContent}>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>ชื่อ-นามสกุล</Text>
+                <TextInput
+                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
+                  value={editForm.displayName}
+                  onChangeText={(t) => setEditForm({ ...editForm, displayName: t })}
+                  placeholder="ชื่อจริง นามสกุล"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+            </View>
 
-          <Input
-            label="ประสบการณ์ทำงาน (ปี)"
-            value={editForm.experience}
-            onChangeText={(text) => setEditForm({ ...editForm, experience: text })}
-            placeholder="0"
-            keyboardType="numeric"
-            icon={<Text>⏱️</Text>}
-          />
+            {/* เบอร์โทรศัพท์ */}
+            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: phoneStep === 'verify' ? colors.warning : phoneStep === 'verified' ? colors.success : editForm.phone !== (user?.phone || '') ? colors.warning : colors.border }]}>
+              <View style={profileEditStyles.fieldIcon}>
+                <Ionicons
+                  name={phoneStep === 'verified' ? 'checkmark-circle' : 'call-outline'}
+                  size={18}
+                  color={phoneStep === 'verified' ? colors.success : phoneStep === 'verify' ? colors.warning : colors.primary}
+                />
+              </View>
+              <View style={profileEditStyles.fieldContent}>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>เบอร์โทรศัพท์</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TextInput
+                    style={[profileEditStyles.fieldInput, { color: colors.text, flex: 1 }]}
+                    value={editForm.phone}
+                    onChangeText={(t) => {
+                      setEditForm({ ...editForm, phone: t });
+                      if (phoneStep !== 'idle') { setPhoneStep('idle'); setOtpValue(''); setOtpError(''); }
+                    }}
+                    placeholder="0xx-xxx-xxxx"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="phone-pad"
+                    editable={phoneStep !== 'verify'}
+                  />
+                  {phoneStep === 'verified' && (
+                    <View style={[profileEditStyles.verifiedBadge, { backgroundColor: colors.success + '20' }]}>
+                      <Text style={{ color: colors.success, fontSize: 11, fontWeight: '700' }}>ยืนยันแล้ว ✓</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
 
-          <View style={styles.bioInput}>
-            <Text style={styles.bioLabel}>เกี่ยวกับฉัน</Text>
-            <TextInput
-              style={[styles.bioTextInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
-              value={editForm.bio}
-              onChangeText={(text) => setEditForm({ ...editForm, bio: text })}
-              placeholder="บอกเล่าเกี่ยวกับตัวคุณ ความเชี่ยวชาญ และสิ่งที่คุณมองหา..."
-              placeholderTextColor={colors.textMuted}
-              multiline={true}
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
+            {/* Phone changed warning */}
+            {editForm.phone.trim() !== (user?.phone || '').trim() && editForm.phone.trim() !== '' && phoneStep === 'idle' && (
+              <View style={[profileEditStyles.infoBanner, { backgroundColor: '#FFF8E1', borderColor: '#F59E0B' }]}>
+                <Ionicons name="warning-outline" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
+                <Text style={{ color: '#92400E', fontSize: 13, flex: 1 }}>
+                  การเปลี่ยนเบอร์โทรศัพท์ต้องยืนยัน OTP ก่อนที่จะบันทึก
+                </Text>
+              </View>
+            )}
+
+            {/* OTP Inline Step */}
+            {(phoneStep === 'verify' || phoneStep === 'sending') && (
+              <View style={[profileEditStyles.otpBox, { backgroundColor: colors.background, borderColor: colors.warning }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  <Ionicons name="shield-checkmark-outline" size={20} color={colors.warning} />
+                  <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, marginLeft: 8 }}>ยืนยัน OTP</Text>
+                </View>
+                <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 14 }}>
+                  กรอกรหัส 6 หลัก ที่ส่งไปยัง {'\n'}
+                  <Text style={{ fontWeight: '700', color: colors.text }}>{editForm.phone}</Text>
+                </Text>
+
+                {/* OTP digit input */}
+                <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: otpError ? colors.danger : colors.border }]}>
+                  <View style={profileEditStyles.fieldIcon}>
+                    <Ionicons name="keypad-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={profileEditStyles.fieldContent}>
+                    <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>รหัส OTP</Text>
+                    <TextInput
+                      style={[profileEditStyles.fieldInput, { color: colors.text, letterSpacing: 8, fontSize: 20, fontWeight: '700' }]}
+                      value={otpValue}
+                      onChangeText={setOtpValue}
+                      placeholder="------"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      autoFocus
+                    />
+                  </View>
+                </View>
+
+                {otpError ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                    <Ionicons name="alert-circle-outline" size={15} color={colors.danger} />
+                    <Text style={{ color: colors.danger, fontSize: 13, marginLeft: 6 }}>{otpError}</Text>
+                  </View>
+                ) : null}
+
+                <TouchableOpacity
+                  onPress={handleVerifyOTP}
+                  disabled={otpLoading || !otpValue}
+                  style={[profileEditStyles.otpConfirmBtn, { backgroundColor: otpLoading || !otpValue ? colors.border : colors.primary }]}
+                >
+                  {otpLoading
+                    ? <Text style={{ color: '#fff', fontWeight: '700' }}>กำลังยืนยัน…</Text>
+                    : <Text style={{ color: '#fff', fontWeight: '700' }}>ยืนยันรหัส OTP</Text>
+                  }
+                </TouchableOpacity>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12 }}>
+                  {otpResendCountdown > 0
+                    ? <Text style={{ color: colors.textMuted, fontSize: 13 }}>ขอรหัสใหม่ได้อีกใน {otpResendCountdown} วินาที</Text>
+                    : (
+                      <TouchableOpacity onPress={handleSendPhoneOTP} disabled={phoneStep === 'sending'}>
+                        <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '600' }}>
+                          {phoneStep === 'sending' ? 'กำลังส่ง…' : '📨 ส่งรหัสใหม่'}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  }
+                </View>
+              </View>
+            )}
           </View>
+
+          {/* ── SECTION: ข้อมูลวิชาชีพ ── */}
+          <View style={profileEditStyles.section}>
+            <View style={profileEditStyles.sectionHeader}>
+              <View style={[profileEditStyles.sectionDot, { backgroundColor: '#7C3AED' }]} />
+              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>ข้อมูลวิชาชีพ</Text>
+            </View>
+
+            {/* เลขใบประกอบวิชาชีพ */}
+            <View style={[profileEditStyles.fieldBox, {
+              backgroundColor: colors.surface,
+              borderColor: editForm.licenseNumber !== (user?.licenseNumber || '') && editForm.licenseNumber !== '' ? '#7C3AED' : colors.border,
+            }]}>
+              <View style={profileEditStyles.fieldIcon}>
+                <Ionicons name="ribbon-outline" size={18} color="#7C3AED" />
+              </View>
+              <View style={profileEditStyles.fieldContent}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>เลขใบประกอบวิชาชีพ</Text>
+                  {(user as any)?.licenseVerificationStatus === 'pending' && (
+                    <View style={{ backgroundColor: '#FFF3CD', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                      <Text style={{ color: '#856404', fontSize: 10, fontWeight: '700' }}>⏳ รอตรวจสอบ</Text>
+                    </View>
+                  )}
+                  {(user as any)?.licenseVerificationStatus === 'approved' && (
+                    <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                      <Text style={{ color: '#065F46', fontSize: 10, fontWeight: '700' }}>✓ ยืนยันแล้ว</Text>
+                    </View>
+                  )}
+                  {(user as any)?.licenseVerificationStatus === 'rejected' && (
+                    <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                      <Text style={{ color: '#B91C1C', fontSize: 10, fontWeight: '700' }}>✗ ไม่ผ่าน</Text>
+                    </View>
+                  )}
+                </View>
+                <TextInput
+                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
+                  value={editForm.licenseNumber}
+                  onChangeText={(t) => setEditForm({ ...editForm, licenseNumber: t })}
+                  placeholder="เลขที่ใบอนุญาต เช่น ผ.12345"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="characters"
+                />
+              </View>
+            </View>
+
+            {/* Pending license display */}
+            {(user as any)?.pendingLicenseNumber && (user as any)?.licenseVerificationStatus === 'pending' && (
+              <View style={[profileEditStyles.infoBanner, { backgroundColor: '#FFF8E1', borderColor: '#F59E0B' }]}>
+                <Ionicons name="time-outline" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
+                <Text style={{ color: '#92400E', fontSize: 12, flex: 1 }}>
+                  เลขที่รอตรวจสอบ: <Text style={{ fontWeight: '700' }}>{(user as any).pendingLicenseNumber}</Text>
+                  {'\n'}จะแสดงบนโปรไฟล์หลังจากได้รับการอนุมัติ
+                </Text>
+              </View>
+            )}
+
+            {/* License changed info banner */}
+            {editForm.licenseNumber.trim() !== (user?.licenseNumber || '').trim() && editForm.licenseNumber.trim() !== '' && (
+              <View style={[profileEditStyles.infoBanner, { backgroundColor: '#EDE9FE', borderColor: '#7C3AED' }]}>
+                <Ionicons name="information-circle-outline" size={16} color="#7C3AED" style={{ marginRight: 8 }} />
+                <Text style={{ color: '#4C1D95', fontSize: 12, flex: 1 }}>
+                  เลขใบประกอบวิชาชีพใหม่จะถูกส่งเพื่อรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์
+                </Text>
+              </View>
+            )}
+
+            {/* ประสบการณ์ */}
+            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={profileEditStyles.fieldIcon}>
+                <Ionicons name="briefcase-outline" size={18} color="#059669" />
+              </View>
+              <View style={profileEditStyles.fieldContent}>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>ประสบการณ์ทำงาน (ปี)</Text>
+                <TextInput
+                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
+                  value={editForm.experience}
+                  onChangeText={(t) => setEditForm({ ...editForm, experience: t.replace(/[^0-9]/g, '') })}
+                  placeholder="0"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="number-pad"
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* ── SECTION: เกี่ยวกับฉัน ── */}
+          <View style={profileEditStyles.section}>
+            <View style={profileEditStyles.sectionHeader}>
+              <View style={[profileEditStyles.sectionDot, { backgroundColor: '#0EA5E9' }]} />
+              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>เกี่ยวกับฉัน</Text>
+            </View>
+            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border, alignItems: 'flex-start', minHeight: 100 }]}>
+              <View style={[profileEditStyles.fieldIcon, { marginTop: 10 }]}>
+                <Ionicons name="chatbubble-ellipses-outline" size={18} color="#0EA5E9" />
+              </View>
+              <View style={[profileEditStyles.fieldContent, { paddingTop: 10 }]}>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 4 }]}>บรรยายตัวเอง</Text>
+                <TextInput
+                  style={[profileEditStyles.fieldInput, { color: colors.text, minHeight: 80, textAlignVertical: 'top' }]}
+                  value={editForm.bio}
+                  onChangeText={(t) => setEditForm({ ...editForm, bio: t })}
+                  placeholder="บอกเล่าเกี่ยวกับตัวคุณ ความเชี่ยวชาญ และสิ่งที่คุณมองหา..."
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  numberOfLines={4}
+                />
+              </View>
+            </View>
+          </View>
+
+          <View style={{ height: 24 }} />
         </ScrollView>
 
+        {/* Action Buttons */}
         <View style={[styles.editModalActions, { paddingBottom: Math.max(insets.bottom, 16) + SPACING.md }]}>
-          <Button
-            onPress={() => setShowEditModal(false)}
-            variant="outline"
-            style={{ flex: 1, marginRight: SPACING.sm }}
+          <TouchableOpacity
+            onPress={() => { setShowEditModal(false); setPhoneStep('idle'); }}
+            style={[profileEditStyles.actionBtn, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginRight: 10 }]}
           >
-            <Text>ยกเลิก</Text>
-          </Button>
-          <Button
+            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 16 }}>ยกเลิก</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={handleSaveProfile}
-            disabled={otpLoading}
-            style={{ flex: 1 }}
+            disabled={isAuthLoading || phoneStep === 'sending' || phoneStep === 'verify'}
+            style={[profileEditStyles.actionBtn, {
+              backgroundColor: (isAuthLoading || phoneStep === 'sending' || phoneStep === 'verify') ? colors.border : colors.primary,
+              flex: 1.5,
+            }]}
           >
-            <Text>{isAuthLoading || otpLoading ? 'กำลังบันทึก...' : 'บันทึก'}</Text>
-          </Button>
-              {/* OTP Modal */}
-              <ModalContainer
-                visible={showOTPModal}
-                onClose={() => setShowOTPModal(false)}
-                title="ยืนยันเบอร์โทรศัพท์"
-              >
-                <View style={{ padding: 24 }}>
-                  <Text style={{ fontSize: 16, marginBottom: 12 }}>กรอกรหัส OTP ที่ส่งไปยัง {editForm.phone}</Text>
-                  <Input
-                    label="รหัส OTP"
-                    value={otpValue}
-                    onChangeText={setOtpValue}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    autoFocus
-                  />
-                  {otpError ? <Text style={{ color: 'red', marginTop: 8 }}>{otpError}</Text> : null}
-                  <Button
-                    onPress={handleConfirmOTP}
-                    style={{ marginTop: 16 }}
-                    disabled={otpLoading}
-                  >
-                    <Text>{otpLoading ? 'กำลังยืนยัน...' : 'ยืนยันรหัส'}</Text>
-                  </Button>
-                  <Button
-                    onPress={async () => {
-                      setOtpLoading(true);
-                      setOtpError('');
-                      try {
-                        await sendOTP(editForm.phone);
-                        setOtpSent(true);
-                      } catch (error: any) {
-                        setOtpError(error.message || 'ส่งรหัส OTP ไม่สำเร็จ');
-                      } finally {
-                        setOtpLoading(false);
-                      }
-                    }}
-                    variant="outline"
-                    style={{ marginTop: 8 }}
-                    disabled={otpLoading}
-                  >
-                    <Text>ขอรหัสใหม่</Text>
-                  </Button>
-                </View>
-              </ModalContainer>
+            {isAuthLoading
+              ? <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>กำลังบันทึก…</Text>
+              : phoneStep === 'verify' || phoneStep === 'sending'
+                ? <Text style={{ color: colors.textMuted, fontWeight: '600', fontSize: 14 }}>ยืนยัน OTP ก่อนบันทึก</Text>
+                : editForm.phone.trim() !== (user?.phone || '').trim() && editForm.phone.trim() !== '' && phoneStep === 'idle'
+                  ? <><Ionicons name="shield-outline" size={16} color="#fff" style={{ marginRight: 6 }} /><Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>ขอ OTP & บันทึก</Text></>
+                  : <><Ionicons name="checkmark-circle-outline" size={16} color="#fff" style={{ marginRight: 6 }} /><Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>บันทึกข้อมูล</Text></>
+            }
+          </TouchableOpacity>
         </View>
       </ModalContainer>
 
@@ -956,6 +1261,93 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
+  },
+});
+
+// ── New Edit Modal Styles ──
+const profileEditStyles = StyleSheet.create({
+  section: {
+    marginBottom: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sectionDot: {
+    width: 4,
+    height: 20,
+    borderRadius: 2,
+    marginRight: 10,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  fieldBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  fieldIcon: {
+    width: 32,
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  fieldContent: {
+    flex: 1,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fieldInput: {
+    fontSize: 15,
+    fontWeight: '500',
+    paddingVertical: 2,
+  },
+  verifiedBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    marginLeft: 8,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    marginTop: -4,
+  },
+  otpBox: {
+    borderWidth: 1.5,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    marginTop: -4,
+  },
+  otpConfirmBtn: {
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    paddingVertical: 14,
   },
 });
 

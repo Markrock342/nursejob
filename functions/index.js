@@ -657,6 +657,232 @@ exports.cleanupOldNotifications = functions.pubsub
   });
 
 // ============================================
+// GEOHASH HELPERS (pure JS, no dependency)
+// ============================================
+const GEO_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+
+function encodeGeohash(lat, lng, precision = 4) {
+  let idx = 0, bit = 0, evenBit = true, geohash = '';
+  let latMin = -90, latMax = 90, lngMin = -180, lngMax = 180;
+  while (geohash.length < precision) {
+    if (evenBit) {
+      const lngMid = (lngMin + lngMax) / 2;
+      if (lng >= lngMid) { idx = idx * 2 + 1; lngMin = lngMid; }
+      else { idx = idx * 2; lngMax = lngMid; }
+    } else {
+      const latMid = (latMin + latMax) / 2;
+      if (lat >= latMid) { idx = idx * 2 + 1; latMin = latMid; }
+      else { idx = idx * 2; latMax = latMid; }
+    }
+    evenBit = !evenBit;
+    if (++bit === 5) { geohash += GEO_BASE32[idx]; bit = 0; idx = 0; }
+  }
+  return geohash;
+}
+
+function decodeGeohash(geohash) {
+  let evenBit = true;
+  let latMin = -90, latMax = 90, lngMin = -180, lngMax = 180;
+  for (const char of geohash) {
+    const ci = GEO_BASE32.indexOf(char);
+    for (let bits = 4; bits >= 0; bits--) {
+      const bitN = (ci >> bits) & 1;
+      if (evenBit) {
+        const lngMid = (lngMin + lngMax) / 2;
+        if (bitN === 1) lngMin = lngMid; else lngMax = lngMid;
+      } else {
+        const latMid = (latMin + latMax) / 2;
+        if (bitN === 1) latMin = latMid; else latMax = latMid;
+      }
+      evenBit = !evenBit;
+    }
+  }
+  return { lat: (latMin + latMax) / 2, lng: (lngMin + lngMax) / 2 };
+}
+
+function getGeohashNeighbors(geohash) {
+  const { lat, lng } = decodeGeohash(geohash);
+  const precision = geohash.length;
+  const latErr = 45 / Math.pow(2, 2.5 * precision - 0.5);
+  const lngErr = 45 / Math.pow(2, 2.5 * precision);
+  return [
+    encodeGeohash(lat + latErr * 2, lng, precision),
+    encodeGeohash(lat + latErr * 2, lng + lngErr * 2, precision),
+    encodeGeohash(lat, lng + lngErr * 2, precision),
+    encodeGeohash(lat - latErr * 2, lng + lngErr * 2, precision),
+    encodeGeohash(lat - latErr * 2, lng, precision),
+    encodeGeohash(lat - latErr * 2, lng - lngErr * 2, precision),
+    encodeGeohash(lat, lng - lngErr * 2, precision),
+    encodeGeohash(lat + latErr * 2, lng - lngErr * 2, precision),
+  ];
+}
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ============================================
+// HELPER: Send Expo Push Notification
+// Uses Expo Push API (works with Expo push tokens)
+// ============================================
+async function sendExpoPush(pushToken, title, body, data = {}) {
+  if (!pushToken || !pushToken.startsWith('ExponentPushToken')) return false;
+  try {
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Accept-encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: pushToken,
+        sound: 'default',
+        title,
+        body,
+        data,
+        priority: 'high',
+        channelId: 'jobs',
+      }),
+    });
+    const result = await response.json();
+    if (result.data?.status === 'error') {
+      console.warn('⚠️ Expo push error:', result.data.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('❌ Expo push failed:', err.message);
+    return false;
+  }
+}
+
+// ============================================
+// 10. ON NEW SHIFT — แจ้งเตือน "งานใกล้ฉัน"
+// Trigger: shifts/{shiftId} onCreate
+// ============================================
+exports.onNewShift = functions.firestore
+  .document('shifts/{shiftId}')
+  .onCreate(async (snap, context) => {
+    const shift = snap.data();
+    const shiftId = context.params.shiftId;
+
+    console.log('📍 New shift posted:', shiftId);
+
+    // ── ต้องมี lat/lng จึงจะทำงานได้ ──
+    const shiftLat = shift.lat ?? shift.location?.lat ?? shift.location?.coordinates?.lat;
+    const shiftLng = shift.lng ?? shift.location?.lng ?? shift.location?.coordinates?.lng;
+
+    if (!shiftLat || !shiftLng) {
+      console.log('⚠️ No lat/lng on shift, skipping nearby alerts');
+      return null;
+    }
+
+    // ── คำนวณ geohash4 รอบงานนี้ (center + 8 neighbors) ──
+    const centerHash = encodeGeohash(shiftLat, shiftLng, 4);
+    const neighborHashes = getGeohashNeighbors(centerHash);
+    // รวม 9 cells ครอบคลุม ~120km รอบจุดศูนย์กลาง
+    // Firestore 'in' รองรับ ≤ 10 values
+    const queryHashes = [centerHash, ...neighborHashes].slice(0, 9);
+
+    console.log(`🗺️ Shift at [${shiftLat},${shiftLng}], geohash4: ${centerHash}`);
+
+    try {
+      // ── ดึง users ที่เปิด nearbyJobAlert และอยู่ในพื้นที่ใกล้เคียง ──
+      const usersSnap = await db.collection('users')
+        .where('nearbyJobAlert.enabled', '==', true)
+        .where('nearbyJobAlert.geohash4', 'in', queryHashes)
+        .get();
+
+      if (usersSnap.empty) {
+        console.log('ℹ️ No nearby-alert users in range');
+        return null;
+      }
+
+      console.log(`👥 Found ${usersSnap.size} candidate users`);
+
+      // ── กรองด้วย Haversine และส่ง push ──
+      const locationLabel =
+        shift.location?.province ??
+        shift.province ??
+        shift.address ??
+        'ไม่ระบุสถานที่';
+
+      const shiftTitle = shift.title || 'งานพยาบาล';
+
+      let notifiedCount = 0;
+
+      for (const userDoc of usersSnap.docs) {
+        // อย่าแจ้งเตือน poster ตัวเอง
+        if (userDoc.id === shift.posterId) continue;
+
+        const userData = userDoc.data();
+        const alert = userData.nearbyJobAlert;
+        const userLat = alert.lat;
+        const userLng = alert.lng;
+        const radiusKm = alert.radiusKm ?? 5;
+
+        const distKm = haversineKm(userLat, userLng, shiftLat, shiftLng);
+
+        if (distKm > radiusKm) {
+          console.log(`  ↩️ ${userDoc.id}: ${distKm.toFixed(1)}km > ${radiusKm}km, skip`);
+          continue;
+        }
+
+        console.log(`  ✉️ ${userDoc.id}: ${distKm.toFixed(1)}km <= ${radiusKm}km, notify`);
+
+        const notifTitle = '📍 มีงานใหม่ใกล้คุณ!';
+        const notifBody = `${shiftTitle} · ${locationLabel} · ห่างจากคุณ ${distKm.toFixed(1)} กม.`;
+        const notifData = { type: 'nearby_job', shiftId, jobId: shiftId };
+
+        // ── Expo Push (ถ้ามี token) ──
+        const pushToken = userData.pushToken;
+        if (pushToken) {
+          await sendExpoPush(pushToken, notifTitle, notifBody, notifData);
+        }
+
+        // ── FCM fallback (ถ้ามี fcmToken) ──
+        const fcmToken = userData.fcmToken;
+        if (fcmToken && !pushToken) {
+          try {
+            await admin.messaging().send({
+              notification: { title: notifTitle, body: notifBody },
+              data: { type: 'nearby_job', shiftId },
+              token: fcmToken,
+              android: { channelId: 'jobs', priority: 'high' },
+            });
+          } catch (fcmErr) {
+            console.warn('FCM error:', fcmErr.message);
+          }
+        }
+
+        // ── In-app notification ──
+        await createInAppNotification(userDoc.id, {
+          type: 'nearby_job',
+          title: notifTitle,
+          body: notifBody,
+          data: notifData,
+        });
+
+        notifiedCount++;
+      }
+
+      console.log(`✅ Notified ${notifiedCount} users for shift ${shiftId}`);
+      return null;
+    } catch (error) {
+      console.error('❌ onNewShift error:', error);
+      return null;
+    }
+  });
+
+// ============================================
 // HELPER: Create In-App Notification
 // ============================================
 async function createInAppNotification(userId, notification) {

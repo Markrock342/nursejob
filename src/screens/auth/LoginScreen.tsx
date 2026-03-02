@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import Constants from 'expo-constants';
 import { Button, Input, Divider, SuccessModal, ErrorModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -29,19 +30,17 @@ import { validateAdminCredentials } from '../../services/authService';
 WebBrowser.maybeCompleteAuthSession();
 
 // ============================================
-// Google OAuth Config
+// Google OAuth Config — อ่านจาก app.config.js extra
 // ============================================
-// Google OAuth Config - nurse-go-th project
-// https://console.cloud.google.com/apis/credentials
-// Use correct client IDs for each platform
-const GOOGLE_WEB_CLIENT_ID = '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com';
-const GOOGLE_ANDROID_CLIENT_ID = '427547114323-2v7g7k1v7k1v7k1v7k1v7k1v7k1v7k1v.apps.googleusercontent.com'; // <-- Replace with your real Android OAuth client ID
-const GOOGLE_IOS_CLIENT_ID = '427547114323-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com'; // <-- Replace with your real iOS OAuth client ID if needed
+const extra = Constants.expoConfig?.extra || {};
+const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId || '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com';
+const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || ''; // ต้องใส่ใน app.config.js หลัง setup
+const GOOGLE_IOS_CLIENT_ID = extra.googleIosClientId || '';
 
 const GOOGLE_CLIENT_ID = {
-  expoClientId: GOOGLE_WEB_CLIENT_ID, // Only for Expo Go (not for EAS build)
-  androidClientId: GOOGLE_ANDROID_CLIENT_ID, // Use real Android client ID for EAS build
-  iosClientId: GOOGLE_IOS_CLIENT_ID, // Use real iOS client ID if needed
+  expoClientId: GOOGLE_WEB_CLIENT_ID,
+  androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
+  iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
   webClientId: GOOGLE_WEB_CLIENT_ID,
 };
 

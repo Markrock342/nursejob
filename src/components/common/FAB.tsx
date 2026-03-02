@@ -127,13 +127,13 @@ export default function FAB({
       })}
 
       {/* Main FAB */}
-      <Animated.View style={{ transform: [{ scale: pressScale }] }}>
+      <Animated.View style={{ transform: [{ scale: pressScale }], elevation: 20, zIndex: 1000 }}>
         <Pressable
           onPress={toggle}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
           android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: true }}
-          hitSlop={{ top: 20, left: 20, right: 20, bottom: 20 }}
+          hitSlop={{ top: 28, left: 28, right: 28, bottom: 28 }}
           accessibilityLabel="Floating action button"
           style={({ pressed }) => [
             styles.fab,
@@ -143,7 +143,6 @@ export default function FAB({
               borderRadius: size / 2,
               backgroundColor: COLORS.primary,
               ...SHADOWS.large,
-              zIndex: 1000,
             },
             style,
           ]}
@@ -167,11 +166,11 @@ export default function FAB({
 export function SimpleFAB({ icon = 'add', onPress, color = COLORS.primary, size = 56, position = 'bottomRight', style, }: { icon?: string; onPress: () => void; color?: string; size?: number; position?: 'bottomRight' | 'bottomLeft'; style?: ViewStyle }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + SPACING.sm, pointerEvents: 'box-none', paddingHorizontal: SPACING.md, alignItems: position === 'bottomLeft' ? 'flex-start' : 'flex-end' }}>
+    <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + SPACING.sm, pointerEvents: 'box-none', paddingHorizontal: SPACING.md, alignItems: position === 'bottomLeft' ? 'flex-start' : 'flex-end', elevation: 20, zIndex: 1000 }}>
       <Pressable
         onPress={onPress}
         android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: true }}
-        hitSlop={{ top: 12, left: 12, right: 12, bottom: 12 }}
+        hitSlop={{ top: 28, left: 28, right: 28, bottom: 28 }}
         style={[
           styles.fab,
           { backgroundColor: color, width: size, height: size, borderRadius: size / 2 },
@@ -189,7 +188,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     zIndex: 999,
-    elevation: 20,
+    elevation: 30,
   },
   fab: {
     alignItems: 'center',

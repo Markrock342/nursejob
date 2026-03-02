@@ -105,29 +105,34 @@ const applyPalette = (baseColors: ThemeColors, palette: ColorPalette): ThemeColo
 };
 
 // ============================================
-// Light Theme Colors (Base)
+// Light Theme Colors (Base) — NurseGo Design System v2
 // ============================================
 export const lightColors: ThemeColors = {
-  primary: '#4A90D9',
-  primaryLight: '#7EB3F1',
-  primaryDark: '#2E6BB0',
-  primaryBackground: '#E8F4FF',
-  
-  background: '#F5F7FA',
-  backgroundSecondary: '#F0F2F5',
+  // Brand — Sky Blue (trust + medical)
+  primary: '#0EA5E9',
+  primaryLight: '#38BDF8',
+  primaryDark: '#0284C7',
+  primaryBackground: '#F0F9FF',
+
+  // Backgrounds
+  background: '#F8FAFC',
+  backgroundSecondary: '#F1F5F9',
   surface: '#FFFFFF',
   card: '#FFFFFF',
-  
-  text: '#1F2937',
-  textSecondary: '#6B7280',
-  textMuted: '#9CA3AF',
-  textLight: '#9CA3AF',
+
+  // Text (Slate scale)
+  text: '#0F172A',
+  textSecondary: '#475569',
+  textMuted: '#94A3B8',
+  textLight: '#CBD5E1',
   textInverse: '#FFFFFF',
-  
-  border: '#E5E7EB',
-  borderLight: '#F3F4F6',
-  divider: '#F3F4F6',
-  
+
+  // Borders
+  border: '#E2E8F0',
+  borderLight: '#F1F5F9',
+  divider: '#F1F5F9',
+
+  // Status
   success: '#10B981',
   successLight: '#D1FAE5',
   warning: '#F59E0B',
@@ -138,33 +143,33 @@ export const lightColors: ThemeColors = {
   dangerLight: '#FEE2E2',
   info: '#3B82F6',
   infoLight: '#DBEAFE',
-  
-  // Special
-  urgent: '#FF4757',
-  verified: '#2ED573',
-  premium: '#FFD700',
+
+  // Marketplace
+  urgent: '#EF4444',
+  verified: '#10B981',
+  premium: '#F59E0B',
   online: '#22C55E',
-  offline: '#9CA3AF',
-  
+  offline: '#94A3B8',
+
   // Social
-  google: '#DB4437',
-  facebook: '#4267B2',
+  google: '#EA4335',
+  facebook: '#1877F2',
   line: '#00B900',
-  
-  // Secondary
-  secondary: '#5BC0BE',
-  secondaryDark: '#3A9997',
-  secondaryLight: '#8DD4D2',
-  
-  // Accent
-  accent: '#FF6B6B',
-  accentDark: '#E55555',
-  accentLight: '#FF9999',
-  
+
+  // Secondary — Emerald (healthcare + growth)
+  secondary: '#10B981',
+  secondaryDark: '#059669',
+  secondaryLight: '#34D399',
+
+  // Accent — Amber (CTAs + important)
+  accent: '#F59E0B',
+  accentDark: '#D97706',
+  accentLight: '#FCD34D',
+
   white: '#FFFFFF',
   black: '#000000',
-  overlay: 'rgba(0, 0, 0, 0.5)',
-  overlayLight: 'rgba(0, 0, 0, 0.3)',
+  overlay: 'rgba(15, 23, 42, 0.6)',
+  overlayLight: 'rgba(15, 23, 42, 0.35)',
 };
 
 // ============================================

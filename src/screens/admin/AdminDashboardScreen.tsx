@@ -47,7 +47,9 @@ import { formatRelativeTime } from '../../utils/helpers';
 // ============================================
 // Types
 // ============================================
-type TabType = 'overview' | 'users' | 'jobs';
+type TabType = 'overview' | 'users' | 'jobs' | 'chats';
+type UserFilterRole = 'all' | 'nurse' | 'hospital' | 'admin' | 'pending';
+type JobFilterStatus = 'all' | 'active' | 'closed' | 'urgent';
 
 // Selected user for profile view
 interface SelectedUserProfile {
@@ -92,6 +94,9 @@ export default function AdminDashboardScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterRole, setFilterRole] = useState<UserFilterRole>('all');
+  const [filterJobStatus, setFilterJobStatus] = useState<JobFilterStatus>('all');
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
   
   // Data
   const [stats, setStats] = useState<DashboardStats>({
@@ -101,6 +106,7 @@ export default function AdminDashboardScreen() {
     totalConversations: 0,
     todayNewUsers: 0,
     todayNewJobs: 0,
+    pendingVerifications: 0,
   });
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [jobs, setJobs] = useState<AdminJob[]>([]);
@@ -468,6 +474,20 @@ export default function AdminDashboardScreen() {
     </TouchableOpacity>
   );
 
+  // Computed filtered lists
+  const filteredUsers = users.filter(u => {
+    if (filterRole === 'all') return true;
+    if (filterRole === 'pending') return !u.isVerified && u.role !== 'admin';
+    return u.role === filterRole;
+  });
+
+  const filteredJobs = jobs.filter(j => {
+    const matchStatus = filterJobStatus === 'all' || j.status === filterJobStatus;
+    const q = jobSearchQuery.trim().toLowerCase();
+    const matchSearch = !q || j.title.toLowerCase().includes(q) || j.posterName.toLowerCase().includes(q) || (j.province || '').toLowerCase().includes(q);
+    return matchStatus && matchSearch;
+  });
+
   // Render overview tab
   const renderOverview = () => (
     <View style={styles.section}>
@@ -489,10 +509,17 @@ export default function AdminDashboardScreen() {
           subtitle={`+${stats.todayNewJobs} วันนี้`}
         />
         <StatCard
-          title="ประกาศที่เปิดรับ"
+          title="ประกาศเปิดรับ"
           value={stats.activeJobs}
           icon="checkmark-circle"
+          color="#10B981"
+        />
+        <StatCard
+          title="รอยืนยันใบอนุญาต"
+          value={stats.pendingVerifications ?? 0}
+          icon="shield-checkmark"
           color={COLORS.warning}
+          subtitle="แตะเพื่อตรวจสอบ"
         />
         <StatCard
           title="การสนทนา"
@@ -500,42 +527,60 @@ export default function AdminDashboardScreen() {
           icon="chatbubbles"
           color={COLORS.info}
         />
+        <StatCard
+          title="โหลดวันนี้ (งาน)"
+          value={stats.todayNewJobs}
+          icon="flash"
+          color="#8B5CF6"
+        />
       </View>
 
       {/* Quick Actions */}
-      <Text style={[styles.sectionTitle, { marginTop: SPACING.lg }]}>การดำเนินการด่วน</Text>
+      <Text style={[styles.sectionTitle, { marginTop: SPACING.lg }]}>เครื่องมือจัดการ</Text>
       <View style={styles.quickActions}>
-        <TouchableOpacity style={styles.quickActionButton} onPress={() => setActiveTab('users')}>
-          <Ionicons name="person" size={24} color={COLORS.primary} />
-          <Text style={styles.quickActionText}>จัดการผู้ใช้</Text>
+        <TouchableOpacity style={styles.quickActionButton} onPress={() => { setFilterRole('all'); setActiveTab('users'); }}>
+          <Ionicons name="people" size={26} color={COLORS.primary} />
+          <Text style={styles.quickActionText}>ผู้ใช้ทั้งหมด</Text>
+          <Text style={styles.quickActionBadge}>{stats.totalUsers}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.quickActionButton} onPress={() => setActiveTab('jobs')}>
-          <Ionicons name="document-text" size={24} color={COLORS.success} />
-          <Text style={styles.quickActionText}>จัดการประกาศ</Text>
+        <TouchableOpacity style={[styles.quickActionButton, { borderColor: COLORS.warning, borderWidth: 1.5 }]} onPress={() => { setFilterRole('pending'); setActiveTab('users'); }}>
+          <Ionicons name="time" size={26} color={COLORS.warning} />
+          <Text style={styles.quickActionText}>รอยืนยัน</Text>
+          <Text style={[styles.quickActionBadge, { backgroundColor: COLORS.warning }]}>{stats.pendingVerifications ?? 0}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quickActionButton} onPress={() => { setFilterJobStatus('all'); setActiveTab('jobs'); }}>
+          <Ionicons name="document-text" size={26} color={COLORS.success} />
+          <Text style={styles.quickActionText}>ประกาศงาน</Text>
+          <Text style={styles.quickActionBadge}>{stats.totalJobs}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quickActionButton} onPress={() => setActiveTab('chats')}>
+          <Ionicons name="chatbubbles" size={26} color={COLORS.info} />
+          <Text style={styles.quickActionText}>แชท</Text>
+          <Text style={styles.quickActionBadge}>{stats.totalConversations}</Text>
         </TouchableOpacity>
         <TouchableOpacity 
           style={styles.quickActionButton} 
           onPress={() => navigation.navigate('AdminVerification' as never)}
         >
-          <Ionicons name="shield-checkmark" size={24} color={COLORS.info} />
+          <Ionicons name="shield-checkmark" size={26} color="#10B981" />
           <Text style={styles.quickActionText}>ตรวจใบอนุญาต</Text>
         </TouchableOpacity>
         <TouchableOpacity 
           style={styles.quickActionButton} 
           onPress={() => navigation.navigate('AdminReports' as never)}
         >
-          <Ionicons name="flag" size={24} color={COLORS.danger} />
-          <Text style={styles.quickActionText}>ดูรายงาน</Text>
+          <Ionicons name="flag" size={26} color={COLORS.danger} />
+          <Text style={styles.quickActionText}>รายงาน</Text>
         </TouchableOpacity>
         <TouchableOpacity 
           style={styles.quickActionButton} 
           onPress={() => navigation.navigate('AdminFeedback' as never)}
         >
-          <Ionicons name="chatbox-ellipses" size={24} color="#8B5CF6" />
+          <Ionicons name="chatbox-ellipses" size={26} color="#8B5CF6" />
           <Text style={styles.quickActionText}>Feedback</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.quickActionButton} onPress={onRefresh}>
-          <Ionicons name="refresh" size={24} color={COLORS.warning} />
+          <Ionicons name="refresh" size={26} color={COLORS.warning} />
           <Text style={styles.quickActionText}>รีเฟรช</Text>
         </TouchableOpacity>
       </View>
@@ -546,7 +591,10 @@ export default function AdminDashboardScreen() {
         <View key={userItem.id} style={styles.listItem}>
           <Avatar uri={userItem.photoURL} name={userItem.displayName} size={40} />
           <View style={styles.listItemInfo}>
-            <Text style={styles.listItemName}>{userItem.displayName}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.listItemName}>{userItem.displayName}</Text>
+              {userItem.isVerified && <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />}
+            </View>
             <Text style={styles.listItemSubtext}>{userItem.email}</Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: userItem.isActive ? COLORS.successLight : COLORS.dangerLight }]}>
@@ -562,7 +610,7 @@ export default function AdminDashboardScreen() {
   // Render users tab
   const renderUsers = () => (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>จัดการผู้ใช้ ({users.length})</Text>
+      <Text style={styles.sectionTitle}>จัดการผู้ใช้ ({filteredUsers.length})</Text>
       
       {/* Search */}
       <View style={styles.searchContainer}>
@@ -583,7 +631,27 @@ export default function AdminDashboardScreen() {
         ) : null}
       </View>
 
-      {users.map((userItem) => (
+      {/* Role Filter Chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.md }}>
+        {([
+          { key: 'all', label: 'ทั้งหมด', icon: 'people', color: COLORS.primary },
+          { key: 'nurse', label: 'พยาบาล', icon: 'medkit', color: '#10B981' },
+          { key: 'hospital', label: 'โรงพยาบาล', icon: 'business', color: COLORS.info },
+          { key: 'admin', label: 'Admin', icon: 'shield', color: COLORS.danger },
+          { key: 'pending', label: 'รอยืนยัน', icon: 'time', color: COLORS.warning },
+        ] as { key: UserFilterRole; label: string; icon: string; color: string }[]).map(f => (
+          <TouchableOpacity
+            key={f.key}
+            style={[styles.filterChip, filterRole === f.key && { backgroundColor: f.color, borderColor: f.color }]}
+            onPress={() => setFilterRole(f.key)}
+          >
+            <Ionicons name={f.icon as any} size={13} color={filterRole === f.key ? '#fff' : f.color} />
+            <Text style={[styles.filterChipText, filterRole === f.key && { color: '#fff' }]}>{f.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {filteredUsers.map((userItem) => (
         <View key={userItem.id} style={styles.userCard}>
           <TouchableOpacity 
             style={styles.userCardHeader}
@@ -602,6 +670,21 @@ export default function AdminDashboardScreen() {
                     <Text style={styles.adminBadgeText}>Admin</Text>
                   </View>
                 )}
+                <View style={[styles.roleBadge, {
+                  backgroundColor: userItem.role === 'nurse' ? '#D1FAE5' :
+                    userItem.role === 'hospital' ? '#DBEAFE' :
+                    userItem.role === 'admin' ? '#FEE2E2' : '#F3F4F6'
+                }]}>
+                  <Text style={[styles.roleBadgeText, {
+                    color: userItem.role === 'nurse' ? '#059669' :
+                      userItem.role === 'hospital' ? '#2563EB' :
+                      userItem.role === 'admin' ? '#DC2626' : '#6B7280'
+                  }]}>
+                    {userItem.role === 'nurse' ? 'พยาบาล' :
+                      userItem.role === 'hospital' ? 'รพ./คลินิก' :
+                      userItem.role === 'admin' ? 'Admin' : 'ผู้ใช้'}
+                  </Text>
+                </View>
               </View>
               <Text style={styles.userEmail}>{userItem.email}</Text>
               {userItem.phone && <Text style={styles.userPhone}>📞 {userItem.phone}</Text>}
@@ -643,10 +726,13 @@ export default function AdminDashboardScreen() {
         </View>
       ))}
       
-      {users.length === 0 && (
+      {filteredUsers.length === 0 && (
         <View style={styles.emptyState}>
           <Ionicons name="people-outline" size={48} color={COLORS.textMuted} />
-          <Text style={styles.emptyStateText}>ไม่พบผู้ใช้</Text>
+          <Text style={styles.emptyStateText}>
+            {filterRole === 'pending' ? 'ไม่มีผู้ใช้ที่รอยืนยัน' :
+             filterRole !== 'all' ? `ไม่พบผู้ใช้ประเภท ${filterRole}` : 'ไม่พบผู้ใช้'}
+          </Text>
         </View>
       )}
     </View>
@@ -655,25 +741,91 @@ export default function AdminDashboardScreen() {
   // Render jobs tab
   const renderJobs = () => (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>จัดการประกาศ ({jobs.length})</Text>
+      <Text style={styles.sectionTitle}>จัดการประกาศ ({filteredJobs.length}/{jobs.length})</Text>
+
+      {/* Job Search */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color={colors.textSecondary} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.text }]}
+          placeholder="ค้นหาชื่องาน, ผู้โพสต์, จังหวัด..."
+          placeholderTextColor={colors.textMuted}
+          value={jobSearchQuery}
+          onChangeText={setJobSearchQuery}
+          returnKeyType="search"
+        />
+        {jobSearchQuery ? (
+          <TouchableOpacity onPress={() => setJobSearchQuery('')}>
+            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {/* Status Filter Chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.md }}>
+        {([
+          { key: 'all', label: 'ทั้งหมด', color: COLORS.primary },
+          { key: 'active', label: 'เปิดรับ', color: '#10B981' },
+          { key: 'urgent', label: 'ด่วน', color: COLORS.danger },
+          { key: 'closed', label: 'ปิดแล้ว', color: COLORS.textMuted },
+        ] as { key: JobFilterStatus; label: string; color: string }[]).map(f => (
+          <TouchableOpacity
+            key={f.key}
+            style={[styles.filterChip, filterJobStatus === f.key && { backgroundColor: f.color, borderColor: f.color }]}
+            onPress={() => setFilterJobStatus(f.key)}
+          >
+            <Text style={[styles.filterChipText, filterJobStatus === f.key && { color: '#fff' }]}>{f.label}</Text>
+            {f.key !== 'all' && (
+              <Text style={[styles.filterChipCount, filterJobStatus === f.key && { color: '#fff' }]}>
+                {jobs.filter(j => j.status === f.key).length}
+              </Text>
+            )}
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
       
-      {jobs.map((job) => (
+      {filteredJobs.map((job) => (
         <View key={job.id} style={styles.jobCard}>
           <View style={styles.jobCardHeader}>
             <View style={styles.jobCardInfo}>
-              <Text style={styles.jobTitle}>{job.title}</Text>
-              <Text style={styles.jobPoster}>โดย: {job.posterName}</Text>
-              <Text style={styles.jobRate}>฿{job.shiftRate.toLocaleString()}</Text>
-              <Text style={styles.jobDate}>{formatRelativeTime(job.createdAt)}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={styles.jobTitle}>{job.title}</Text>
+                {job.staffType && (
+                  <View style={styles.staffTypeBadge}>
+                    <Text style={styles.staffTypeBadgeText}>{job.staffType}</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.jobPoster}>
+                <Ionicons name="person-outline" size={12} /> {job.posterName}
+              </Text>
+              {(job.province || job.hospital) && (
+                <Text style={styles.jobLocation}>
+                  <Ionicons name="location-outline" size={12} /> {[job.hospital, job.province].filter(Boolean).join(' · ')}
+                </Text>
+              )}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 2 }}>
+                <Text style={styles.jobRate}>฿{job.shiftRate.toLocaleString()}</Text>
+                {job.shiftTime && <Text style={styles.jobShiftTime}>{job.shiftTime}</Text>}
+              </View>
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 2 }}>
+                <Text style={styles.jobStat}>
+                  <Ionicons name="eye-outline" size={11} /> {job.viewsCount}
+                </Text>
+                <Text style={styles.jobStat}>
+                  <Ionicons name="people-outline" size={11} /> {job.applicantsCount}
+                </Text>
+                <Text style={styles.jobDate}>{formatRelativeTime(job.createdAt)}</Text>
+              </View>
             </View>
             <View style={[
               styles.jobStatusBadge,
-              { backgroundColor: job.status === 'active' ? COLORS.successLight : 
-                job.status === 'urgent' ? COLORS.dangerLight : COLORS.textMuted + '20' }
+              { backgroundColor: job.status === 'active' ? '#D1FAE5' : 
+                job.status === 'urgent' ? COLORS.dangerLight : '#F3F4F6' }
             ]}>
               <Text style={[
                 styles.jobStatusText,
-                { color: job.status === 'active' ? COLORS.success : 
+                { color: job.status === 'active' ? '#059669' : 
                   job.status === 'urgent' ? COLORS.danger : COLORS.textMuted }
               ]}>
                 {job.status === 'active' ? 'เปิดรับ' : job.status === 'urgent' ? 'ด่วน' : 'ปิดแล้ว'}
@@ -682,13 +834,35 @@ export default function AdminDashboardScreen() {
           </View>
           
           <View style={styles.jobCardActions}>
+            {job.status !== 'urgent' && (
+              <TouchableOpacity
+                style={[styles.userActionButton, { backgroundColor: COLORS.dangerLight }]}
+                onPress={() => {
+                  setModalAction({
+                    type: 'urgentJob',
+                    id: job.id,
+                    title: 'ทำเครื่องหมายด่วน',
+                    message: `ต้องการทำประกาศ "${job.title}" เป็นงานด่วนหรือไม่?`,
+                    onConfirm: async () => {
+                      await updateJobStatus(job.id, 'urgent');
+                      setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'urgent' } : j));
+                    },
+                  });
+                  safeBlur();
+                  setShowConfirmModal(true);
+                }}
+              >
+                <Ionicons name="flash" size={16} color={COLORS.danger} />
+                <Text style={[styles.userActionText, { color: COLORS.danger }]}>ด่วน</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
-              style={[styles.userActionButton, { backgroundColor: job.status === 'active' ? COLORS.warningLight : COLORS.successLight }]}
+              style={[styles.userActionButton, { backgroundColor: job.status === 'active' ? COLORS.warningLight : '#D1FAE5' }]}
               onPress={() => handleToggleJobStatus(job)}
             >
-              <Ionicons name={job.status === 'active' ? "close-circle" : "checkmark-circle"} size={16} color={job.status === 'active' ? COLORS.warning : COLORS.success} />
-              <Text style={[styles.userActionText, { color: job.status === 'active' ? COLORS.warning : COLORS.success }]}>
-                {job.status === 'active' ? 'ปิดประกาศ' : 'เปิดประกาศ'}
+              <Ionicons name={job.status === 'active' || job.status === 'urgent' ? "close-circle" : "checkmark-circle"} size={16} color={job.status !== 'closed' ? COLORS.warning : '#059669'} />
+              <Text style={[styles.userActionText, { color: job.status !== 'closed' ? COLORS.warning : '#059669' }]}>
+                {job.status !== 'closed' ? 'ปิดประกาศ' : 'เปิดประกาศ'}
               </Text>
             </TouchableOpacity>
             
@@ -703,16 +877,88 @@ export default function AdminDashboardScreen() {
         </View>
       ))}
       
-      {jobs.length === 0 && (
+      {filteredJobs.length === 0 && (
         <View style={styles.emptyState}>
           <Ionicons name="briefcase-outline" size={48} color={COLORS.textMuted} />
-          <Text style={styles.emptyStateText}>ไม่มีประกาศ</Text>
+          <Text style={styles.emptyStateText}>
+            {jobSearchQuery ? `ไม่พบประกาศที่ตรงกับ "${jobSearchQuery}"` : 'ไม่มีประกาศ'}
+          </Text>
         </View>
       )}
     </View>
   );
 
-  // Render user profile view (instead of all chats tab)
+  // Standalone chats tab
+  const renderChats = () => (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>การสนทนาทั้งหมด ({conversations.length})</Text>
+
+      {/* Chat viewer */}
+      {selectedChat && (
+        <View style={styles.chatViewer}>
+          <View style={styles.chatViewerHeader}>
+            <Text style={styles.chatViewerTitle}>
+              {selectedChat.participantDetails?.map(p => p.name || p.displayName).join(' ↔ ')}
+            </Text>
+            <TouchableOpacity onPress={() => setSelectedChat(null)}>
+              <Ionicons name="close" size={24} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+          {selectedChat.jobTitle && (
+            <Text style={styles.chatViewerJob}>งาน: {selectedChat.jobTitle}</Text>
+          )}
+          {isLoadingMessages ? (
+            <ActivityIndicator style={{ marginVertical: SPACING.lg }} />
+          ) : (
+            <ScrollView style={styles.chatMessages}>
+              {chatMessages.map((msg, index) => (
+                <View key={index} style={styles.chatMessage}>
+                  <Text style={styles.chatMessageSender}>{msg.senderName}</Text>
+                  <Text style={styles.chatMessageText}>{msg.text}</Text>
+                  <Text style={styles.chatMessageTime}>{formatRelativeTime(msg.createdAt)}</Text>
+                </View>
+              ))}
+              {chatMessages.length === 0 && (
+                <Text style={styles.noMessages}>ไม่มีข้อความ</Text>
+              )}
+            </ScrollView>
+          )}
+        </View>
+      )}
+
+      {conversations.map((chat) => (
+        <View key={chat.id} style={styles.chatCard}>
+          <TouchableOpacity style={styles.chatCardContent} onPress={() => handleViewChat(chat)}>
+            <View style={styles.chatCardInfo}>
+              <Text style={styles.chatParticipants}>
+                {chat.participantDetails?.map(p => p.name || p.displayName).join(' ↔ ') || 'ไม่ทราบ'}
+              </Text>
+              {chat.jobTitle && (
+                <Text style={styles.chatJobTitle}>งาน: {chat.jobTitle}</Text>
+              )}
+              <Text style={styles.chatLastMessage} numberOfLines={1}>
+                {chat.lastMessage || 'ไม่มีข้อความ'}
+              </Text>
+              <Text style={styles.chatDate}>{formatRelativeTime(chat.lastMessageAt)}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.chatDeleteButton} onPress={() => handleDeleteChat(chat)}>
+            <Ionicons name="trash" size={18} color={COLORS.danger} />
+          </TouchableOpacity>
+        </View>
+      ))}
+
+      {conversations.length === 0 && (
+        <View style={styles.emptyState}>
+          <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textMuted} />
+          <Text style={styles.emptyStateText}>ไม่มีการสนทนา</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  // Render user profile view
   const renderUserProfile = () => {
     if (!selectedUserProfile) {
       return (
@@ -954,8 +1200,9 @@ export default function AdminDashboardScreen() {
       {/* Tabs */}
       <View style={styles.tabs}>
         {renderTabButton('overview', 'ภาพรวม', 'grid')}
-        {renderTabButton('users', 'ผู้ใช้', 'people')}
-        {renderTabButton('jobs', 'ประกาศ', 'briefcase')}
+        {renderTabButton('users', `ผู้ใช้(${stats.totalUsers})`, 'people')}
+        {renderTabButton('jobs', `ประกาศ(${stats.totalJobs})`, 'briefcase')}
+        {renderTabButton('chats', `แชท(${stats.totalConversations})`, 'chatbubbles')}
       </View>
 
       {/* Content */}
@@ -969,6 +1216,7 @@ export default function AdminDashboardScreen() {
         {activeTab === 'overview' && renderOverview()}
         {activeTab === 'users' && (selectedUserProfile ? renderUserProfile() : renderUsers())}
         {activeTab === 'jobs' && renderJobs()}
+        {activeTab === 'chats' && renderChats()}
         
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -1173,6 +1421,82 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginTop: SPACING.xs,
     textAlign: 'center',
+  },
+  quickActionBadge: {
+    fontSize: FONT_SIZES.xs,
+    color: '#fff',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 8,
+    marginTop: 2,
+    minWidth: 18,
+    textAlign: 'center',
+    overflow: 'hidden',
+  },
+
+  // Filter Chips
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    marginRight: SPACING.sm,
+    backgroundColor: COLORS.white,
+    gap: 4,
+  },
+  filterChipText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.text,
+    fontWeight: '500',
+  },
+  filterChipCount: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+  },
+
+  // Role Badge
+  roleBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  roleBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  // Staff Type Badge
+  staffTypeBadge: {
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  staffTypeBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7C3AED',
+  },
+
+  // Job extra fields
+  jobLocation: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  jobShiftTime: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.info,
+    fontWeight: '600',
+  },
+  jobStat: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textMuted,
   },
 
   // List Item

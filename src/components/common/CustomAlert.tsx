@@ -1,5 +1,5 @@
 // ============================================
-// CUSTOM ALERT - SweetAlert Style for React Native
+// CUSTOM ALERT v2 — Modern Bottom-Sheet Style
 // ============================================
 
 import React, { useEffect, useRef } from 'react';
@@ -11,10 +11,12 @@ import {
   Modal,
   Animated,
   Dimensions,
+  Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 export type AlertType = 'success' | 'error' | 'warning' | 'info' | 'question';
 
@@ -32,39 +34,50 @@ interface CustomAlertProps {
   buttons?: AlertButton[];
   onClose: () => void;
   icon?: string;
-  autoClose?: number; // Auto close after X milliseconds
+  autoClose?: number;
 }
 
-const ALERT_CONFIG = {
+const ALERT_CONFIG: Record<AlertType, {
+  ionicon: string;
+  color: string;
+  bgColor: string;
+  ringColor: string;
+  defaultTitle: string;
+}> = {
   success: {
-    icon: '✅',
+    ionicon: 'checkmark-circle',
     color: '#10B981',
-    bgColor: '#D1FAE5',
+    bgColor: '#ECFDF5',
+    ringColor: 'rgba(16,185,129,0.15)',
     defaultTitle: 'สำเร็จ!',
   },
   error: {
-    icon: '❌',
+    ionicon: 'close-circle',
     color: '#EF4444',
-    bgColor: '#FEE2E2',
+    bgColor: '#FEF2F2',
+    ringColor: 'rgba(239,68,68,0.15)',
     defaultTitle: 'เกิดข้อผิดพลาด',
   },
   warning: {
-    icon: '⚠️',
+    ionicon: 'warning',
     color: '#F59E0B',
-    bgColor: '#FEF3C7',
+    bgColor: '#FFFBEB',
+    ringColor: 'rgba(245,158,11,0.15)',
     defaultTitle: 'คำเตือน',
   },
   info: {
-    icon: 'ℹ️',
+    ionicon: 'information-circle',
     color: '#3B82F6',
-    bgColor: '#DBEAFE',
+    bgColor: '#EFF6FF',
+    ringColor: 'rgba(59,130,246,0.15)',
     defaultTitle: 'แจ้งเตือน',
   },
   question: {
-    icon: '❓',
+    ionicon: 'help-circle',
     color: '#8B5CF6',
-    bgColor: '#EDE9FE',
-    defaultTitle: 'ยืนยัน',
+    bgColor: '#F5F3FF',
+    ringColor: 'rgba(139,92,246,0.15)',
+    defaultTitle: 'ยืนยันรายการ',
   },
 };
 
@@ -75,89 +88,54 @@ export default function CustomAlert({
   message,
   buttons = [{ text: 'ตกลง' }],
   onClose,
-  icon,
   autoClose,
 }: CustomAlertProps) {
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(80)).current;
+  const scaleAnim = useRef(new Animated.Value(0.92)).current;
+  const iconScaleAnim = useRef(new Animated.Value(0)).current;
 
   const config = ALERT_CONFIG[type];
-  const displayIcon = icon || config.icon;
   const displayTitle = title || config.defaultTitle;
 
   useEffect(() => {
     if (visible) {
       Animated.parallel([
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          friction: 8,
-          tension: 40,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacityAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-      // Auto close if specified
+        Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(slideAnim, { toValue: 0, friction: 9, tension: 55, useNativeDriver: true }),
+        Animated.spring(scaleAnim, { toValue: 1, friction: 9, tension: 55, useNativeDriver: true }),
+      ]).start(() => {
+        Animated.spring(iconScaleAnim, { toValue: 1, friction: 5, tension: 80, useNativeDriver: true }).start();
+      });
       if (autoClose) {
-        const timer = setTimeout(() => {
-          handleClose();
-        }, autoClose);
+        const timer = setTimeout(() => handleClose(), autoClose);
         return () => clearTimeout(timer);
       }
     } else {
-      scaleAnim.setValue(0);
-      opacityAnim.setValue(0);
+      backdropAnim.setValue(0);
+      slideAnim.setValue(80);
+      scaleAnim.setValue(0.92);
+      iconScaleAnim.setValue(0);
     }
   }, [visible]);
 
   const handleClose = (callback?: () => void) => {
     Animated.parallel([
-      Animated.timing(scaleAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
+      Animated.timing(backdropAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 60, duration: 160, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 0.92, duration: 160, useNativeDriver: true }),
     ]).start(() => {
       onClose();
       callback?.();
     });
   };
 
-  const getButtonStyle = (style?: string, index?: number, total?: number) => {
+  const getButtonStyle = (btnStyle?: string, index?: number, total?: number) => {
     const isLast = index === (total ?? 1) - 1;
-    
-    if (style === 'cancel') {
-      return {
-        backgroundColor: '#F3F4F6',
-        textColor: COLORS.textSecondary,
-      };
-    }
-    if (style === 'destructive') {
-      return {
-        backgroundColor: '#FEE2E2',
-        textColor: '#EF4444',
-      };
-    }
-    // Default - use type color for last/primary button
-    if (isLast || total === 1) {
-      return {
-        backgroundColor: config.color,
-        textColor: '#FFFFFF',
-      };
-    }
-    return {
-      backgroundColor: '#F3F4F6',
-      textColor: COLORS.text,
-    };
+    if (btnStyle === 'cancel') return { bg: '#F1F5F9', fg: '#64748B', border: '#E2E8F0' };
+    if (btnStyle === 'destructive') return { bg: '#FEF2F2', fg: '#EF4444', border: '#FCA5A5' };
+    if (isLast || total === 1) return { bg: config.color, fg: '#FFFFFF', border: config.color };
+    return { bg: '#F8FAFC', fg: '#475569', border: '#E2E8F0' };
   };
 
   return (
@@ -165,58 +143,62 @@ export default function CustomAlert({
       visible={visible}
       transparent
       animationType="none"
+      statusBarTranslucent
       onRequestClose={() => handleClose()}
     >
-      <Animated.View style={[styles.overlay, { opacity: opacityAnim }]}>
-        <Animated.View 
+      <Animated.View style={[styles.backdrop, { opacity: backdropAnim }]}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={() => buttons.length === 1 && handleClose()}
+        />
+      </Animated.View>
+
+      <View style={styles.centeredView} pointerEvents="box-none">
+        <Animated.View
           style={[
-            styles.container,
-            { transform: [{ scale: scaleAnim }] }
+            styles.card,
+            { transform: [{ translateY: slideAnim }, { scale: scaleAnim }] },
           ]}
         >
-          {/* Icon Circle */}
-          <View style={[styles.iconCircle, { backgroundColor: config.bgColor }]}>
-            <Text style={styles.icon}>{displayIcon}</Text>
-          </View>
+          <View style={[styles.topAccent, { backgroundColor: config.color }]} />
+          <View style={styles.body}>
+            <Animated.View
+              style={[styles.iconRing, { backgroundColor: config.ringColor, transform: [{ scale: iconScaleAnim }] }]}
+            >
+              <View style={[styles.iconCircle, { backgroundColor: config.bgColor }]}>
+                <Ionicons name={config.ionicon as any} size={38} color={config.color} />
+              </View>
+            </Animated.View>
 
-          {/* Title */}
-          <Text style={[styles.title, { color: config.color }]}>
-            {displayTitle}
-          </Text>
+            <Text style={styles.title}>{displayTitle}</Text>
+            {message ? <Text style={styles.message}>{message}</Text> : null}
 
-          {/* Message */}
-          {message && (
-            <Text style={styles.message}>{message}</Text>
-          )}
+            <View style={styles.divider} />
 
-          {/* Buttons */}
-          <View style={[
-            styles.buttonContainer,
-            buttons.length > 2 && styles.buttonContainerVertical
-          ]}>
-            {buttons.map((button, index) => {
-              const btnStyle = getButtonStyle(button.style, index, buttons.length);
-              return (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.button,
-                    buttons.length <= 2 && styles.buttonHorizontal,
-                    buttons.length > 2 && styles.buttonVertical,
-                    { backgroundColor: btnStyle.backgroundColor }
-                  ]}
-                  onPress={() => handleClose(button.onPress)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.buttonText, { color: btnStyle.textColor }]}>
-                    {button.text}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+            <View style={[styles.buttonRow, buttons.length > 2 && styles.buttonColumn]}>
+              {buttons.map((btn, idx) => {
+                const bs = getButtonStyle(btn.style, idx, buttons.length);
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[
+                      styles.btn,
+                      buttons.length <= 2 && { flex: 1 },
+                      buttons.length > 2 && { width: '100%' },
+                      { backgroundColor: bs.bg, borderColor: bs.border },
+                    ]}
+                    onPress={() => handleClose(btn.onPress)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.btnText, { color: bs.fg }]}>{btn.text}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         </Animated.View>
-      </Animated.View>
+      </View>
     </Modal>
   );
 }
@@ -290,69 +272,94 @@ export const createAlert = {
 };
 
 const styles = StyleSheet.create({
-  overlay: {
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+  },
+  centeredView: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.lg,
+    paddingHorizontal: 28,
   },
-  container: {
+  card: {
+    width: '100%',
+    maxWidth: 360,
     backgroundColor: '#FFFFFF',
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.xl,
-    width: width * 0.85,
-    maxWidth: 340,
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 32,
+    elevation: 16,
+  },
+  topAccent: {
+    height: 5,
+    width: '100%',
+  },
+  body: {
+    padding: 28,
     alignItems: 'center',
-    ...SHADOWS.lg,
+  },
+  iconRing: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    marginTop: 4,
   },
   iconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  icon: {
-    fontSize: 40,
   },
   title: {
-    fontSize: FONT_SIZES.xl,
+    fontSize: 20,
     fontWeight: '700',
+    color: '#0F172A',
     textAlign: 'center',
-    marginBottom: SPACING.sm,
+    marginBottom: 8,
+    letterSpacing: -0.3,
   },
   message: {
-    fontSize: FONT_SIZES.md,
-    color: COLORS.textSecondary,
+    fontSize: 14,
+    color: '#64748B',
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: SPACING.lg,
+    marginBottom: 4,
   },
-  buttonContainer: {
+  divider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    width: '100%',
+    marginVertical: 20,
+  },
+  buttonRow: {
     flexDirection: 'row',
-    gap: SPACING.sm,
+    gap: 10,
     width: '100%',
   },
-  buttonContainerVertical: {
+  buttonColumn: {
     flexDirection: 'column',
+    gap: 8,
   },
-  button: {
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.lg,
-    borderRadius: BORDER_RADIUS.lg,
+  btn: {
+    paddingVertical: 13,
+    paddingHorizontal: 20,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1.5,
+    minHeight: 48,
   },
-  buttonHorizontal: {
-    flex: 1,
-  },
-  buttonVertical: {
-    width: '100%',
-  },
-  buttonText: {
-    fontSize: FONT_SIZES.md,
+  btnText: {
+    fontSize: 15,
     fontWeight: '600',
+    letterSpacing: 0.1,
   },
 });

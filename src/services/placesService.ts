@@ -29,6 +29,7 @@ export interface PlaceResult {
   lat?: number;
   lng?: number;
   type?: string;
+  place_id?: string;
 }
 
 export interface PlacePrediction {
@@ -74,10 +75,9 @@ const GOOGLE_PLACES_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/de
 export async function searchPlacesGoogle(query: string): Promise<PlaceResult[]> {
   if (!query || query.length < 2) return [];
   
-  // On Web, Google Places API has CORS issues - use local database only
+  // On Web, Google Places API has CORS issues — return empty and let user type freely.
   if (Platform.OS === 'web') {
-    console.log('[Places] Using local database (Web - CORS limitation)');
-    return searchThaiHospitals(query);
+    return [];
   }
   
   try {
@@ -86,7 +86,7 @@ export async function searchPlacesGoogle(query: string): Promise<PlaceResult[]> 
       key: GOOGLE_PLACES_API_KEY,
       language: 'th',
       components: 'country:th',
-      types: 'hospital|health|doctor|pharmacy|establishment',
+      // No 'types' filter — returns all: addresses, house numbers, establishments, landmarks
     });
 
     const response = await fetch(`${GOOGLE_PLACES_AUTOCOMPLETE_URL}?${params}`);
@@ -94,35 +94,35 @@ export async function searchPlacesGoogle(query: string): Promise<PlaceResult[]> 
 
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
       console.warn('Google Places API error:', data.status, data.error_message);
-      // Fallback to local database
-      return searchThaiHospitals(query);
+      return [];
     }
 
     if (!data.predictions || data.predictions.length === 0) {
-      return searchThaiHospitals(query);
+      return [];
     }
 
-    // Get details for each prediction to extract province/district
-    const results: PlaceResult[] = await Promise.all(
-      data.predictions.slice(0, 5).map(async (prediction: any) => {
-        const details = await getPlaceDetailsGoogle(prediction.place_id);
-        return {
-          name: prediction.structured_formatting?.main_text || prediction.description,
-          province: details?.province || '',
-          district: details?.district || '',
-          address: prediction.description,
-          lat: details?.lat,
-          lng: details?.lng,
-          type: 'google',
-        };
-      })
-    );
+    // Extract province/district from prediction terms (no extra API calls needed)
+    const results: PlaceResult[] = data.predictions.slice(0, 7).map((prediction: any) => {
+      const terms: { value: string }[] = prediction.terms || [];
+      // terms order: [name, ..., district, province, "ประเทศไทย"]
+      const province = terms.length >= 2 ? terms[terms.length - 2]?.value || '' : '';
+      const district = terms.length >= 3 ? terms[terms.length - 3]?.value || '' : '';
+      return {
+        name: prediction.structured_formatting?.main_text || prediction.description,
+        province,
+        district,
+        address: prediction.description,
+        lat: undefined,
+        lng: undefined,
+        type: 'google',
+        place_id: prediction.place_id,
+      };
+    });
 
     return results;
   } catch (error) {
     console.error('Error searching Google Places:', error);
-    // Fallback to local database
-    return searchThaiHospitals(query);
+    return [];
   }
 }
 

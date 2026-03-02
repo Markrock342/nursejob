@@ -3,7 +3,6 @@
 // ============================================
 
 import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
-import * as Notifications from 'expo-notifications';
 import { useAuth } from './AuthContext';
 import {
   registerForPushNotificationsAsync,
@@ -18,7 +17,7 @@ import {
 // ==========================================
 interface NotificationContextType {
   expoPushToken: string | null;
-  notification: Notifications.Notification | null;
+  notification: any | null;
   hasPermission: boolean;
   registerForNotifications: () => Promise<void>;
   clearNotifications: () => Promise<void>;
@@ -39,11 +38,11 @@ interface NotificationProviderProps {
 export function NotificationProvider({ children }: NotificationProviderProps) {
   const { user } = useAuth();
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [notification, setNotification] = useState<Notifications.Notification | null>(null);
+  const [notification, setNotification] = useState<any | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
 
-  const notificationListener = useRef<ReturnType<typeof addNotificationReceivedListener>>();
-  const responseListener = useRef<ReturnType<typeof addNotificationResponseListener>>();
+  const notificationListener = useRef<any>();
+  const responseListener = useRef<any>();
 
   // Register for push notifications when user logs in
   useEffect(() => {
@@ -54,7 +53,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
   // Set up notification listeners
   useEffect(() => {
-    // Listen for incoming notifications
+    // Listen for incoming notifications (service will return a safe no-op if unavailable)
     notificationListener.current = addNotificationReceivedListener((notification) => {
       console.log('Notification received:', notification);
       setNotification(notification);
@@ -67,11 +66,11 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     });
 
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
+      if (notificationListener.current?.remove) {
+        try { notificationListener.current.remove(); } catch {}
       }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
+      if (responseListener.current?.remove) {
+        try { responseListener.current.remove(); } catch {}
       }
     };
   }, []);

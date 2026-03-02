@@ -13,11 +13,12 @@ import {
   Platform,
   Vibration,
 } from 'react-native';
-import { Audio } from 'expo-av';
+// Removed `expo-av` usage (replaced with vibration + web audio fallback)
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from './AuthContext';
 import { subscribeToConversations } from '../services/chatService';
-import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../theme';
+import { sendMessageNotification } from '../services/notificationService';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../theme';
 import { Conversation } from '../types';
 
 interface ChatNotificationContextType {
@@ -101,14 +102,14 @@ function GlobalToast({ visible, senderName, message, onHide, onPress }: ToastPro
         activeOpacity={0.9}
       >
         <View style={styles.toastIcon}>
-          <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.white} />
+          <Ionicons name="chatbubble-ellipses" size={22} color="#FFFFFF" />
         </View>
         <View style={styles.toastTextContainer}>
           <Text style={styles.toastSender} numberOfLines={1}>{senderName}</Text>
           <Text style={styles.toastMessage} numberOfLines={2}>{message}</Text>
         </View>
         <TouchableOpacity onPress={hideToast} style={styles.toastCloseBtn}>
-          <Ionicons name="close" size={20} color={COLORS.white} />
+          <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
         </TouchableOpacity>
       </TouchableOpacity>
     </Animated.View>
@@ -142,21 +143,10 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
         // Vibrate pattern on mobile: wait, vibrate, wait, vibrate (more noticeable)
         Vibration.vibrate([0, 150, 100, 150]);
         
-        // Try to set audio mode and play sound via expo-av
-        try {
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS: false,
-            playsInSilentModeIOS: true,
-            staysActiveInBackground: false,
-            shouldDuckAndroid: true,
-          });
-          
-          // Use a simple beep sound by creating one programmatically
-          // For now, rely on vibration which is more reliable
-        } catch (audioError) {
-          // Audio not available, vibration still works
-          console.log('Audio mode setup failed, using vibration');
-        }
+        // We removed `expo-av` to avoid native-module issues in Expo Go.
+        // For mobile devices we rely on vibration (most reliable across devices).
+        // If you need richer audio notifications, install and use `expo-audio` or a
+        // development build with the native module included.
       } else {
         // Web Audio API for web
         try {
@@ -220,13 +210,16 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
             const senderName = otherParticipant?.name || 'ผู้ใช้';
             
             // Show toast
+            const msgText = conv.lastMessage || 'ส่งข้อความใหม่';
             setToastData({
               senderName,
-              message: conv.lastMessage || 'ส่งข้อความใหม่',
+              message: msgText,
               conversationId: conv.id,
             });
             setShowToast(true);
             playSound();
+            // Also fire a push notification (works in background)
+            sendMessageNotification(senderName, msgText, conv.id).catch(() => {});
           }
         }
 
@@ -289,16 +282,18 @@ const styles = StyleSheet.create({
   toastContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a2e',
-    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: '#0F172A',
+    borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: 'rgba(14,165,233,0.3)',
     ...SHADOWS.lg,
   },
   toastIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#0EA5E9',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.sm,
@@ -307,17 +302,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   toastSender: {
-    fontSize: FONT_SIZES.md,
+    fontSize: FONT_SIZES.sm,
     fontWeight: '700',
-    color: COLORS.white,
+    color: '#FFFFFF',
     marginBottom: 2,
   },
   toastMessage: {
-    fontSize: FONT_SIZES.sm,
-    color: 'rgba(255,255,255,0.9)',
+    fontSize: FONT_SIZES.xs,
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 16,
   },
   toastCloseBtn: {
-    padding: 8,
+    padding: 6,
     marginLeft: SPACING.xs,
   },
 });

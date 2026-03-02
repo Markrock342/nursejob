@@ -31,7 +31,9 @@ export type NotificationType =
   | 'new_applicant'     // มีคนสมัครงาน (สำหรับโรงพยาบาล)
   | 'job_expired'       // งานหมดอายุ
   | 'profile_reminder'  // เตือนให้อัพเดทโปรไฟล์
-  | 'system';           // ข้อความจากระบบ
+  | 'system'            // ข้อความจากระบบ
+  | 'license_approved'  // ใบประกอบวิชาชีพผ่าน
+  | 'license_rejected'; // ใบประกอบวิชาชีพไม่ผ่าน
 
 export interface Notification {
   id: string;
@@ -268,4 +270,27 @@ export async function notifyNewMessage(
     messagePreview.length > 50 ? messagePreview.substring(0, 50) + '...' : messagePreview,
     { conversationId }
   );
+}
+
+// Helper: แจ้งเตือนผลการตรวจสอบใบประกอบวิชาชีพ
+export async function notifyLicenseVerification(
+  userId: string,
+  status: 'approved' | 'rejected',
+  reason?: string
+): Promise<void> {
+  if (status === 'approved') {
+    await createNotification(
+      userId,
+      'license_approved',
+      'ใบประกอบวิชาชีพผ่านการตรวจสอบ',
+      'ใบประกอบวิชาชีพของคุณได้รับการอนุมัติแล้ว สามารถใช้งานระบบได้เต็มรูปแบบ',
+    );
+  } else {
+    await createNotification(
+      userId,
+      'license_rejected',
+      'ใบประกอบวิชาชีพไม่ผ่านการตรวจสอบ',
+      `ใบประกอบวิชาชีพของคุณไม่ผ่านการตรวจสอบ${reason ? ': ' + reason : ''} กรุณาตรวจสอบและส่งใหม่อีกครั้ง`,
+    );
+  }
 }

@@ -16,13 +16,13 @@ export interface ColorPalette {
 export const PALETTES: ColorPalette[] = [
   {
     id: 'default-blue',
-    name: 'Nurse Blue (Default)',
-    primary: '#4A90D9',
-    primaryLight: '#7EB3F1',
-    primaryDark: '#2E6BB0',
-    primaryBackground: '#E8F4FF',
-    secondary: '#5BC0BE',
-    accent: '#FF6B6B',
+    name: 'NurseGo Sky (Default)',
+    primary: '#0EA5E9',
+    primaryLight: '#38BDF8',
+    primaryDark: '#0284C7',
+    primaryBackground: '#F0F9FF',
+    secondary: '#10B981',
+    accent: '#F59E0B',
   },
   {
     id: 'teal-serene',

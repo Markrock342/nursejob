@@ -9,18 +9,19 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   RefreshControl,
   SafeAreaView,
   Modal,
   Linking,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Loading, EmptyState, Avatar, KittenButton as Button } from '../../components/common';
+import { Loading, EmptyState, Avatar, KittenButton as Button, ModalContainer } from '../../components/common';
+import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import {
   getHospitalApplications,
   updateApplicationStatus,
@@ -57,6 +58,7 @@ const statusOptions: { status: ContactStatus; label: string; icon: string }[] = 
 export default function ApplicantsScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { colors } = useTheme();
   const [contacts, setContacts] = useState<ApplicantDetails[]>([]);
   const [filteredContacts, setFilteredContacts] = useState<ApplicantDetails[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -64,6 +66,9 @@ export default function ApplicantsScreen() {
   const [selectedFilter, setSelectedFilter] = useState<ContactStatus | 'all'>('all');
   const [selectedContact, setSelectedContact] = useState<ApplicantDetails | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileContact, setProfileContact] = useState<ApplicantDetails | null>(null);
+  const [alert, setAlert] = useState<AlertState>(initialAlertState);
 
   const loadContacts = useCallback(async () => {
     if (!user?.uid) return;
@@ -118,47 +123,23 @@ export default function ApplicantsScreen() {
       setShowStatusModal(false);
       setSelectedContact(null);
       
-      Alert.alert('สำเร็จ', `อัพเดทสถานะเป็น "${getStatusLabel(status)}" แล้ว`);
+      setAlert(createAlert.success('สำเร็จ', `อัปเดทสถานะเป็น "${getStatusLabel(status)}" แล้ว`) as AlertState);
     } catch (error) {
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถอัพเดทสถานะได้');
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', 'ไม่สามารถอัปเดทสถานะได้') as AlertState);
     }
   };
 
   const handleCall = (phone?: string) => {
     if (!phone) {
-      Alert.alert('ไม่มีเบอร์โทร', 'ผู้ติดต่อไม่ได้ระบุเบอร์โทรศัพท์');
+      setAlert(createAlert.warning('ไม่มีเบอร์โทร', 'ผู้ติดต่อไม่ได้ระบุเบอร์โทรศัพท์') as AlertState);
       return;
     }
     Linking.openURL(`tel:${phone}`);
   };
 
-  const handleLineChat = (phone?: string) => {
-    if (!phone) {
-      Alert.alert('ไม่มีเบอร์โทร', 'ไม่สามารถเปิด Line ได้');
-      return;
-    }
-    // Open LINE with phone number
-    Linking.openURL(`https://line.me/ti/p/~${phone}`);
-  };
-
   const handleViewProfile = (contact: ApplicantDetails) => {
-    const profile = contact.userProfile;
-    Alert.alert(
-      profile?.displayName || contact.userName || 'ผู้สนใจ',
-      `📞 โทร: ${contact.userPhone || profile?.phone || '-'}
-📧 อีเมล: ${profile?.email || '-'}
-🎖️ เลขใบประกอบวิชาชีพ: ${profile?.licenseNumber || '-'}
-💼 ประสบการณ์: ${profile?.experience || 0} ปี
-
-${contact.message ? `\n💬 ข้อความ:\n${contact.message}` : ''}`,
-      [
-        { text: 'ปิด' },
-        { 
-          text: '📞 โทร', 
-          onPress: () => handleCall(contact.userPhone || profile?.phone) 
-        },
-      ]
-    );
+    setProfileContact(contact);
+    setShowProfileModal(true);
   };
 
   if (isLoading) {
@@ -423,6 +404,88 @@ ${contact.message ? `\n💬 ข้อความ:\n${contact.message}` : ''}`,
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* ─── Profile Detail Modal ─────────────────── */}
+      <ModalContainer
+        visible={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        title="ข้อมูลผู้สมัคร"
+      >
+        {profileContact ? (() => {
+          const p = profileContact.userProfile;
+          const phone = profileContact.userPhone || p?.phone;
+          return (
+            <ScrollView style={{ width: '100%' }} showsVerticalScrollIndicator={false}>
+              {/* Avatar + Name */}
+              <View style={styles.profileHeader}>
+                <Avatar
+                  uri={p?.photoURL}
+                  name={profileContact.userName || p?.displayName || 'ไม่ระบุชื่อ'}
+                  size={72}
+                />
+                <Text style={styles.profileName}>
+                  {profileContact.userName || p?.displayName || 'ไม่ระบุชื่อ'}
+                </Text>
+                {p?.licenseNumber ? (
+                  <View style={styles.licenseBadge}>
+                    <Ionicons name="ribbon" size={13} color={COLORS.success} />
+                    <Text style={styles.licenseText}>มีใบประกอบวิชาชีพ</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Info rows */}
+              <View style={styles.profileInfoCard}>
+                {[
+                  { icon: 'call-outline', label: 'เบอร์โทร', value: phone || '-', color: COLORS.success },
+                  { icon: 'mail-outline', label: 'อีเมล', value: p?.email || '-', color: undefined },
+                  { icon: 'ribbon-outline', label: 'เลขใบประกอบ', value: p?.licenseNumber || '-', color: undefined },
+                  { icon: 'briefcase-outline', label: 'ประสบการณ์', value: `${p?.experience || 0} ปี`, color: undefined },
+                ].map((row, i) => (
+                  <View key={i} style={[styles.profileInfoRow, i > 0 && { borderTopWidth: 1, borderTopColor: COLORS.border }]}>
+                    <Ionicons name={row.icon as any} size={16} color={row.color || COLORS.textSecondary} />
+                    <Text style={styles.profileInfoLabel}>{row.label}</Text>
+                    <Text style={[styles.profileInfoValue, row.color ? { color: row.color, fontWeight: '600' } : {}]}>
+                      {row.value}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Message */}
+              {profileContact.message ? (
+                <View style={styles.profileMessageBox}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <Ionicons name="chatbubble-outline" size={15} color={COLORS.primary} />
+                    <Text style={styles.profileMessageLabel}>ข้อความจากผู้สมัคร</Text>
+                  </View>
+                  <Text style={styles.profileMessageText}>{profileContact.message}</Text>
+                </View>
+              ) : null}
+
+              {/* Action buttons */}
+              <View style={styles.profileActions}>
+                <TouchableOpacity
+                  style={[styles.profileActionBtn, { backgroundColor: COLORS.success, opacity: phone ? 1 : 0.4 }]}
+                  onPress={() => { setShowProfileModal(false); handleCall(phone); }}
+                  disabled={!phone}
+                >
+                  <Ionicons name="call" size={18} color="#fff" />
+                  <Text style={styles.profileActionText}>โทรเลย</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.profileActionBtn, { backgroundColor: COLORS.surface, borderWidth: 1.5, borderColor: COLORS.border }]}
+                  onPress={() => setShowProfileModal(false)}
+                >
+                  <Text style={[styles.profileActionText, { color: COLORS.textSecondary }]}>ปิด</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          );
+        })() : null}
+      </ModalContainer>
+
+      <CustomAlert {...alert} onClose={() => setAlert(initialAlertState)} />
     </SafeAreaView>
   );
 }
@@ -672,6 +735,96 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.md,
     color: COLORS.textSecondary,
     fontWeight: '500',
+  },
+
+  // Profile Modal
+  profileHeader: {
+    alignItems: 'center',
+    paddingVertical: SPACING.lg,
+    gap: 8,
+  },
+  profileName: {
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  licenseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.success + '18',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 99,
+  },
+  licenseText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '600',
+    color: COLORS.success,
+  },
+  profileInfoCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.md,
+    overflow: 'hidden',
+  },
+  profileInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  profileInfoLabel: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    width: 100,
+  },
+  profileInfoValue: {
+    flex: 1,
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.text,
+    textAlign: 'right',
+  },
+  profileMessageBox: {
+    backgroundColor: COLORS.primaryBackground,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  profileMessageLabel: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  profileMessageText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.text,
+    lineHeight: 20,
+  },
+  profileActions: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
+  profileActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    borderRadius: BORDER_RADIUS.lg,
+    gap: 6,
+  },
+  profileActionText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: '#fff',
   },
 });
 

@@ -37,37 +37,37 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
     {
       key: 'photo',
       label: 'รูปโปรไฟล์',
-      icon: '📷',
+      icon: 'camera-outline',
       completed: Boolean(user.photoURL),
     },
     {
       key: 'name',
       label: 'ชื่อ-สกุล',
-      icon: '👤',
+      icon: 'person-outline',
       completed: Boolean(user.displayName && user.displayName.length > 3),
     },
     {
       key: 'phone',
       label: 'เบอร์โทร',
-      icon: '📱',
+      icon: 'call-outline',
       completed: Boolean(user.phone),
     },
     {
       key: 'email',
       label: 'อีเมล',
-      icon: '📧',
+      icon: 'mail-outline',
       completed: Boolean(user.email),
     },
     {
       key: 'license',
       label: 'ใบประกอบวิชาชีพ',
-      icon: '📄',
+      icon: 'ribbon-outline',
       completed: Boolean(user.licenseNumber),
     },
     {
       key: 'verified',
       label: 'ยืนยันตัวตน',
-      icon: '✅',
+      icon: 'shield-checkmark-outline',
       completed: Boolean(user.isVerified),
     },
   ];
@@ -80,7 +80,8 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
   if (progressPercent === 100) {
     return (
       <View style={styles.completedContainer}>
-        <Text style={styles.completedText}>✅ โปรไฟล์สมบูรณ์แล้ว!</Text>
+        <Ionicons name="checkmark-circle" size={18} color="#059669" style={{ marginRight: 6 }} />
+        <Text style={styles.completedText}>โปรไฟล์สมบูรณ์แล้ว</Text>
       </View>
     );
   }
@@ -125,7 +126,11 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
               item.completed && styles.itemCompleted,
             ]}
           >
-            <Text style={styles.itemIcon}>{item.completed ? '✓' : item.icon}</Text>
+            <Ionicons
+              name={item.completed ? 'checkmark' : item.icon as any}
+              size={16}
+              color={item.completed ? '#10B981' : '#9CA3AF'}
+            />
           </View>
         ))}
       </View>
@@ -133,8 +138,9 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
       {/* Suggestion */}
       {nextIncomplete && (
         <View style={styles.suggestion}>
+          <Ionicons name={nextIncomplete.icon as any} size={15} color={COLORS.primary} style={{ marginRight: 6 }} />
           <Text style={styles.suggestionText}>
-            {nextIncomplete.icon} เพิ่ม{nextIncomplete.label}เพื่อโปรไฟล์ที่ดีขึ้น
+            เพิ่ม{nextIncomplete.label}เพื่อโปรไฟล์ที่ดีขึ้น
           </Text>
           <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
         </View>
@@ -159,7 +165,9 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   completedText: {
     fontSize: FONT_SIZES.md,
@@ -222,9 +230,6 @@ const styles = StyleSheet.create({
   itemCompleted: {
     backgroundColor: '#D1FAE5',
     borderColor: '#10B981',
-  },
-  itemIcon: {
-    fontSize: 14,
   },
   suggestion: {
     flexDirection: 'row',

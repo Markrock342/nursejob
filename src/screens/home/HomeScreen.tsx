@@ -1,8 +1,23 @@
-// ============================================
+﻿// ============================================
 // HOME SCREEN - Production Ready
 // ============================================
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useLocation } from '../../utils/useLocation';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+// Helper: คำนวณระยะทางระหว่าง 2 จุด (Haversine)
+function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (v: number) => (v * Math.PI) / 180;
+  const R = 6371; // km
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 import {
   View,
   Text,
@@ -16,6 +31,8 @@ import {
   Dimensions,
   Animated,
   Platform,
+  ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -241,10 +258,10 @@ const urgentStyles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.border,
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   dotActive: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#0EA5E9',
     width: 18,
   },
   scrollContent: {
@@ -323,6 +340,9 @@ const urgentStyles = StyleSheet.create({
 // Component
 // ============================================
 export default function HomeScreen({ navigation }: Props) {
+    // Nearby location
+    const { location, loading: locationLoading, error: locationError, getLocation } = useLocation();
+    const [nearbyMode, setNearbyMode] = useState(false); // true = ใกล้ฉัน
   // Auth context
   const { user, requireAuth } = useAuth();
   const toast = useToast();
@@ -333,12 +353,16 @@ export default function HomeScreen({ navigation }: Props) {
   const [jobs, setJobs] = useState<JobPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const lastDocRef = useRef<any>(null);
+  const hasMoreRef = useRef(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [showExpiryPopup, setShowExpiryPopup] = useState(false);
   const [expiringPosts, setExpiringPosts] = useState<JobPost[]>([]);
+  const [showNearbyPromo, setShowNearbyPromo] = useState(false);
   const [filters, setFilters] = useState<JobFilters>({
     province: '',
     district: '',
@@ -357,22 +381,55 @@ export default function HomeScreen({ navigation }: Props) {
     return jobs.filter(job => job.status === 'urgent').slice(0, 5);
   }, [jobs]);
 
-  // Fetch jobs
-  const fetchJobs = useCallback(async (showRefresh = false) => {
-    if (showRefresh) setIsRefreshing(true);
-    else setIsLoading(true);
+  // Fetch location silently on mount — enables distance badges on all job cards
+  useEffect(() => {
+    if (!location) {
+      getLocation().catch(() => {}); // silent fail — if denied, distances just won't show
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch jobs (infinite scroll + nearby)
+  const fetchJobs = useCallback(async (showRefresh = false, loadMore = false) => {
+    if (loadMore && !hasMoreRef.current) return;
+    if (loadMore) setIsLoadingMore(true);
+    else if (showRefresh) { setIsRefreshing(true); lastDocRef.current = null; hasMoreRef.current = true; }
+    else { setIsLoading(true); lastDocRef.current = null; hasMoreRef.current = true; }
 
     try {
-      const fetchedJobs = await getJobs(filters);
-      setJobs(fetchedJobs);
+      let fetchedJobs: JobPost[];
+
+      if (nearbyMode && location) {
+        const { getJobsNearby } = await import('../../services/jobService');
+        fetchedJobs = await getJobsNearby(location.latitude, location.longitude, 20);
+        lastDocRef.current = null;
+        hasMoreRef.current = false;
+        setJobs(fetchedJobs);
+      } else {
+        const cursor = loadMore ? lastDocRef.current : null;
+        const result = await getJobs(filters, cursor);
+        fetchedJobs = result.jobs;
+        lastDocRef.current = result.lastDoc;
+        hasMoreRef.current = result.lastDoc !== null && fetchedJobs.length > 0;
+
+        if (loadMore) {
+          setJobs(prev => {
+            const ids = new Set(prev.map(j => j.id));
+            return [...prev, ...fetchedJobs.filter(j => !ids.has(j.id))];
+          });
+        } else {
+          setJobs(fetchedJobs);
+        }
+      }
     } catch (error) {
       console.error('Error fetching jobs:', error);
       Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถโหลดงานได้ กรุณาลองใหม่');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
+      setIsLoadingMore(false);
     }
-  }, [filters]);
+  }, [filters, nearbyMode, location]);
 
   // Initial load
   useEffect(() => {
@@ -408,6 +465,33 @@ export default function HomeScreen({ navigation }: Props) {
 
     return () => unsubscribe();
   }, [user?.uid]);
+
+  // Check for expiring posts on app load
+  useEffect(() => {
+    // Show nearby job alert promo popup once per install (only for logged-in users)
+    const checkNearbyPromo = async () => {
+      if (!user?.uid) return;
+      // If already set up, never show
+      if (user.nearbyJobAlert?.enabled) return;
+      try {
+        const shown = await AsyncStorage.getItem(`nearby_promo_shown_${user.uid}`);
+        if (!shown) {
+          setTimeout(() => setShowNearbyPromo(true), 1800);
+        }
+      } catch (_) {}
+    };
+    checkNearbyPromo();
+  }, [user?.uid]);
+
+  const dismissNearbyPromo = useCallback(async (navigate = false) => {
+    setShowNearbyPromo(false);
+    if (user?.uid) {
+      await AsyncStorage.setItem(`nearby_promo_shown_${user.uid}`, '1');
+    }
+    if (navigate) {
+      (navigation as any).navigate('NearbyJobAlert');
+    }
+  }, [user?.uid, navigation]);
 
   // Check for expiring posts on app load
   useEffect(() => {
@@ -615,6 +699,18 @@ export default function HomeScreen({ navigation }: Props) {
     return count;
   }, [filters]);
 
+  // Compute distance for each job (if user location is available)
+  const jobsWithDistance = useMemo(() => {
+    if (!location) return jobs;
+    return jobs.map(job => {
+      const jobLat = (job as any).lat ?? job.location?.lat ?? job.location?.coordinates?.lat;
+      const jobLng = (job as any).lng ?? job.location?.lng ?? job.location?.coordinates?.lng;
+      if (!jobLat || !jobLng) return job;
+      const dist = getDistanceKm(location.latitude, location.longitude, jobLat, jobLng);
+      return { ...job, _distanceKm: Math.round(dist * 10) / 10 } as JobPost;
+    });
+  }, [jobs, location]);
+
   // Render job item
   const renderJobItem = ({ item }: { item: JobPost }) => (
     <JobCard
@@ -628,12 +724,38 @@ export default function HomeScreen({ navigation }: Props) {
   // Render header
   const renderHeader = () => (
     <View style={styles.listHeader}>
+      {/* Nearby Job Alert Banner — always visible until user sets up */}
+      {user && !user.nearbyJobAlert?.enabled && (
+        <TouchableOpacity
+          style={styles.nearbyBanner}
+          onPress={() => (navigation as any).navigate('NearbyJobAlert')}
+          activeOpacity={0.85}
+        >
+          <View style={styles.nearbyBannerLeft}>
+            <View style={styles.nearbyBannerIcon}>
+              <Ionicons name="location" size={20} color="#FFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nearbyBannerTitle}>งานใกล้ฉัน</Text>
+              <Text style={styles.nearbyBannerSub}>
+                เปิดรับแจ้งเตือนเมื่อมีงานในรัศมีของคุณ
+              </Text>
+            </View>
+          </View>
+          <View style={styles.nearbyBannerCTA}>
+            <Text style={styles.nearbyBannerCTAText}>ตั้งค่า</Text>
+            <Ionicons name="chevron-forward" size={14} color="#0EA5E9" />
+          </View>
+        </TouchableOpacity>
+      )}
       {/* Urgent Jobs Banner - Premium Placement */}
       {urgentJobs.length > 0 && (
-        <UrgentJobsBanner 
-          urgentJobs={urgentJobs} 
-          onPress={handleJobPress} 
-        />
+        <View style={{ paddingHorizontal: SPACING.md }}>
+          <UrgentJobsBanner 
+            urgentJobs={urgentJobs} 
+            onPress={handleJobPress} 
+          />
+        </View>
       )}
 
       {/* Quick Filters */}
@@ -656,6 +778,18 @@ export default function HomeScreen({ navigation }: Props) {
           label="✓ ยืนยันตัวตน"
           selected={filters.verifiedOnly}
           onPress={() => setFilters({ ...filters, verifiedOnly: !filters.verifiedOnly })}
+        />
+        <Chip
+          label="📍 ใกล้ฉัน"
+          selected={nearbyMode}
+          onPress={async () => {
+            if (!nearbyMode) {
+              await getLocation();
+              setNearbyMode(true);
+            } else {
+              setNearbyMode(false);
+            }
+          }}
         />
         <Chip
           label="🏠 ดูแลที่บ้าน"
@@ -699,9 +833,10 @@ export default function HomeScreen({ navigation }: Props) {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: '#0EA5E9' }]} edges={['top']}>
+      <StatusBar backgroundColor="#0EA5E9" barStyle="light-content" translucent={false} />
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary }]}>
+      <View style={[styles.header, { backgroundColor: '#0EA5E9' }]}>
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.greeting}>
@@ -717,7 +852,7 @@ export default function HomeScreen({ navigation }: Props) {
               style={styles.notificationButton}
               onPress={() => (navigation as any).navigate('Notifications')}
             >
-              <Ionicons name="notifications-outline" size={24} color={COLORS.text} />
+              <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
               {notificationCount > 0 && (
                 <View style={styles.notificationBadge}>
                   <Text style={styles.notificationBadgeText}>
@@ -744,17 +879,17 @@ export default function HomeScreen({ navigation }: Props) {
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <View style={styles.searchBar}>
-            <Ionicons name="search-outline" size={20} color={colors.textMuted} style={styles.searchIcon} />
+            <Ionicons name="search-outline" size={20} color={'#94A3B8'} style={styles.searchIcon} />
             <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
+              style={[styles.searchInput, { color: '#0F172A' }]}
               placeholder="ค้นหาเวร, แผนก, สถานที่..."
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={'#94A3B8'}
               value={searchQuery}
               onChangeText={handleSearch}
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => handleSearch('')}>
-                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                <Ionicons name="close-circle" size={20} color={'#94A3B8'} />
               </TouchableOpacity>
             )}
           </View>
@@ -762,7 +897,7 @@ export default function HomeScreen({ navigation }: Props) {
             style={[styles.filterButton, activeFilterCount > 0 && styles.filterButtonActive]}
             onPress={() => setShowFilters(true)}
           >
-            <Ionicons name="options-outline" size={22} color={activeFilterCount > 0 ? COLORS.white : COLORS.primary} />
+            <Ionicons name="options-outline" size={22} color={activeFilterCount > 0 ? '#FFFFFF' : '#0EA5E9'} />
             {activeFilterCount > 0 && (
               <View style={styles.filterBadge}>
                 <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
@@ -773,11 +908,12 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
 
       {/* Job List */}
+      <View style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
       {isLoading ? (
         <Loading text="กำลังโหลดงาน..." />
       ) : (
         <FlatList
-          data={jobs}
+          data={jobsWithDistance}
           renderItem={renderJobItem}
           keyExtractor={(item) => item.id}
           ListHeaderComponent={renderHeader}
@@ -794,14 +930,30 @@ export default function HomeScreen({ navigation }: Props) {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => fetchJobs(true)}
-              colors={[COLORS.primary]}
-              tintColor={COLORS.primary}
+              colors={['#0EA5E9']}
+              tintColor={'#0EA5E9'}
             />
           }
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          onEndReached={() => fetchJobs(false, true)}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            isLoadingMore ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#0EA5E9" />
+                <Text style={{ color: '#94A3B8', fontSize: 12, marginTop: 6 }}>โหลดเพิ่มเติม...</Text>
+              </View>
+            ) : jobs.length > 0 && !hasMoreRef.current ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <Text style={{ color: '#CBD5E1', fontSize: 12 }}>— แสดงทั้งหมด {jobs.length} รายการ —</Text>
+              </View>
+            ) : null
+          }
         />
       )}
+
+      </View>
 
       {/* Filter Modal */}
       <FilterModal
@@ -811,7 +963,60 @@ export default function HomeScreen({ navigation }: Props) {
         setFilters={setFilters}
         onApply={applyFilters}
         onClear={clearFilters}
+        nearbyMode={nearbyMode}
+        setNearbyMode={setNearbyMode}
       />
+
+      {/* ── Nearby Job Alert Promo Popup ─────────────────────── */}
+      <ModalContainer
+        visible={showNearbyPromo}
+        onClose={() => dismissNearbyPromo(false)}
+        title=""
+      >
+        <View style={styles.promoWrap}>
+          {/* Icon */}
+          <View style={styles.promoIconCircle}>
+            <Ionicons name="location" size={44} color="#0EA5E9" />
+          </View>
+
+          <Text style={styles.promoTitle}>รู้ก่อนใคร! งานใกล้คุณ</Text>
+          <Text style={styles.promoDesc}>
+            เมื่อมีคนโพสต์งานในรัศมีที่คุณกำหนด{`\n`}
+            แอปจะส่ง Push Notification ให้คุณทันที
+          </Text>
+
+          {/* Feature list */}
+          {[
+            { icon: 'notifications', text: 'แจ้งเตือนแบบ Real-time ทันทีที่มีงานใหม่' },
+            { icon: 'resize', text: 'กำหนดรัศมีเองได้ 1–50 กม.' },
+            { icon: 'location-outline', text: 'ตั้งตำแหน่งจาก GPS ของมือถือ' },
+          ].map((f) => (
+            <View key={f.icon} style={styles.promoFeatureRow}>
+              <View style={styles.promoFeatureDot}>
+                <Ionicons name={f.icon as any} size={15} color="#0EA5E9" />
+              </View>
+              <Text style={styles.promoFeatureText}>{f.text}</Text>
+            </View>
+          ))}
+
+          {/* CTA */}
+          <TouchableOpacity
+            style={styles.promoCTA}
+            onPress={() => dismissNearbyPromo(true)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="location" size={18} color="#FFF" />
+            <Text style={styles.promoCTAText}>เปิดการแจ้งเตือนงานใกล้ฉัน</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.promoDismiss}
+            onPress={() => dismissNearbyPromo(false)}
+          >
+            <Text style={styles.promoDismissText}>ไว้ทีหลัง</Text>
+          </TouchableOpacity>
+        </View>
+      </ModalContainer>
 
       {/* Expiring Posts Popup */}
       <ModalContainer
@@ -820,7 +1025,7 @@ export default function HomeScreen({ navigation }: Props) {
         title="⏰ ประกาศใกล้หมดอายุ"
       >
         <View style={{ padding: SPACING.md }}>
-          <Text style={{ fontSize: FONT_SIZES.md, color: COLORS.textSecondary, marginBottom: SPACING.md, textAlign: 'center' }}>
+          <Text style={{ fontSize: FONT_SIZES.md, color: '#64748B', marginBottom: SPACING.md, textAlign: 'center' }}>
             คุณมี {expiringPosts.length} ประกาศที่ใกล้หมดอายุ
           </Text>
           
@@ -836,12 +1041,12 @@ export default function HomeScreen({ navigation }: Props) {
                 borderRadius: BORDER_RADIUS.md,
                 marginBottom: SPACING.sm,
                 borderLeftWidth: 4,
-                borderLeftColor: COLORS.error,
+                borderLeftColor: colors.error,
               }}>
-                <Text style={{ fontWeight: '600', color: COLORS.text }} numberOfLines={1}>
+                <Text style={{ fontWeight: '600', color: '#0F172A' }} numberOfLines={1}>
                   {post.title}
                 </Text>
-                <Text style={{ fontSize: FONT_SIZES.sm, color: COLORS.error, marginTop: 4 }}>
+                <Text style={{ fontSize: FONT_SIZES.sm, color: colors.error, marginTop: 4 }}>
                   ⚠️ จะหมดอายุภายใน 24 ชั่วโมง!
                 </Text>
               </View>
@@ -854,7 +1059,7 @@ export default function HomeScreen({ navigation }: Props) {
             borderRadius: BORDER_RADIUS.md,
             marginTop: SPACING.sm,
           }}>
-            <Text style={{ fontSize: FONT_SIZES.sm, color: COLORS.primary, textAlign: 'center' }}>
+            <Text style={{ fontSize: FONT_SIZES.sm, color: '#0EA5E9', textAlign: 'center' }}>
               💡 ต่ออายุประกาศได้ในราคา 19 บาท/วัน
             </Text>
           </View>
@@ -882,21 +1087,21 @@ export default function HomeScreen({ navigation }: Props) {
         actions={[
           {
             icon: 'create-outline',
-            label: 'โพสต์หาคนแทน',
+            label: 'โพสต์งาน',
             onPress: () => (navigation as any).navigate('Main', { screen: 'PostJob' }),
-            color: COLORS.primary,
+            color: '#0EA5E9',
+          },
+          {
+            icon: 'map-outline',
+            label: 'ดูแผนที่',
+            onPress: () => (navigation as any).navigate('MapJobs'),
+            color: '#6366F1',
           },
           {
             icon: 'heart-outline',
             label: 'รายการโปรด',
             onPress: () => (navigation as any).navigate('Favorites'),
             color: '#EC4899',
-          },
-          {
-            icon: 'chatbubbles-outline',
-            label: 'แชท',
-            onPress: () => (navigation as any).navigate('Chat'),
-            color: '#06B6D4',
           },
         ]}
       />
@@ -914,21 +1119,31 @@ interface FilterModalProps {
   setFilters: React.Dispatch<React.SetStateAction<JobFilters>>;
   onApply: () => void;
   onClear: () => void;
+  nearbyMode: boolean;
+  setNearbyMode: (val: boolean) => void;
 }
 
-function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear }: FilterModalProps) {
+function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, nearbyMode, setNearbyMode }: FilterModalProps) {
   const insets = useSafeAreaInsets();
   const [provinceSearch, setProvinceSearch] = useState('');
   const [showAllProvinces, setShowAllProvinces] = useState(false);
-  
-  // Filter provinces by search
+  const [nearbyPreset, setNearbyPreset] = useState(!!nearbyMode);
+  const [minRateText, setMinRateText] = useState(filters.minRate?.toString() ?? '');
+  const [maxRateText, setMaxRateText] = useState(filters.maxRate?.toString() ?? '');
+
   const filteredProvinces = provinceSearch
-    ? ALL_PROVINCES.filter(p => p.includes(provinceSearch))
+    ? ALL_PROVINCES.filter(p => p.toLowerCase().includes(provinceSearch.toLowerCase()))
     : (showAllProvinces ? ALL_PROVINCES : POPULAR_PROVINCES);
-  
-  // Get departments based on location type
-  const departments = filters.locationType === 'HOME' ? HOME_CARE_TYPES : ALL_DEPARTMENTS;
-  
+
+  const SectionHeader = ({ icon, label, iconColor = '#0EA5E9' }: { icon: string; label: string; iconColor?: string }) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+      <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: iconColor + '18', alignItems: 'center', justifyContent: 'center' }}>
+        <Ionicons name={icon as any} size={15} color={iconColor} />
+      </View>
+      <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>{label}</Text>
+    </View>
+  );
+
   return (
     <ModalContainer
       visible={visible}
@@ -936,261 +1151,237 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear }
       title="ตัวกรองการค้นหา"
       fullScreen={true}
     >
-      <ScrollView style={styles.filterContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={[styles.filterContent, { backgroundColor: '#F8FAFC' }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Near Me */}
+        <View style={{ marginBottom: 14 }}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setNearbyPreset(!nearbyPreset)}
+            style={{
+              backgroundColor: nearbyPreset ? '#E0F2FE' : '#fff',
+              borderRadius: 16,
+              padding: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              borderWidth: nearbyPreset ? 2 : 1,
+              borderColor: nearbyPreset ? '#0EA5E9' : '#E2E8F0',
+              shadowColor: '#0EA5E9',
+              shadowOpacity: nearbyPreset ? 0.12 : 0,
+              shadowRadius: 8,
+              elevation: nearbyPreset ? 3 : 0,
+            }}
+          >
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: nearbyPreset ? '#0EA5E9' : '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+              <Ionicons name="location" size={22} color={nearbyPreset ? '#fff' : '#64748B'} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: nearbyPreset ? '#0EA5E9' : '#0F172A' }}>ใกล้ฉัน</Text>
+              <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>งานใกล้ตำแหน่งของคุณมากที่สุด</Text>
+            </View>
+            <View style={{
+              width: 28, height: 16, borderRadius: 8,
+              backgroundColor: nearbyPreset ? '#0EA5E9' : '#CBD5E1',
+              justifyContent: 'center',
+              paddingHorizontal: 2,
+            }}>
+              <View style={{
+                width: 12, height: 12, borderRadius: 6, backgroundColor: '#fff',
+                alignSelf: nearbyPreset ? 'flex-end' : 'flex-start',
+              }} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
         {/* Staff Type */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>ประเภทบุคลากร</Text>
+        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+          <SectionHeader icon="person-outline" label="ประเภทบุคลากร" iconColor="#0EA5E9" />
           <View style={styles.filterOptions}>
-            <Chip
-              label="ทั้งหมด"
-              selected={!filters.staffType}
-              onPress={() => setFilters({ ...filters, staffType: undefined })}
-              style={styles.optionChip}
-            />
+            <Chip label="ทั้งหมด" selected={!filters.staffType}
+              onPress={() => setFilters({ ...filters, staffType: undefined })} style={styles.optionChip} />
             {STAFF_TYPES.map((type) => (
-              <Chip
-                key={type.code}
-                label={type.shortName}
+              <Chip key={type.code} label={type.shortName}
                 selected={filters.staffType === type.code}
                 onPress={() => setFilters({ ...filters, staffType: type.code })}
-                style={styles.optionChip}
-              />
+                style={styles.optionChip} />
             ))}
           </View>
         </View>
 
         {/* Location Type */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>ประเภทสถานที่</Text>
+        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+          <SectionHeader icon="business-outline" label="ประเภทสถานที่" iconColor="#8B5CF6" />
           <View style={styles.filterOptions}>
-            <Chip
-              label="ทั้งหมด"
-              selected={!filters.locationType}
-              onPress={() => setFilters({ ...filters, locationType: undefined, department: '' })}
-              style={styles.optionChip}
-            />
-            {LOCATION_TYPES.map((type) => (
-              <Chip
-                key={type.code}
-                label={`${type.icon} ${type.nameTH}`}
-                selected={filters.locationType === type.code}
-                onPress={() => setFilters({ ...filters, locationType: type.code as any, department: '' })}
-                style={styles.optionChip}
-              />
+            <Chip label="ทั้งหมด" selected={!filters.locationType}
+              onPress={() => setFilters({ ...filters, locationType: undefined, homeCareOnly: false })}
+              style={styles.optionChip} />
+            {LOCATION_TYPES.map((loc) => (
+              <Chip key={loc.code}
+                label={`${loc.icon} ${loc.nameTH}`}
+                selected={filters.locationType === loc.code}
+                onPress={() => setFilters({ ...filters, locationType: loc.code, homeCareOnly: loc.code === 'HOME' })}
+                style={styles.optionChip} />
             ))}
           </View>
         </View>
 
         {/* Province */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>จังหวัด</Text>
+        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+          <SectionHeader icon="map-outline" label="จังหวัด" iconColor="#10B981" />
           <TextInput
             style={styles.provinceSearchInput}
             placeholder="ค้นหาจังหวัด..."
-            placeholderTextColor={COLORS.textMuted}
+            placeholderTextColor="#94A3B8"
             value={provinceSearch}
             onChangeText={setProvinceSearch}
           />
           <View style={styles.filterOptions}>
-            <Chip
-              label="ทั้งหมด"
-              selected={!filters.province}
-              onPress={() => setFilters({ ...filters, province: '', district: '' })}
-              style={styles.optionChip}
-            />
+            <Chip label="ทั้งหมด" selected={!filters.province}
+              onPress={() => setFilters({ ...filters, province: '', district: '' })} style={styles.optionChip} />
             {filteredProvinces.map((province) => (
-              <Chip
-                key={province}
-                label={province}
+              <Chip key={province} label={province}
                 selected={filters.province === province}
                 onPress={() => setFilters({ ...filters, province, district: '' })}
-                style={styles.optionChip}
-              />
+                style={styles.optionChip} />
             ))}
           </View>
-          {!provinceSearch && !showAllProvinces && (
-            <TouchableOpacity 
-              style={styles.showMoreButton}
-              onPress={() => setShowAllProvinces(true)}
-            >
-              <Text style={styles.showMoreText}>ดูทั้งหมด 77 จังหวัด</Text>
-              <Ionicons name="chevron-down" size={16} color={COLORS.primary} />
-            </TouchableOpacity>
-          )}
-          {showAllProvinces && (
-            <TouchableOpacity 
-              style={styles.showMoreButton}
-              onPress={() => setShowAllProvinces(false)}
-            >
-              <Text style={styles.showMoreText}>แสดงน้อยลง</Text>
-              <Ionicons name="chevron-up" size={16} color={COLORS.primary} />
+          {!provinceSearch && (
+            <TouchableOpacity style={styles.showMoreButton} onPress={() => setShowAllProvinces(!showAllProvinces)}>
+              <Text style={styles.showMoreText}>{showAllProvinces ? 'แสดงน้อยลง' : 'ดูทั้งหมด 77 จังหวัด'}</Text>
+              <Ionicons name={showAllProvinces ? 'chevron-up' : 'chevron-down'} size={16} color="#0EA5E9" />
             </TouchableOpacity>
           )}
         </View>
 
-        {/* District - show for selected provinces */}
+        {/* District (conditional) */}
         {filters.province && getDistrictsForProvince(filters.province).length > 0 && (
-          <View style={styles.filterSection}>
-            <Text style={styles.filterLabel}>
-              {filters.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'}
-            </Text>
-            <ScrollView horizontal={true} showsHorizontalScrollIndicator={false}>
-              <View style={styles.filterOptions}>
-                <Chip
-                  label={filters.province === 'กรุงเทพมหานคร' ? 'ทุกเขต' : 'ทุกอำเภอ'}
+          <View style={[styles.filterCard, { marginBottom: 14 }]}>
+            <SectionHeader icon="location-outline" label={filters.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'} iconColor="#10B981" />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <Chip label={filters.province === 'กรุงเทพมหานคร' ? 'ทุกเขต' : 'ทุกอำเภอ'}
                   selected={!filters.district}
-                  onPress={() => setFilters({ ...filters, district: '' })}
-                  style={styles.optionChip}
-                />
+                  onPress={() => setFilters({ ...filters, district: '' })} style={styles.optionChip} />
                 {getDistrictsForProvince(filters.province).map((district) => (
-                  <Chip
-                    key={district}
-                    label={district}
+                  <Chip key={district} label={district}
                     selected={filters.district === district}
                     onPress={() => setFilters({ ...filters, district })}
-                    style={styles.optionChip}
-                  />
+                    style={styles.optionChip} />
                 ))}
               </View>
             </ScrollView>
           </View>
         )}
 
-        {/* Department / Care Type */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>
-            {filters.locationType === 'HOME' ? 'ประเภทการดูแล' : 'แผนก'}
-          </Text>
-          <ScrollView horizontal={true} showsHorizontalScrollIndicator={false}>
-            <View style={styles.filterOptions}>
-              <Chip
-                label="ทั้งหมด"
-                selected={!filters.department}
-                onPress={() => setFilters({ ...filters, department: '' })}
-                style={styles.optionChip}
+        {/* Salary Range */}
+        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+          <SectionHeader icon="cash-outline" label="ค่าตอบแทน (บาท)" iconColor="#F59E0B" />
+          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>ขั้นต่ำ</Text>
+              <TextInput
+                style={[styles.provinceSearchInput, { marginBottom: 0 }]}
+                placeholder="เช่น 500"
+                placeholderTextColor="#CBD5E1"
+                keyboardType="numeric"
+                value={minRateText}
+                onChangeText={(t) => {
+                  setMinRateText(t);
+                  setFilters({ ...filters, minRate: t ? parseInt(t) || undefined : undefined });
+                }}
               />
-              {departments.map((dept) => (
-                <Chip
-                  key={dept}
-                  label={dept}
-                  selected={filters.department === dept}
-                  onPress={() => setFilters({ ...filters, department: dept })}
-                  style={styles.optionChip}
-                />
-              ))}
             </View>
-          </ScrollView>
-        </View>
-
-        {/* Payment Type */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>รูปแบบค่าตอบแทน</Text>
-          <View style={styles.filterOptions}>
-            <Chip
-              label="ทั้งหมด"
-              selected={!filters.paymentType}
-              onPress={() => setFilters({ ...filters, paymentType: undefined })}
-              style={styles.optionChip}
-            />
-            {PAYMENT_TYPES.map((pt) => (
-              <Chip
-                key={pt.code}
-                label={pt.nameTH}
-                selected={filters.paymentType === pt.code}
-                onPress={() => setFilters({ ...filters, paymentType: pt.code as any })}
-                style={styles.optionChip}
+            <Text style={{ color: '#94A3B8', marginTop: 16 }}>—</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>สูงสุด</Text>
+              <TextInput
+                style={[styles.provinceSearchInput, { marginBottom: 0 }]}
+                placeholder="เช่น 3000"
+                placeholderTextColor="#CBD5E1"
+                keyboardType="numeric"
+                value={maxRateText}
+                onChangeText={(t) => {
+                  setMaxRateText(t);
+                  setFilters({ ...filters, maxRate: t ? parseInt(t) || undefined : undefined });
+                }}
               />
+            </View>
+          </View>
+          {/* Quick rate chips */}
+          <View style={[styles.filterOptions, { marginTop: 10 }]}>
+            {[300, 500, 700, 1000, 1500, 2000].map((rate) => (
+              <TouchableOpacity
+                key={rate}
+                onPress={() => {
+                  setMinRateText(rate.toString());
+                  setFilters({ ...filters, minRate: rate, maxRate: undefined });
+                  setMaxRateText('');
+                }}
+                style={{
+                  paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+                  backgroundColor: filters.minRate === rate && !filters.maxRate ? '#F59E0B' : '#FEF3C7',
+                  borderWidth: 1, borderColor: '#FDE68A',
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '600', color: filters.minRate === rate && !filters.maxRate ? '#fff' : '#92400E' }}>
+                  {rate.toLocaleString()}+
+                </Text>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
 
-        {/* Urgent Only & Verified Only */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>ตัวเลือกพิเศษ</Text>
+        {/* Special + Sort */}
+        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+          <SectionHeader icon="options-outline" label="ตัวเลือกพิเศษ" iconColor="#EF4444" />
           <View style={styles.filterOptions}>
-            <Chip
-              label="🔥 ด่วนเท่านั้น"
-              selected={filters.urgentOnly || false}
-              onPress={() => setFilters({ ...filters, urgentOnly: !filters.urgentOnly })}
-              style={styles.optionChip}
-            />
-            <Chip
-              label="✓ ยืนยันตัวตน"
-              selected={filters.verifiedOnly || false}
-              onPress={() => setFilters({ ...filters, verifiedOnly: !filters.verifiedOnly })}
-              style={styles.optionChip}
-            />
+            <Chip label="🔥 ด่วนเท่านั้น" selected={filters.urgentOnly || false}
+              onPress={() => setFilters({ ...filters, urgentOnly: !filters.urgentOnly })} style={styles.optionChip} />
+            <Chip label="✓ ยืนยันตัวตน" selected={filters.verifiedOnly || false}
+              onPress={() => setFilters({ ...filters, verifiedOnly: !filters.verifiedOnly })} style={styles.optionChip} />
           </View>
         </View>
 
-        {/* Rate Range */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>ช่วงค่าตอบแทน</Text>
+        <View style={[styles.filterCard, { marginBottom: 24 }]}>
+          <SectionHeader icon="swap-vertical-outline" label="เรียงตาม" iconColor="#64748B" />
           <View style={styles.filterOptions}>
-            <Chip
-              label="ทั้งหมด"
-              selected={!filters.minRate && !filters.maxRate}
-              onPress={() => setFilters({ ...filters, minRate: undefined, maxRate: undefined })}
-              style={styles.optionChip}
-            />
-            <Chip
-              label="< 1,500"
-              selected={filters.maxRate === 1500 && !filters.minRate}
-              onPress={() => setFilters({ ...filters, minRate: undefined, maxRate: 1500 })}
-              style={styles.optionChip}
-            />
-            <Chip
-              label="1,500 - 2,500"
-              selected={filters.minRate === 1500 && filters.maxRate === 2500}
-              onPress={() => setFilters({ ...filters, minRate: 1500, maxRate: 2500 })}
-              style={styles.optionChip}
-            />
-            <Chip
-              label="2,500 - 3,500"
-              selected={filters.minRate === 2500 && filters.maxRate === 3500}
-              onPress={() => setFilters({ ...filters, minRate: 2500, maxRate: 3500 })}
-              style={styles.optionChip}
-            />
-            <Chip
-              label="> 3,500"
-              selected={filters.minRate === 3500 && !filters.maxRate}
-              onPress={() => setFilters({ ...filters, minRate: 3500, maxRate: undefined })}
-              style={styles.optionChip}
-            />
-          </View>
-        </View>
-
-        {/* Sort By */}
-        <View style={[styles.filterSection, styles.filterCard]}>
-          <Text style={styles.filterLabel}>เรียงตาม</Text>
-          <View style={styles.filterOptions}>
-            <Chip
-              label="ล่าสุด"
-              selected={filters.sortBy === 'latest' || !filters.sortBy}
-              onPress={() => setFilters({ ...filters, sortBy: 'latest' })}
-              style={styles.optionChip}
-            />
-            <Chip
-              label="ค่าตอบแทนสูงสุด"
-              selected={filters.sortBy === 'highestPay'}
-              onPress={() => setFilters({ ...filters, sortBy: 'highestPay' })}
-              style={styles.optionChip}
-            />
+            <Chip label="ล่าสุด" selected={filters.sortBy === 'latest' || !filters.sortBy}
+              onPress={() => setFilters({ ...filters, sortBy: 'latest' })} style={styles.optionChip} />
+            <Chip label="ค่าตอบแทนสูงสุด" selected={filters.sortBy === 'highestPay'}
+              onPress={() => setFilters({ ...filters, sortBy: 'highestPay' })} style={styles.optionChip} />
+            <Chip label="เช้า" selected={filters.sortBy === 'morning'}
+              onPress={() => setFilters({ ...filters, sortBy: 'morning' })} style={styles.optionChip} />
+            <Chip label="กลางคืน" selected={filters.sortBy === 'night'}
+              onPress={() => setFilters({ ...filters, sortBy: 'night' })} style={styles.optionChip} />
           </View>
         </View>
       </ScrollView>
 
       {/* Actions */}
-      <View style={[styles.filterActions, { paddingBottom: Math.max(insets.bottom, 16) + SPACING.md }]}>
+      <View style={[styles.filterActions, {
+        paddingBottom: Math.max(insets.bottom, 16) + SPACING.md,
+        backgroundColor: '#fff',
+        borderTopWidth: 1,
+        borderTopColor: '#F1F5F9',
+        shadowColor: '#000',
+        shadowOpacity: 0.06,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: -4 },
+        elevation: 8,
+      }]}>
+        <Button onPress={() => { onClear(); setMinRateText(''); setMaxRateText(''); }}
+          variant="outline"
+          style={{ flex: 1, marginRight: SPACING.sm, borderRadius: 14, height: 50 }}>
+          ล้างตัวกรอง
+        </Button>
         <Button
-            onPress={onClear}
-            variant="outline"
-            style={{ flex: 1, marginRight: SPACING.sm }}
-          >ล้างตัวกรอง</Button>
-          <Button
-            onPress={onApply}
-            style={{ flex: 1 }}
-          >ค้นหา</Button>
+          onPress={() => { setNearbyMode(nearbyPreset); onApply(); }}
+          style={{ flex: 2, borderRadius: 14, height: 50 }}>
+          ค้นหา
+        </Button>
       </View>
     </ModalContainer>
   );
@@ -1202,12 +1393,12 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#F8FAFC',
   },
 
   // Header
   header: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#0EA5E9',
     paddingHorizontal: SPACING.md,
     paddingBottom: SPACING.md,
     borderBottomLeftRadius: 24,
@@ -1239,17 +1430,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     right: 0,
-    backgroundColor: COLORS.danger,
+    backgroundColor: '#EF4444',
     borderRadius: 10,
     minWidth: 18,
     height: 18,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderColor: '#0EA5E9',
   },
   notificationBadgeText: {
-    color: COLORS.white,
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '700',
     paddingHorizontal: 4,
@@ -1257,7 +1448,7 @@ const styles = StyleSheet.create({
   greeting: {
     fontSize: FONT_SIZES.xl,
     fontWeight: '700',
-    color: COLORS.white,
+    color: '#FFFFFF',
   },
   headerSubtitle: {
     fontSize: FONT_SIZES.sm,
@@ -1266,7 +1457,7 @@ const styles = StyleSheet.create({
   },
   profileButton: {
     borderWidth: 2,
-    borderColor: COLORS.white,
+    borderColor: '#FFFFFF',
     borderRadius: 22,
   },
 
@@ -1280,7 +1471,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
+    backgroundColor: '#FFFFFF',
     borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md,
     height: 48,
@@ -1291,7 +1482,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: FONT_SIZES.md,
-    color: COLORS.text,
+    color: '#0F172A',
   },
   filterButton: {
     width: 48,
@@ -1302,13 +1493,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   filterButtonActive: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: '#0EA5E9',
   },
   filterBadge: {
     position: 'absolute',
     top: -4,
     right: -4,
-    backgroundColor: COLORS.danger,
+    backgroundColor: '#EF4444',
     borderRadius: 10,
     width: 20,
     height: 20,
@@ -1316,7 +1507,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   filterBadgeText: {
-    color: COLORS.white,
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -1346,15 +1537,15 @@ const styles = StyleSheet.create({
   },
   resultsText: {
     fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
+    color: '#64748B',
   },
   resultsCount: {
     fontWeight: '700',
-    color: COLORS.primary,
+    color: '#0EA5E9',
   },
   clearFilters: {
     fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
+    color: '#0EA5E9',
     fontWeight: '500',
   },
 
@@ -1369,7 +1560,7 @@ const styles = StyleSheet.create({
   filterLabel: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
-    color: COLORS.text,
+    color: '#0F172A',
     marginBottom: SPACING.sm,
   },
   filterOptions: {
@@ -1377,11 +1568,11 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   filterCard: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: '#FFFFFF',
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#E2E8F0',
     marginBottom: SPACING.md,
     ...SHADOWS.small,
   },
@@ -1391,13 +1582,13 @@ const styles = StyleSheet.create({
   },
   provinceSearchInput: {
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#E2E8F0',
     borderRadius: BORDER_RADIUS.md,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     marginBottom: SPACING.sm,
     fontSize: FONT_SIZES.md,
-    color: COLORS.text,
+    color: '#0F172A',
   },
   showMoreButton: {
     flexDirection: 'row',
@@ -1408,14 +1599,146 @@ const styles = StyleSheet.create({
   },
   showMoreText: {
     fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
+    color: '#0EA5E9',
     marginRight: 4,
   },
   filterActions: {
     flexDirection: 'row',
     padding: SPACING.md,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderTopColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+  },
+
+  // ── Nearby Job Alert Banner ───────────────────────────────────────
+  nearbyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EFF6FF',
+    borderRadius: BORDER_RADIUS.lg,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+    marginTop: SPACING.sm,
+    padding: SPACING.md,
+    borderWidth: 1.5,
+    borderColor: '#BAE6FD',
+  },
+  nearbyBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    flex: 1,
+  },
+  nearbyBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#0EA5E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nearbyBannerTitle: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+    color: '#0C4A6E',
+  },
+  nearbyBannerSub: {
+    fontSize: 11,
+    color: '#0369A1',
+    marginTop: 2,
+  },
+  nearbyBannerCTA: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#0EA5E9',
+    gap: 2,
+  },
+  nearbyBannerCTAText: {
+    fontSize: 12,
+    color: '#0EA5E9',
+    fontWeight: '700',
+  },
+
+  // ── Nearby Promo Modal ─────────────────────────────────────────────
+  promoWrap: {
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.lg,
+    paddingTop: SPACING.sm,
+  },
+  promoIconCircle: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.md,
+  },
+  promoTitle: {
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: SPACING.sm,
+    textAlign: 'center',
+  },
+  promoDesc: {
+    fontSize: FONT_SIZES.sm,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: SPACING.lg,
+  },
+  promoFeatureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    alignSelf: 'stretch',
+    marginBottom: SPACING.sm,
+  },
+  promoFeatureDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promoFeatureText: {
+    fontSize: FONT_SIZES.sm,
+    color: '#334155',
+    flex: 1,
+  },
+  promoCTA: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    backgroundColor: '#0EA5E9',
+    alignSelf: 'stretch',
+    paddingVertical: 16,
+    borderRadius: BORDER_RADIUS.lg,
+    marginTop: SPACING.lg,
+  },
+  promoCTAText: {
+    color: '#FFF',
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+  },
+  promoDismiss: {
+    marginTop: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  promoDismissText: {
+    fontSize: FONT_SIZES.sm,
+    color: '#94A3B8',
+    textDecorationLine: 'underline',
   },
 });
+

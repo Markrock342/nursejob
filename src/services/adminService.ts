@@ -48,9 +48,16 @@ export interface AdminJob {
   posterId: string;
   status: 'active' | 'closed' | 'urgent';
   department: string;
+  staffType?: string;
   shiftRate: number;
+  province?: string;
+  hospital?: string;
+  shiftDate?: Date;
+  shiftTime?: string;
   createdAt: Date;
   contactsCount: number;
+  applicantsCount: number;
+  viewsCount: number;
 }
 
 export interface AdminConversation {
@@ -70,6 +77,7 @@ export interface DashboardStats {
   totalConversations: number;
   todayNewUsers: number;
   todayNewJobs: number;
+  pendingVerifications?: number;
 }
 
 // ============================================
@@ -93,8 +101,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     const todayUsersSnapshot = await getCountFromServer(todayUsersQuery);
     const todayNewUsers = todayUsersSnapshot.data().count;
 
-    // Get total jobs
-    const jobsRef = collection(db, 'jobs');
+    // Get total jobs (collection is 'shifts')
+    const jobsRef = collection(db, 'shifts');
     const jobsSnapshot = await getCountFromServer(jobsRef);
     const totalJobs = jobsSnapshot.data().count;
 
@@ -111,6 +119,17 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     const todayJobsSnapshot = await getCountFromServer(todayJobsQuery);
     const todayNewJobs = todayJobsSnapshot.data().count;
 
+    // Get pending verifications
+    const pendingVerifQuery = query(
+      collection(db, 'verifications'),
+      where('status', '==', 'pending')
+    );
+    let pendingVerifications = 0;
+    try {
+      const pendingSnap = await getCountFromServer(pendingVerifQuery);
+      pendingVerifications = pendingSnap.data().count;
+    } catch (_) {}
+
     // Get total conversations
     const conversationsRef = collection(db, 'conversations');
     const conversationsSnapshot = await getCountFromServer(conversationsRef);
@@ -123,6 +142,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       totalConversations,
       todayNewUsers,
       todayNewJobs,
+      pendingVerifications,
     };
   } catch (error) {
     console.error('Error getting dashboard stats:', error);
@@ -293,22 +313,30 @@ export async function getUserById(userId: string): Promise<AdminUser | null> {
 // ============================================
 export async function getAllJobs(limitCount: number = 50): Promise<AdminJob[]> {
   try {
-    const jobsRef = collection(db, 'jobs');
+    const jobsRef = collection(db, 'shifts');
     const q = query(jobsRef, orderBy('createdAt', 'desc'), limit(limitCount));
     const snapshot = await getDocs(q);
 
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
+    return snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      const loc = data.location || {};
       return {
-        id: doc.id,
+        id: docSnap.id,
         title: data.title || 'ไม่ระบุชื่อ',
         posterName: data.posterName || 'ไม่ระบุ',
         posterId: data.posterId || '',
         status: data.status || 'active',
         department: data.department || '',
+        staffType: data.staffType,
         shiftRate: data.shiftRate || 0,
+        province: data.province || loc.province || '',
+        hospital: data.hospital || loc.hospital || '',
+        shiftDate: data.shiftDate?.toDate?.() || data.shiftDates?.[0] ? new Date(data.shiftDates[0]) : undefined,
+        shiftTime: data.shiftTime || (data.startTime && data.endTime ? `${data.startTime}-${data.endTime}` : ''),
         createdAt: data.createdAt?.toDate?.() || new Date(),
         contactsCount: data.contactsCount || 0,
+        applicantsCount: data.applicantsCount || 0,
+        viewsCount: data.viewsCount || 0,
       };
     });
   } catch (error) {
@@ -322,7 +350,7 @@ export async function updateJobStatus(
   status: 'active' | 'closed' | 'urgent'
 ): Promise<void> {
   try {
-    const jobRef = doc(db, 'jobs', jobId);
+    const jobRef = doc(db, 'shifts', jobId);
     await updateDoc(jobRef, {
       status,
       updatedAt: serverTimestamp(),
@@ -335,7 +363,7 @@ export async function updateJobStatus(
 
 export async function deleteJob(jobId: string): Promise<void> {
   try {
-    const jobRef = doc(db, 'jobs', jobId);
+    const jobRef = doc(db, 'shifts', jobId);
     await deleteDoc(jobRef);
   } catch (error) {
     console.error('Error deleting job:', error);

@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { KittenButton as Button, Input, Card, Chip, ModalContainer, PlaceAutocomplete, QuickPlacePicker, CalendarPicker } from '../../components/common';
+import { MultiDateCalendar } from '../../components/common/MultiDateCalendar';
 import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, DEPARTMENTS, PROVINCES, DISTRICTS_BY_PROVINCE } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -46,7 +47,7 @@ interface ShiftForm {
   shiftRate: string;
   // broadened to accept other possible rate types from JobPost
   rateType: 'shift' | 'hour' | 'day' | 'month' | 'per_shift' | 'per_day' | 'per_month' | 'negotiable' | string;
-  shiftDate: Date;
+  shiftDates: Date[];  // multi-date support
   startTime: Date;
   endTime: Date;
   province: string;
@@ -93,7 +94,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
     description: editJob?.description || '',
     shiftRate: editJob?.shiftRate?.toString() || '',
     rateType: editJob?.rateType || 'shift',
-    shiftDate: editJob?.shiftDate ? new Date(editJob.shiftDate) : new Date(),
+    shiftDates: editJob?.shiftDate ? [new Date(editJob.shiftDate)] : [new Date()],
     startTime: parseTimeFromString(editJob?.shiftTime || '', false),
     endTime: parseTimeFromString(editJob?.shiftTime || '', true),
     province: editJob?.location?.province || 'กรุงเทพมหานคร',
@@ -229,7 +230,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
     if (!form.title.trim()) newErrors.title = 'กรุณากรอกหัวข้อ';
     if (!form.department) newErrors.department = 'กรุณาเลือกแผนก';
     if (!form.shiftRate) newErrors.shiftRate = 'กรุณากรอกค่าตอบแทน';
-    if (!form.shiftDate) newErrors.shiftDate = 'กรุณาเลือกวันที่';
+    if (form.shiftDates.length === 0) newErrors.shiftDates = 'กรุณาเลือกอย่างน้อย 1 วัน';
     if (!form.province) newErrors.province = 'กรุณาเลือกจังหวัด';
     if (!form.hospital.trim()) newErrors.hospital = 'กรุณากรอกชื่อโรงพยาบาล/สถานที่';
     if (!form.contactPhone && !form.contactLine) {
@@ -260,7 +261,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
     if (form.isUrgent && userPlan === 'free' && !isEditMode) {
       const serializeForm = (f: any) => ({
         ...f,
-        shiftDate: f.shiftDate ? (f.shiftDate instanceof Date ? f.shiftDate.toISOString() : f.shiftDate) : undefined,
+        shiftDates: (f.shiftDates || []).map((d: any) => d instanceof Date ? d.toISOString() : d),
       });
       (navigation as any).navigate('Payment', {
         type: 'urgent_post',
@@ -296,7 +297,8 @@ export default function PostJobScreen({ navigation, route }: Props) {
         description: form.description,
         shiftRate: parseInt(form.shiftRate),
         rateType: form.rateType as JobPost['rateType'],
-        shiftDate: form.shiftDate,
+        shiftDate: form.shiftDates[0],
+        shiftDates: form.shiftDates.map(d => d.toISOString()),
         shiftTime,
         location: {
           province: form.province,
@@ -344,7 +346,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
           department: jobData.department || '',
           shiftRate: jobData.shiftRate || 0,
           rateType: jobData.rateType as JobPost['rateType'] || 'shift',
-          shiftDate: jobData.shiftDate || new Date(),
+          shiftDate: jobData.shiftDate || form.shiftDates[0] || new Date(),
           shiftTime: jobData.shiftTime || '',
           location: jobData.location || {},
           contactPhone: jobData.contactPhone || '',
@@ -361,6 +363,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         const serializedCreatedJob = {
           ...createdJob,
           shiftDate: createdJob.shiftDate ? (createdJob.shiftDate instanceof Date ? createdJob.shiftDate.toISOString() : createdJob.shiftDate) : undefined,
+          shiftDates: (jobData.shiftDates || []),
           createdAt: createdJob.createdAt ? (createdJob.createdAt instanceof Date ? createdJob.createdAt.toISOString() : createdJob.createdAt) : undefined,
         } as any;
         (navigation as any).navigate('JobDetail', { job: serializedCreatedJob });
@@ -472,14 +475,15 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <Card style={styles.section}>
           <Text style={styles.sectionTitle}>วันเวลา</Text>
           
-          {/* Date Picker - Using CalendarPicker */}
-          <CalendarPicker
-            label="วันที่ต้องการ *"
-            value={form.shiftDate}
-            onChange={(date) => setForm({ ...form, shiftDate: date })}
-            error={errors.shiftDate}
+          {/* Date Picker - Multi-date */}
+          <MultiDateCalendar
+            selectedDates={form.shiftDates}
+            onChange={(dates) => setForm({ ...form, shiftDates: dates })}
             minDate={new Date()}
           />
+          {errors.shiftDates && (
+            <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{errors.shiftDates}</Text>
+          )}
 
           {/* Time Pickers */}
           <Text style={styles.inputLabel}>ช่วงเวลา *</Text>

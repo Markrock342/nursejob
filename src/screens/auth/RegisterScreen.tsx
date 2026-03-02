@@ -1,8 +1,4 @@
-// ============================================
-// REGISTER SCREEN - Phone OTP Verification First
-// ============================================
-
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,10 +11,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { KittenButton as Button, Input, ErrorModal, TermsConsentModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { AuthStackParamList } from '../../types';
 import { sendOTP, isValidThaiPhone } from '../../services/otpService';
+import { firebaseConfig } from '../../config/firebase';
 import { Ionicons } from '@expo/vector-icons';
 
 // ============================================
@@ -41,6 +39,8 @@ export default function RegisterScreen({ navigation }: Props) {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showTermsModal, setShowTermsModal] = useState(false);
+
+  const recaptchaRef = useRef<FirebaseRecaptchaVerifierModal>(null);
 
   // Format phone number for display
   const formatPhoneInput = (text: string): string => {
@@ -86,43 +86,18 @@ export default function RegisterScreen({ navigation }: Props) {
 
     try {
       const cleanedPhone = phone.replace(/\D/g, '');
-      const result = await sendOTP(cleanedPhone);
-      
-      if (result.success) {
-        // Show OTP code in dev mode
-        if (__DEV__ && result.otp) {
-          console.log(`📱 [DEV] OTP: ${result.otp}`);
-          
-          // On web, Alert.alert callbacks don't work - navigate directly
-          if (Platform.OS === 'web') {
-            // Use window.alert then navigate
-            window.alert(`🔧 Dev Mode\n\nOTP Code: ${result.otp}\n\n(ใน Production จะส่ง SMS จริง)`);
-            navigation.navigate('OTPVerification', {
-              phone: cleanedPhone,
-            });
-          } else {
-            // On mobile, use Alert with callback
-            Alert.alert(
-              '🔧 Dev Mode',
-              `OTP Code: ${result.otp}\n\n(ใน Production จะส่ง SMS จริง)`,
-              [
-                {
-                  text: 'ตกลง',
-                  onPress: () => {
-                    navigation.navigate('OTPVerification', {
-                      phone: cleanedPhone,
-                    });
-                  },
-                },
-              ]
-            );
-          }
-        } else {
-          // Navigate to OTP verification
-          navigation.navigate('OTPVerification', {
-            phone: cleanedPhone,
-          });
-        }
+
+      if (!recaptchaRef.current) {
+        throw new Error('ไม่พบ reCAPTCHA กรุณาลองใหม่');
+      }
+
+      const result = await sendOTP(cleanedPhone, recaptchaRef.current);
+
+      if (result.success && result.verificationId) {
+        navigation.navigate('OTPVerification', {
+          phone: cleanedPhone,
+          verificationId: result.verificationId,
+        });
       } else {
         setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
         setShowErrorModal(true);
@@ -142,6 +117,12 @@ export default function RegisterScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Firebase reCAPTCHA Verifier (ต้องอยู่ใน render เสมอ) */}
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaRef}
+        firebaseConfig={firebaseConfig}
+        attemptInvisibleVerification={true}
+      />
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -198,15 +179,18 @@ export default function RegisterScreen({ navigation }: Props) {
 
             {/* Continue Button */}
             <Button
-              title={isLoading ? 'กำลังส่ง OTP...' : 'ขอรหัส OTP'}
               onPress={handleContinuePress}
               loading={isLoading}
-              fullWidth
               size="large"
               style={styles.continueButton}
-              icon={<Ionicons name="arrow-forward" size={20} color={COLORS.white} />}
-              iconPosition="right"
-            />
+            >
+              <Text style={{color: COLORS.white, fontWeight: '600'}}>
+                {isLoading ? 'กำลังส่ง OTP...' : 'ขอรหัส OTP'}
+              </Text>
+              {!isLoading && (
+                <Ionicons name="arrow-forward" size={20} color={COLORS.white} style={{marginLeft: 8}} />
+              )}
+            </Button>
 
             {/* Note */}
             <Text style={styles.noteText}>

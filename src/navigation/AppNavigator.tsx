@@ -48,6 +48,7 @@ import MyPostsScreen from '../screens/myposts/MyPostsScreen';
 import ApplicantsScreen from '../screens/applicants/ApplicantsScreen';
 import ReviewsScreen from '../screens/reviews/ReviewsScreen';
 import HelpScreen from '../screens/help/HelpScreen';
+import MapJobsScreen from '../screens/map/MapJobsScreen';
 import TermsScreen from '../screens/legal/TermsScreen';
 import PrivacyScreen from '../screens/legal/PrivacyScreen';
 import VerificationScreen from '../screens/verification/VerificationScreen';
@@ -63,6 +64,7 @@ import AdminFeedbackScreen from '../screens/admin/AdminFeedbackScreen';
 // Feature Screens
 import FeedbackScreen from '../screens/feedback/FeedbackScreen';
 import PaymentScreen from '../screens/payment/PaymentScreen';
+import NearbyJobAlertScreen from '../screens/notifications/NearbyJobAlertScreen';
 
 // Theme
 import { COLORS, SPACING, FONT_SIZES } from '../theme';
@@ -419,6 +421,23 @@ function RootNavigator() {
       <RootStack.Screen 
         name="ThemeSelection" 
         component={ThemeSelectionScreen}
+        options={{
+          animation: 'slide_from_right',
+        }}
+      />
+      {/* Map Jobs */}
+      <RootStack.Screen
+        name="MapJobs"
+        component={MapJobsScreen}
+        options={{
+          headerShown: false,
+          animation: 'slide_from_bottom',
+        }}
+      />
+      {/* Nearby Job Alert - ตั้งค่าแจ้งเตือนงานใกล้ตัว */}
+      <RootStack.Screen
+        name="NearbyJobAlert"
+        component={NearbyJobAlertScreen}
         options={{
           animation: 'slide_from_right',
         }}

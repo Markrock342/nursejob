@@ -1,5 +1,21 @@
 import { Timestamp } from 'firebase/firestore';
 
+// Re-export Timestamp so other files import from one place
+export type { Timestamp };
+
+// ============================================
+// MULTI-DATE SHIFT TYPE (ใช้กับโพสที่มีหลายเวร)
+// ============================================
+export interface PostShift {
+  id: string;           // uuid หรือ auto-generated key
+  date: string;         // ISO date string: "2026-03-05"
+  startTime: string;    // "08:00"
+  endTime: string;      // "16:00"
+  filled: boolean;      // มีคนรับเวรนี้แล้ว
+  applicantId?: string; // uid ของคนที่รับ
+  applicantName?: string;
+}
+
 // ============================================
 // TYPE DEFINITIONS - Production Ready
 // ============================================
@@ -93,8 +109,8 @@ export interface UserProfile {
   };
   // Subscription
   subscription?: Subscription;
-  createdAt: Date | admin.firestore.Timestamp;
-  updatedAt?: Date | admin.firestore.Timestamp;
+  createdAt: Date | Timestamp;
+  updatedAt?: Date | Timestamp;
   lastActiveAt?: Date;
   fcmToken?: string; // For push notifications
 }
@@ -129,6 +145,7 @@ export interface JobPost {
   
   // วันเวลาที่ต้องการ
   shiftDate: Date;
+  shiftDates?: string[]; // ISO strings สำหรับโพสต์หลายเวร
   shiftDateEnd?: Date; // สำหรับงานหลายวัน
   shiftTime: string; // เช่น "08:00-16:00", "16:00-00:00"
   startTime?: string;
@@ -144,9 +161,11 @@ export interface JobPost {
   location?: {
     province: string;
     district?: string;
-    hospital?: string; // ชื่อ รพ./คลินิก/สถานที่
-    address?: string; // ที่อยู่เต็ม (สำหรับ Home care)
-    landmark?: string; // จุดสังเกต
+    hospital?: string;
+    address?: string;
+    landmark?: string;
+    lat?: number;
+    lng?: number;
     coordinates?: {
       lat: number;
       lng: number;
@@ -158,10 +177,20 @@ export interface JobPost {
   contactPhone?: string;
   contactLine?: string;
   
+  // Multi-date shifts (ใหม่: รองรับโพสที่มีหลายเวร)
+  shifts?: PostShift[];
+  totalShifts?: number;
+  filledShifts?: number;
+
+  // Geolocation (ใหม่: สำหรับ proximity search)
+  geohash?: string;       // geohash precision 5 (~5km) for indexing
+  lat?: number;
+  lng?: number;
+
   // Metadata
-  createdAt: Date | admin.firestore.Timestamp;
-  updatedAt?: Date | admin.firestore.Timestamp;
-  expiresAt?: Date | admin.firestore.Timestamp | null;
+  createdAt: Date | Timestamp;
+  updatedAt?: Date | Timestamp;
+  expiresAt?: Date | Timestamp | null;
   status: 'active' | 'closed' | 'urgent' | 'expired' | 'deleted';
   isUrgent?: boolean;
   viewsCount?: number;
@@ -180,9 +209,10 @@ export interface ShiftContact {
   interestedUserName?: string;
   interestedUserPhone?: string;
   message?: string;
-  status: 'interested' | 'confirmed' | 'cancelled';
+  status: 'interested' | 'confirmed' | 'cancelled' | 'expired';
   contactedAt: Date;
   notes?: string;
+  jobDeleted?: boolean; // true when job post was deleted
 }
 
 // Chat Types
@@ -323,7 +353,10 @@ export type RootStackParamList = {
     title?: string;
     description?: string;
     formData?: any;
+    returnTo?: string;
   };
+  MapJobs: undefined; // แผนที่งานใกล้ตัว
+  NearbyJobAlert: undefined; // ตั้งค่าแจ้งเตือนงานใกล้ตัว
 };
 
 export type AuthStackParamList = {
@@ -333,14 +366,15 @@ export type AuthStackParamList = {
   PhoneLogin: undefined;
   EmailVerification: { email: string };
   OTPVerification: { 
-    phone: string; 
+    phone: string;
+    verificationId: string;
     registrationData?: {
       email?: string;
       password?: string;
       displayName?: string;
     };
   };
-  ChooseRole: { phone: string; registrationData?: any };
+  ChooseRole: { phone: string; phoneVerified?: boolean; registrationData?: any };
   CompleteRegistration: { 
     phone: string; 
     phoneVerified: boolean;

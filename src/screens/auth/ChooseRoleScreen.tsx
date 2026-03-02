@@ -121,7 +121,6 @@ export default function ChooseRoleScreen({ navigation, route }: Props) {
         <Button
           title="ดำเนินการต่อ"
           onPress={handleContinue}
-          fullWidth
           disabled={selectedRole === null}
           style={styles.continueButton}
         />

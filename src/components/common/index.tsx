@@ -22,6 +22,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -323,7 +324,7 @@ export function ModalContainer({
       onRequestClose={onClose}
     >
       {fullScreen ? (
-        <View style={styles.modalFullScreen}>
+        <SafeAreaView style={[styles.modalFullScreen]} edges={['top', 'bottom']}>
           {title && (
             <View style={styles.modalFullScreenHeader}>
               {showCloseButton && (
@@ -338,7 +339,7 @@ export function ModalContainer({
           <View style={styles.modalFullScreenContent}>
             {typeof children === 'string' ? <Text>{children}</Text> : children}
           </View>
-        </View>
+        </SafeAreaView>
       ) : (
         <KeyboardAvoidingView 
           style={{ flex: 1 }}
@@ -825,7 +826,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.xs,
   },
   chipSelected: {
-    backgroundColor: COLORS.primaryLight,
+    backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
   },
   chipIcon: {
@@ -836,8 +837,8 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   chipTextSelected: {
-    color: COLORS.primary,
-    fontWeight: '500',
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 });
 

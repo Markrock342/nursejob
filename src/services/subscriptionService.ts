@@ -32,10 +32,16 @@ export async function getUserSubscription(userId: string): Promise<Subscription>
       if (subscription) {
         // Check if premium has expired
         if (subscription.plan === 'premium' && subscription.expiresAt) {
-          const expiresAt = subscription.expiresAt instanceof Timestamp 
-            ? subscription.expiresAt.toDate() 
-            : new Date(subscription.expiresAt);
-          
+          let expiresAt: Date;
+          const expiresAtRaw: any = subscription.expiresAt;
+          if (expiresAtRaw && typeof expiresAtRaw.toDate === 'function') {
+            expiresAt = expiresAtRaw.toDate();
+          } else if (expiresAtRaw) {
+            expiresAt = new Date(expiresAtRaw);
+          } else {
+            expiresAt = new Date();
+          }
+
           if (expiresAt < new Date()) {
             // Premium expired, revert to free
             await updateUserSubscription(userId, { plan: 'free' });
@@ -243,7 +249,13 @@ export function getSubscriptionStatusDisplay(subscription: Subscription): {
     let expiresText = '';
     
     if (expiresAt) {
-      const expDate = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+      const expiresAtRaw: any = expiresAt;
+      const expDate =
+        expiresAtRaw instanceof Date
+          ? expiresAtRaw
+          : (typeof expiresAtRaw?.toDate === 'function'
+              ? expiresAtRaw.toDate()
+              : new Date(expiresAtRaw));
       const daysLeft = Math.ceil((expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       expiresText = daysLeft > 0 
         ? `เหลืออีก ${daysLeft} วัน` 
@@ -314,17 +326,25 @@ export async function extendPostExpiry(postId: string, days: number = 1): Promis
     }
     
     const data = postDoc.data();
-    const currentExpiry = data.expiresAt?.toDate?.() || new Date();
-    
-    // Add days to current expiry
+    let currentExpiry: Date;
+    const expiresAtRaw = data.expiresAt;
+    if (expiresAtRaw && typeof expiresAtRaw.toDate === 'function') {
+      currentExpiry = expiresAtRaw.toDate();
+    } else if (expiresAtRaw) {
+      currentExpiry = new Date(expiresAtRaw);
+    } else {
+      currentExpiry = new Date();
+    }
+
+    // เพิ่มวันหมดอายุ
     const newExpiry = new Date(currentExpiry);
     newExpiry.setDate(newExpiry.getDate() + days);
-    
+
     await updateDoc(doc(db, JOBS_COLLECTION, postId), {
       expiresAt: newExpiry,
       updatedAt: new Date(),
     });
-    
+
     return newExpiry;
   } catch (error) {
     console.error('Error extending post:', error);

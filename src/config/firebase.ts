@@ -45,7 +45,7 @@ if (Platform.OS === 'web') {
   });
 }
 
-export { auth };
+export { auth, firebaseConfig };
 
 // Initialize other services
 export const db = getFirestore(app);

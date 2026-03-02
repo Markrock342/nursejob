@@ -10,19 +10,81 @@ import {
   where, 
   orderBy, 
   limit,
+  startAfter,
   serverTimestamp,
   Timestamp,
   onSnapshot,
   increment,
+  DocumentSnapshot,
+  QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { JobPost, ShiftContact, JobFilters } from '../types';
+import { JobPost, ShiftContact, JobFilters, PostShift } from '../types';
+import { getQueryGeohashes, getDistanceKm, encodeGeohash } from '../utils/geohash';
 
 // Re-export types for backward compatibility
 export type { JobPost, ShiftContact };
 
 const JOBS_COLLECTION = 'shifts';
 const CONTACTS_COLLECTION = 'shift_contacts';
+const PAGE_SIZE = 20;
+
+// Feature flag — true เฉพาะ dev/staging เท่านั้น
+const SHOW_MOCK_DATA = process.env.EXPO_PUBLIC_SHOW_MOCK_DATA === 'true' && __DEV__;
+
+// ==========================================
+// Helpers
+// ==========================================
+
+/** Map Firestore doc → JobPost (normalize Timestamps → Date) */
+function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    ...data,
+    title: data.title || 'หาคนแทน',
+    posterName: data.posterName || 'ไม่ระบุชื่อ',
+    posterId: data.posterId || '',
+    posterVerified: data.posterVerified || false,
+    department: data.department || 'ทั่วไป',
+    shiftRate: data.shiftRate || 0,
+    rateType: data.rateType || 'shift',
+    shiftDate: data.shiftDate?.toDate?.() ?? new Date(),
+    shiftTime: data.shiftTime || '',
+    location: {
+      province: data.location?.province || 'กรุงเทพมหานคร',
+      district: data.location?.district || '',
+      hospital: data.location?.hospital || '',
+      address: data.location?.address || '',
+      coordinates: data.location?.coordinates,
+      lat: data.location?.lat ?? data.lat,
+      lng: data.location?.lng ?? data.lng,
+    },
+    geohash: data.geohash,
+    lat: data.location?.lat ?? data.lat,
+    lng: data.location?.lng ?? data.lng,
+    shifts: data.shifts || [],
+    totalShifts: data.totalShifts || 0,
+    filledShifts: data.filledShifts || 0,
+    createdAt: data.createdAt?.toDate?.() ?? new Date(),
+    updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
+    expiresAt: data.expiresAt?.toDate?.() ?? null,
+    status: data.status || 'active',
+    isUrgent: data.isUrgent || false,
+    viewsCount: data.viewsCount || 0,
+    applicantsCount: data.applicantsCount || 0,
+  } as JobPost;
+}
+
+/** ตรวจว่าโพสต์ active และยังไม่หมดอายุ */
+function isActivePost(job: JobPost): boolean {
+  if (job.status !== 'active' && job.status !== 'urgent') return false;
+  if (job.expiresAt) {
+    const expiry = job.expiresAt instanceof Date ? job.expiresAt : new Date(job.expiresAt as any);
+    if (expiry < new Date()) return false;
+  }
+  return true;
+}
 
 // ==========================================
 // Shifts Service - บอร์ดหาคนแทน
@@ -32,207 +94,145 @@ const CONTACTS_COLLECTION = 'shift_contacts';
 export function subscribeToJobs(callback: (jobs: JobPost[]) => void): () => void {
   const jobsQuery = query(
     collection(db, JOBS_COLLECTION),
+    where('status', 'in', ['active', 'urgent']),
     orderBy('createdAt', 'desc'),
-    limit(50)
+    limit(PAGE_SIZE)
   );
 
   return onSnapshot(jobsQuery, (snapshot) => {
     const now = new Date();
-    let jobs = snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        title: data.title || 'หาคนแทน',
-        posterName: data.posterName || 'ไม่ระบุชื่อ',
-        posterId: data.posterId || '',
-        posterPhoto: data.posterPhoto,
-        posterVerified: data.posterVerified || false,
-        department: data.department || 'ทั่วไป',
-        shiftRate: data.shiftRate || 1500,
-        rateType: data.rateType || 'shift',
-        shiftDate: data.shiftDate?.toDate?.() || new Date(),
-        shiftTime: data.shiftTime || '08:00-16:00',
-        location: {
-          province: data.location?.province || 'กรุงเทพมหานคร',
-          district: data.location?.district || '',
-          hospital: data.location?.hospital || '',
-        },
-        createdAt: data.createdAt?.toDate?.() || new Date(),
-        updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        expiresAt: data.expiresAt?.toDate?.() || null,
-        status: data.status || 'active',
-        description: data.description || '',
-        contactPhone: data.contactPhone || '',
-        contactLine: data.contactLine || '',
-        viewsCount: data.viewsCount || 0,
-      } as JobPost;
-    });
-    
-    // Filter out expired and inactive posts
-    jobs = jobs.filter(job => {
-      if (job.status !== 'active' && job.status !== 'urgent') return false;
-      if (job.expiresAt && job.expiresAt < now) return false;
-      return true;
-    });
-    
-    console.log(`[subscribeToJobs] Got ${jobs.length} jobs from Firebase`);
-    
-    // รวม real data กับ mock data (แสดงทั้งสองอย่างเสมอ)
-    const mockJobs = getMockJobs();
-    // ไม่เพิ่ม mock ถ้ามี real jobs แล้ว (เพื่อไม่ให้ซ้ำ)
-    const allJobs = jobs.length > 0 ? [...jobs, ...mockJobs.slice(0, 3)] : mockJobs;
-    
-    callback(allJobs);
+    const jobs = snapshot.docs
+      .map(mapDocToJob)
+      .filter(isActivePost);
+
+    console.log(`[subscribeToJobs] ${jobs.length} active jobs from Firestore`);
+
+    // แสดง mock เฉพาะใน dev mode และเมื่อ feature flag เปิดอยู่เท่านั้น
+    if (SHOW_MOCK_DATA && jobs.length === 0) {
+      callback(getMockJobs());
+      return;
+    }
+
+    callback(jobs);
   }, (error) => {
-    console.error('Error subscribing to jobs:', error);
-    // Return mock data on error
-    callback(getMockJobs());
+    console.error('[subscribeToJobs] Firestore error:', error);
+    // ไม่ fallback ไป mock — ให้ caller จัดการ error state เอง
+    callback([]);
   });
 }
 
-// Get all active shifts with optional filters
-export async function getJobs(filters?: JobFilters): Promise<JobPost[]> {
+// Get active jobs with optional filters + pagination cursor
+export async function getJobs(
+  filters?: JobFilters,
+  cursor?: DocumentSnapshot,
+  pageSize = PAGE_SIZE,
+): Promise<{ jobs: JobPost[]; lastDoc: DocumentSnapshot | null }> {
   try {
-    // Use simpler query to avoid index issues
     let jobsQuery = query(
       collection(db, JOBS_COLLECTION),
+      where('status', 'in', ['active', 'urgent']),
       orderBy('createdAt', 'desc'),
-      limit(50)
+      limit(pageSize),
     );
-    
+
+    if (cursor) {
+      jobsQuery = query(jobsQuery, startAfter(cursor));
+    }
+
     const snapshot = await getDocs(jobsQuery);
-    let jobs = snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        title: data.title || 'หาคนแทน',
-        posterName: data.posterName || 'ไม่ระบุชื่อ',
-        posterId: data.posterId || '',
-        posterPhoto: data.posterPhoto,
-        department: data.department || 'ทั่วไป',
-        shiftRate: data.shiftRate || 1500,
-        rateType: data.rateType || 'shift',
-        shiftDate: data.shiftDate?.toDate?.() || new Date(),
-        shiftTime: data.shiftTime || '08:00-16:00',
-        location: {
-          province: data.location?.province || 'กรุงเทพมหานคร',
-          district: data.location?.district || '',
-          hospital: data.location?.hospital || '',
-        },
-        createdAt: data.createdAt?.toDate?.() || new Date(),
-        updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        status: data.status || 'active',
-        description: data.description || '',
-        contactPhone: data.contactPhone || '',
-        contactLine: data.contactLine || '',
-        viewsCount: data.viewsCount || 0,
-      } as JobPost;
-    });
+    let jobs = snapshot.docs.map(mapDocToJob).filter(isActivePost);
 
-    // Apply client-side filters (including status filter)
-    // Filter active/urgent status first
-    jobs = jobs.filter(job => job.status === 'active' || job.status === 'urgent');
-    
-    // Filter out expired posts
-    const now = new Date();
-    jobs = jobs.filter(job => {
-      if (!job.expiresAt) return true; // No expiry = always show
-      const expiresAt = job.expiresAt instanceof Date ? job.expiresAt : new Date(job.expiresAt);
-      return expiresAt > now;
-    });
-    
+    // Client-side filters
     if (filters) {
-      if (filters.province) {
-        jobs = jobs.filter(job => job.location?.province === filters.province);
-      }
-      if (filters.district) {
-        jobs = jobs.filter(job => job.location?.district === filters.district);
-      }
-      if (filters.department) {
-        jobs = jobs.filter(job => job.department === filters.department);
-      }
-      if (filters.urgentOnly) {
-        jobs = jobs.filter(job => job.status === 'urgent');
-      }
-      if (filters.minRate) {
-        jobs = jobs.filter(job => job.shiftRate >= filters.minRate!);
-      }
-      if (filters.maxRate) {
-        jobs = jobs.filter(job => job.shiftRate <= filters.maxRate!);
-      }
-      if (filters.sortBy === 'night') {
-        jobs = jobs.filter(job => job.shiftTime?.includes('00:00-08:00') || job.shiftTime?.includes('ดึก'));
-      } else if (filters.sortBy === 'morning') {
-        jobs = jobs.filter(job => job.shiftTime?.includes('08:00-16:00') || job.shiftTime?.includes('เช้า'));
-      } else if (filters.sortBy === 'highestPay') {
-        jobs = jobs.sort((a, b) => (b.shiftRate || 0) - (a.shiftRate || 0));
+      if (filters.province)     jobs = jobs.filter(j => j.location?.province === filters.province);
+      if (filters.district)     jobs = jobs.filter(j => j.location?.district === filters.district);
+      if (filters.department)   jobs = jobs.filter(j => j.department === filters.department);
+      if (filters.staffType)    jobs = jobs.filter(j => j.staffType === filters.staffType);
+      if (filters.locationType) jobs = jobs.filter(j => j.locationType === filters.locationType);
+      if (filters.urgentOnly)   jobs = jobs.filter(j => j.status === 'urgent' || j.isUrgent);
+      if (filters.verifiedOnly) jobs = jobs.filter(j => j.posterVerified);
+      if (filters.minRate)      jobs = jobs.filter(j => (j.shiftRate || 0) >= filters.minRate!);
+      if (filters.maxRate)      jobs = jobs.filter(j => (j.shiftRate || 0) <= filters.maxRate!);
+      if (filters.sortBy === 'highestPay') {
+        jobs.sort((a, b) => (b.shiftRate || 0) - (a.shiftRate || 0));
       }
     }
 
-    // If no jobs found, return mock data for demo
-    if (jobs.length === 0) {
-      console.log('No jobs found, returning mock data');
-      return getMockJobs();
-    }
+    const lastDoc = snapshot.docs.length === pageSize
+      ? snapshot.docs[snapshot.docs.length - 1] as DocumentSnapshot
+      : null;
 
-    return jobs;
+    return { jobs, lastDoc };
   } catch (error) {
-    console.error('Error fetching shifts:', error);
-    // Return mock data if Firebase fails
-    return getMockJobs();
+    console.error('[getJobs] Firestore error:', error);
+    throw error;
   }
 }
 
 // Get single job by ID
 export async function getJobById(jobId: string): Promise<JobPost | null> {
   try {
-    const docRef = doc(db, JOBS_COLLECTION, jobId);
-    const docSnap = await getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        title: data.title || '',
-        posterName: data.posterName || '',
-        posterId: data.posterId || '',
-        posterPhoto: data.posterPhoto,
-        department: data.department || '',
-        shiftRate: data.shiftRate || 0,
-        rateType: data.rateType || 'shift',
-        shiftDate: data.shiftDate?.toDate() || new Date(),
-        shiftTime: data.shiftTime || '',
-        location: data.location || {},
-        createdAt: data.createdAt?.toDate() || new Date(),
-        status: data.status || 'active',
-        ...data,
-      } as JobPost;
-    }
-    return null;
+    const docSnap = await getDoc(doc(db, JOBS_COLLECTION, jobId));
+    if (!docSnap.exists()) return null;
+    return mapDocToJob(docSnap as QueryDocumentSnapshot);
   } catch (error) {
-    console.error('Error fetching shift:', error);
+    console.error('[getJobById] error:', error);
     throw error;
   }
 }
 
-// Search shifts
+// Search shifts (client-side fulltext — อนาคตเปลี่ยนเป็น Algolia/Typesense)
 export async function searchJobs(searchText: string): Promise<JobPost[]> {
   try {
-    const allJobs = await getJobs();
-    const searchLower = searchText.toLowerCase();
-    
-    return allJobs.filter(job => 
-      job.posterName?.toLowerCase().includes(searchLower) ||
-      job.title.toLowerCase().includes(searchLower) ||
-      job.department.toLowerCase().includes(searchLower) ||
-      job.location?.district?.toLowerCase().includes(searchLower) ||
-      job.location?.province?.toLowerCase().includes(searchLower) ||
-      job.location?.hospital?.toLowerCase().includes(searchLower)
+    const { jobs } = await getJobs();
+    const q = searchText.toLowerCase();
+    return jobs.filter(job =>
+      job.posterName?.toLowerCase().includes(q) ||
+      job.title?.toLowerCase().includes(q) ||
+      job.department?.toLowerCase().includes(q) ||
+      job.location?.district?.toLowerCase().includes(q) ||
+      job.location?.province?.toLowerCase().includes(q) ||
+      job.location?.hospital?.toLowerCase().includes(q)
     );
   } catch (error) {
-    console.error('Error searching shifts:', error);
+    console.error('[searchJobs] error:', error);
+    throw error;
+  }
+}
+
+/**
+ * หางานใกล้ตัวด้วย Geohash
+ * @param lat  ละติจูดของผู้ใช้
+ * @param lng  ลองจิจูด
+ * @param radiusKm  รัศมีที่ต้องการ (กิโลเมตร)
+ */
+export async function getJobsNearby(
+  lat: number,
+  lng: number,
+  radiusKm = 10,
+): Promise<JobPost[]> {
+  try {
+    const geohashes = getQueryGeohashes(lat, lng, radiusKm);
+    const jobsQuery = query(
+      collection(db, JOBS_COLLECTION),
+      where('status', 'in', ['active', 'urgent']),
+      where('geohash', 'in', geohashes),
+      orderBy('createdAt', 'desc'),
+      limit(PAGE_SIZE),
+    );
+    const snapshot = await getDocs(jobsQuery);
+    const jobs = snapshot.docs.map(mapDocToJob).filter(isActivePost);
+
+    // เรียงตามระยะทางจริงโดยใช้ Haversine
+    jobs.sort((a, b) => {
+      const da = a.lat && a.lng ? getDistanceKm(lat, lng, a.lat, a.lng) : 9999;
+      const db2 = b.lat && b.lng ? getDistanceKm(lat, lng, b.lat, b.lng) : 9999;
+      return da - db2;
+    });
+
+    return jobs;
+  } catch (error) {
+    console.error('[getJobsNearby] error:', error);
     throw error;
   }
 }
@@ -240,25 +240,33 @@ export async function searchJobs(searchText: string): Promise<JobPost[]> {
 // Create new job post
 export async function createJob(jobData: Partial<JobPost>): Promise<string> {
   try {
-    // Clean undefined values - Firestore doesn't accept undefined
+    // Clean undefined values — Firestore rejects undefined fields
     const cleanData: Record<string, any> = {};
-    Object.entries(jobData).forEach(([key, value]) => {
-      if (value !== undefined) {
-        cleanData[key] = value;
-      }
-    });
+    for (const [key, value] of Object.entries(jobData)) {
+      if (value !== undefined) cleanData[key] = value;
+    }
+
+    // Auto-generate geohash — support both location.coordinates (Google Places) and location.lat/lng (map picker)
+    const coords = cleanData.location?.coordinates;
+    const locLat = coords?.lat || cleanData.location?.lat;
+    const locLng = coords?.lng || cleanData.location?.lng;
+    if (locLat && locLng) {
+      cleanData.geohash = encodeGeohash(locLat, locLng);
+      cleanData.lat = locLat;
+      cleanData.lng = locLng;
+    }
 
     const docRef = await addDoc(collection(db, JOBS_COLLECTION), {
       ...cleanData,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      applicationCount: 0,
+      applicantsCount: 0,
       viewsCount: 0,
       status: cleanData.status || 'active',
     });
     return docRef.id;
   } catch (error) {
-    console.error('Error creating job:', error);
+    console.error('[createJob] error:', error);
     throw error;
   }
 }
@@ -274,16 +282,15 @@ export async function updateJob(jobId: string, updates: Partial<JobPost>): Promi
   }
 }
 
-// Increment view count when someone views a job
+// Increment view count — ใช้ atomic increment ไม่ต้อง read ก่อน
 export async function incrementViewCount(jobId: string): Promise<void> {
   try {
-    const docRef = doc(db, JOBS_COLLECTION, jobId);
-    await updateDoc(docRef, {
+    await updateDoc(doc(db, JOBS_COLLECTION, jobId), {
       viewsCount: increment(1),
     });
   } catch (error) {
-    console.error('Error incrementing view count:', error);
-    // Don't throw - this is not critical
+    // ไม่ throw — view count ไม่ใช่ critical operation
+    console.warn('[incrementViewCount] non-critical error:', error);
   }
 }
 
@@ -304,85 +311,32 @@ export async function getUserPosts(userId: string): Promise<JobPost[]> {
     const jobsQuery = query(
       collection(db, JOBS_COLLECTION),
       where('posterId', '==', userId),
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'desc'),
     );
-    
     const snapshot = await getDocs(jobsQuery);
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        title: data.title || 'หาคนแทน',
-        posterName: data.posterName || 'ไม่ระบุชื่อ',
-        posterId: data.posterId || '',
-        posterPhoto: data.posterPhoto,
-        department: data.department || 'ทั่วไป',
-        shiftRate: data.shiftRate || 1500,
-        rateType: data.rateType || 'shift',
-        shiftDate: data.shiftDate?.toDate?.() || new Date(),
-        shiftTime: data.shiftTime || '08:00-16:00',
-        location: {
-          province: data.location?.province || 'กรุงเทพมหานคร',
-          district: data.location?.district || '',
-          hospital: data.location?.hospital || '',
-        },
-        createdAt: data.createdAt?.toDate?.() || new Date(),
-        updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        status: data.status || 'active',
-        description: data.description || '',
-        viewsCount: data.viewsCount || 0,
-      } as JobPost;
-    });
+    return snapshot.docs.map(mapDocToJob);
   } catch (error) {
-    console.error('Error fetching user posts:', error);
+    console.error('[getUserPosts] error:', error);
     return [];
   }
 }
 
 // Subscribe to user's posts in real-time
-export function subscribeToUserPosts(userId: string, callback: (posts: JobPost[]) => void): () => void {
-  // Use simple query without orderBy to avoid composite index requirement
+export function subscribeToUserPosts(
+  userId: string,
+  callback: (posts: JobPost[]) => void,
+): () => void {
   const postsQuery = query(
     collection(db, JOBS_COLLECTION),
-    where('posterId', '==', userId)
+    where('posterId', '==', userId),
+    orderBy('createdAt', 'desc'),
   );
 
   return onSnapshot(postsQuery, (snapshot) => {
-    const posts = snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        title: data.title || 'หาคนแทน',
-        posterName: data.posterName || 'ไม่ระบุชื่อ',
-        posterId: data.posterId || '',
-        posterPhoto: data.posterPhoto,
-        department: data.department || 'ทั่วไป',
-        shiftRate: data.shiftRate || 1500,
-        rateType: data.rateType || 'shift',
-        shiftDate: data.shiftDate?.toDate?.() || new Date(),
-        shiftTime: data.shiftTime || '08:00-16:00',
-        location: {
-          province: data.location?.province || 'กรุงเทพมหานคร',
-          district: data.location?.district || '',
-          hospital: data.location?.hospital || '',
-        },
-        createdAt: data.createdAt?.toDate?.() || new Date(),
-        updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        status: data.status || 'active',
-        description: data.description || '',
-        viewsCount: data.viewsCount || 0,
-      } as JobPost;
-    });
-    
-    // Sort by createdAt descending in client-side
-    posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    
-    callback(posts);
+    callback(snapshot.docs.map(mapDocToJob));
   }, (error) => {
-    console.error('Error subscribing to user posts:', error);
-    callback([]); // Return empty array on error
+    console.error('[subscribeToUserPosts] error:', error);
+    callback([]);
   });
 }
 
@@ -469,6 +423,7 @@ export async function getUserShiftContacts(userId: string): Promise<ShiftContact
         
         // Fetch job details
         let jobData: JobPost | undefined;
+        let jobDeleted = false;
         try {
           const jobDoc = await getDoc(doc(db, JOBS_COLLECTION, data.jobId));
           if (jobDoc.exists()) {
@@ -479,6 +434,9 @@ export async function getUserShiftContacts(userId: string): Promise<ShiftContact
               posterName: job.posterName || 'ไม่ระบุ',
               ...job,
             } as JobPost;
+          } else {
+            // Job was deleted
+            jobDeleted = true;
           }
         } catch (e) {
           console.error('Error fetching job:', e);
@@ -489,6 +447,8 @@ export async function getUserShiftContacts(userId: string): Promise<ShiftContact
           ...data,
           contactedAt: data.contactedAt?.toDate() || new Date(),
           job: jobData,
+          jobDeleted,
+          status: jobDeleted ? 'expired' : (data.status || 'interested'),
         } as ShiftContact;
       })
     );
@@ -505,6 +465,11 @@ export async function getUserShiftContacts(userId: string): Promise<ShiftContact
     console.error('Error fetching contacts:', error);
     return [];
   }
+}
+
+// Delete a contact entry from user's history
+export async function deleteShiftContact(contactId: string): Promise<void> {
+  await deleteDoc(doc(db, CONTACTS_COLLECTION, contactId));
 }
 
 // Get contacts for a shift (for poster)

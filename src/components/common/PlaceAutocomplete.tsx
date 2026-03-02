@@ -1,5 +1,5 @@
 // ============================================
-// PLACE AUTOCOMPLETE COMPONENT - Google Places API + Local Cache
+// PLACE AUTOCOMPLETE COMPONENT - Google Places API only
 // ============================================
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -8,303 +8,14 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
+  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
-import { searchPlacesGoogle, PlaceResult, openInGoogleMaps } from '../../services/placesService';
-
-// ใช้ Google Places API - ฟรี $200/เดือน (~28,000 requests)
-// Fallback: Local database ของโรงพยาบาลไทย
-
-// ====== LOCAL HOSPITAL DATABASE ======
-// Popular hospitals in Thailand for instant search
-const LOCAL_HOSPITALS: Array<{ name: string; province: string; district: string }> = [
-  // กรุงเทพมหานคร
-  { name: 'โรงพยาบาลศิริราช', province: 'กรุงเทพมหานคร', district: 'บางกอกน้อย' },
-  { name: 'โรงพยาบาลจุฬาลงกรณ์', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'โรงพยาบาลรามาธิบดี', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลพระมงกุฎเกล้า', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลราชวิถี', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลกรุงเทพ', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'โรงพยาบาลบำรุงราษฎร์', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'โรงพยาบาลสมิติเวช สุขุมวิท', province: 'กรุงเทพมหานคร', district: 'คลองเตย' },
-  { name: 'โรงพยาบาลสมิติเวช ศรีนครินทร์', province: 'กรุงเทพมหานคร', district: 'สวนหลวง' },
-  { name: 'โรงพยาบาลเปาโล พหลโยธิน', province: 'กรุงเทพมหานคร', district: 'จตุจักร' },
-  { name: 'โรงพยาบาลเปาโล เกษตร', province: 'กรุงเทพมหานคร', district: 'จตุจักร' },
-  { name: 'โรงพยาบาลพญาไท 1', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลพญาไท 2', province: 'กรุงเทพมหานคร', district: 'พญาไท' },
-  { name: 'โรงพยาบาลพญาไท 3', province: 'กรุงเทพมหานคร', district: 'บางซื่อ' },
-  { name: 'โรงพยาบาลเวชธานี', province: 'กรุงเทพมหานคร', district: 'ห้วยขวาง' },
-  { name: 'โรงพยาบาลวิภาวดี', province: 'กรุงเทพมหานคร', district: 'หลักสี่' },
-  { name: 'โรงพยาบาลลาดพร้าว', province: 'กรุงเทพมหานคร', district: 'ลาดพร้าว' },
-  { name: 'โรงพยาบาลเจ้าพระยา', province: 'กรุงเทพมหานคร', district: 'บางพลัด' },
-  { name: 'โรงพยาบาลธนบุรี', province: 'กรุงเทพมหานคร', district: 'ธนบุรี' },
-  { name: 'โรงพยาบาลตากสิน', province: 'กรุงเทพมหานคร', district: 'คลองสาน' },
-  { name: 'โรงพยาบาลศิริราช ปิยมหาราชการุณย์', province: 'กรุงเทพมหานคร', district: 'บางกอกน้อย' },
-  { name: 'โรงพยาบาลนวมินทร์', province: 'กรุงเทพมหานคร', district: 'บึงกุ่ม' },
-  { name: 'โรงพยาบาลสินแพทย์', province: 'กรุงเทพมหานคร', district: 'สะพานสูง' },
-  { name: 'โรงพยาบาลมงกุฎวัฒนะ', province: 'กรุงเทพมหานคร', district: 'หลักสี่' },
-  { name: 'โรงพยาบาลเซนต์หลุยส์', province: 'กรุงเทพมหานคร', district: 'สาทร' },
-  { name: 'โรงพยาบาลบีเอ็นเอช', province: 'กรุงเทพมหานคร', district: 'สาทร' },
-  { name: 'โรงพยาบาลราชพิพัฒน์', province: 'กรุงเทพมหานคร', district: 'บางแค' },
-  { name: 'โรงพยาบาลหลวงพ่อทวีศักดิ์', province: 'กรุงเทพมหานคร', district: 'หนองแขม' },
-  { name: 'โรงพยาบาลเลิดสิน', province: 'กรุงเทพมหานคร', district: 'บางรัก' },
-  { name: 'โรงพยาบาลผิวหนัง', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'สถาบันบำราศนราดูร', province: 'กรุงเทพมหานคร', district: 'ดอนเมือง' },
-  { name: 'สถาบันสุขภาพเด็กแห่งชาติ', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลทหารผ่านศึก', province: 'กรุงเทพมหานคร', district: 'พญาไท' },
-  { name: 'โรงพยาบาลโพลีคลินิก', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  
-  // ปริมณฑล
-  { name: 'โรงพยาบาลนนทเวช', province: 'นนทบุรี', district: 'เมืองนนทบุรี' },
-  { name: 'โรงพยาบาลกรุงไทย', province: 'นนทบุรี', district: 'บางบัวทอง' },
-  { name: 'โรงพยาบาลศูนย์การแพทย์นนทบุรี', province: 'นนทบุรี', district: 'เมืองนนทบุรี' },
-  { name: 'โรงพยาบาลปากเกร็ด', province: 'นนทบุรี', district: 'ปากเกร็ด' },
-  { name: 'โรงพยาบาลเจษฎา', province: 'นนทบุรี', district: 'บางใหญ่' },
-  { name: 'ศูนย์การแพทย์ปัญญานันทภิกขุ ชลประทาน', province: 'นนทบุรี', district: 'ปากเกร็ด' },
-  { name: 'โรงพยาบาลชลประทาน มศว', province: 'นนทบุรี', district: 'ปากเกร็ด' },
-  { name: 'โรงพยาบาลพระนั่งเกล้า', province: 'นนทบุรี', district: 'เมืองนนทบุรี' },
-  { name: 'โรงพยาบาลบางใหญ่', province: 'นนทบุรี', district: 'บางใหญ่' },
-  { name: 'โรงพยาบาลบางบัวทอง', province: 'นนทบุรี', district: 'บางบัวทอง' },
-  { name: 'โรงพยาบาลธรรมศาสตร์เฉลิมพระเกียรติ', province: 'ปทุมธานี', district: 'คลองหลวง' },
-  { name: 'โรงพยาบาลปทุมธานี', province: 'ปทุมธานี', district: 'เมืองปทุมธานี' },
-  { name: 'โรงพยาบาลรังสิต', province: 'ปทุมธานี', district: 'ธัญบุรี' },
-  { name: 'โรงพยาบาลสมุทรปราการ', province: 'สมุทรปราการ', district: 'เมืองสมุทรปราการ' },
-  { name: 'โรงพยาบาลเมืองสมุทรปู่เจ้า', province: 'สมุทรปราการ', district: 'เมืองสมุทรปราการ' },
-  { name: 'โรงพยาบาลกรุงไทย แจ้งวัฒนะ', province: 'นนทบุรี', district: 'ปากเกร็ด' },
-  
-  
-  // ภาคกลาง
-  { name: 'โรงพยาบาลพระนครศรีอยุธยา', province: 'พระนครศรีอยุธยา', district: 'พระนครศรีอยุธยา' },
-  { name: 'โรงพยาบาลราชธานี', province: 'พระนครศรีอยุธยา', district: 'พระนครศรีอยุธยา' },
-  { name: 'โรงพยาบาลนครปฐม', province: 'นครปฐม', district: 'เมืองนครปฐม' },
-  { name: 'โรงพยาบาลสนามจันทร์', province: 'นครปฐม', district: 'เมืองนครปฐม' },
-  { name: 'โรงพยาบาลสระบุรี', province: 'สระบุรี', district: 'เมืองสระบุรี' },
-  { name: 'โรงพยาบาลสิงห์บุรี', province: 'สิงห์บุรี', district: 'เมืองสิงห์บุรี' },
-  { name: 'โรงพยาบาลอ่างทอง', province: 'อ่างทอง', district: 'เมืองอ่างทอง' },
-  
-  // ภาคเหนือ
-  { name: 'โรงพยาบาลมหาราชนครเชียงใหม่', province: 'เชียงใหม่', district: 'เมืองเชียงใหม่' },
-  { name: 'โรงพยาบาลเชียงใหม่ราม', province: 'เชียงใหม่', district: 'เมืองเชียงใหม่' },
-  { name: 'โรงพยาบาลลานนา', province: 'เชียงใหม่', district: 'เมืองเชียงใหม่' },
-  { name: 'โรงพยาบาลนครพิงค์', province: 'เชียงใหม่', district: 'แม่ริม' },
-  { name: 'โรงพยาบาลเชียงรายประชานุเคราะห์', province: 'เชียงราย', district: 'เมืองเชียงราย' },
-  { name: 'โรงพยาบาลโอเวอร์บรุ๊ค', province: 'เชียงราย', district: 'เมืองเชียงราย' },
-  { name: 'โรงพยาบาลพุทธชินราช พิษณุโลก', province: 'พิษณุโลก', district: 'เมืองพิษณุโลก' },
-  { name: 'โรงพยาบาลลำปาง', province: 'ลำปาง', district: 'เมืองลำปาง' },
-  { name: 'โรงพยาบาลลำพูน', province: 'ลำพูน', district: 'เมืองลำพูน' },
-  { name: 'โรงพยาบาลพะเยา', province: 'พะเยา', district: 'เมืองพะเยา' },
-  { name: 'โรงพยาบาลแพร่', province: 'แพร่', district: 'เมืองแพร่' },
-  { name: 'โรงพยาบาลน่าน', province: 'น่าน', district: 'เมืองน่าน' },
-  
-  // ภาคตะวันออกเฉียงเหนือ
-  { name: 'โรงพยาบาลศรีนครินทร์ ขอนแก่น', province: 'ขอนแก่น', district: 'เมืองขอนแก่น' },
-  { name: 'โรงพยาบาลขอนแก่น', province: 'ขอนแก่น', district: 'เมืองขอนแก่น' },
-  { name: 'โรงพยาบาลราชพฤกษ์', province: 'ขอนแก่น', district: 'เมืองขอนแก่น' },
-  { name: 'โรงพยาบาลมหาราชนครราชสีมา', province: 'นครราชสีมา', district: 'เมืองนครราชสีมา' },
-  { name: 'โรงพยาบาลเทพรัตน์นครราชสีมา', province: 'นครราชสีมา', district: 'เมืองนครราชสีมา' },
-  { name: 'โรงพยาบาลกรุงเทพราชสีมา', province: 'นครราชสีมา', district: 'เมืองนครราชสีมา' },
-  { name: 'โรงพยาบาลสรรพสิทธิประสงค์', province: 'อุบลราชธานี', district: 'เมืองอุบลราชธานี' },
-  { name: 'โรงพยาบาลอุบลรักษ์ธนบุรี', province: 'อุบลราชธานี', district: 'เมืองอุบลราชธานี' },
-  { name: 'โรงพยาบาลอุดรธานี', province: 'อุดรธานี', district: 'เมืองอุดรธานี' },
-  { name: 'โรงพยาบาลเอกอุดร', province: 'อุดรธานี', district: 'เมืองอุดรธานี' },
-  { name: 'โรงพยาบาลร้อยเอ็ด', province: 'ร้อยเอ็ด', district: 'เมืองร้อยเอ็ด' },
-  { name: 'โรงพยาบาลมหาสารคาม', province: 'มหาสารคาม', district: 'เมืองมหาสารคาม' },
-  { name: 'โรงพยาบาลสกลนคร', province: 'สกลนคร', district: 'เมืองสกลนคร' },
-  { name: 'โรงพยาบาลนครพนม', province: 'นครพนม', district: 'เมืองนครพนม' },
-  { name: 'โรงพยาบาลสุรินทร์', province: 'สุรินทร์', district: 'เมืองสุรินทร์' },
-  { name: 'โรงพยาบาลบุรีรัมย์', province: 'บุรีรัมย์', district: 'เมืองบุรีรัมย์' },
-  { name: 'โรงพยาบาลชัยภูมิ', province: 'ชัยภูมิ', district: 'เมืองชัยภูมิ' },
-  { name: 'โรงพยาบาลเลย', province: 'เลย', district: 'เมืองเลย' },
-  { name: 'โรงพยาบาลหนองคาย', province: 'หนองคาย', district: 'เมืองหนองคาย' },
-  { name: 'โรงพยาบาลศรีสะเกษ', province: 'ศรีสะเกษ', district: 'เมืองศรีสะเกษ' },
-  { name: 'โรงพยาบาลยโสธร', province: 'ยโสธร', district: 'เมืองยโสธร' },
-  { name: 'โรงพยาบาลกาฬสินธุ์', province: 'กาฬสินธุ์', district: 'เมืองกาฬสินธุ์' },
-  { name: 'โรงพยาบาลอำนาจเจริญ', province: 'อำนาจเจริญ', district: 'เมืองอำนาจเจริญ' },
-  { name: 'โรงพยาบาลมุกดาหาร', province: 'มุกดาหาร', district: 'เมืองมุกดาหาร' },
-  
-  // ภาคตะวันออก
-  { name: 'โรงพยาบาลชลบุรี', province: 'ชลบุรี', district: 'เมืองชลบุรี' },
-  { name: 'โรงพยาบาลบางละมุง', province: 'ชลบุรี', district: 'บางละมุง' },
-  { name: 'โรงพยาบาลกรุงเทพพัทยา', province: 'ชลบุรี', district: 'บางละมุง' },
-  { name: 'โรงพยาบาลพญาไทศรีราชา', province: 'ชลบุรี', district: 'ศรีราชา' },
-  { name: 'โรงพยาบาลแหลมฉบัง', province: 'ชลบุรี', district: 'ศรีราชา' },
-  { name: 'โรงพยาบาลระยอง', province: 'ระยอง', district: 'เมืองระยอง' },
-  { name: 'โรงพยาบาลมงกุฎระยอง', province: 'ระยอง', district: 'เมืองระยอง' },
-  { name: 'โรงพยาบาลพระปกเกล้า', province: 'จันทบุรี', district: 'เมืองจันทบุรี' },
-  { name: 'โรงพยาบาลตราด', province: 'ตราด', district: 'เมืองตราด' },
-  { name: 'โรงพยาบาลเจ้าพระยาอภัยภูเบศร', province: 'ปราจีนบุรี', district: 'เมืองปราจีนบุรี' },
-  { name: 'โรงพยาบาลสระแก้ว', province: 'สระแก้ว', district: 'เมืองสระแก้ว' },
-  { name: 'โรงพยาบาลฉะเชิงเทรา', province: 'ฉะเชิงเทรา', district: 'เมืองฉะเชิงเทรา' },
-  
-  // ภาคตะวันตก
-  { name: 'โรงพยาบาลหัวหิน', province: 'ประจวบคีรีขันธ์', district: 'หัวหิน' },
-  { name: 'โรงพยาบาลกรุงเทพหัวหิน', province: 'ประจวบคีรีขันธ์', district: 'หัวหิน' },
-  { name: 'โรงพยาบาลประจวบคีรีขันธ์', province: 'ประจวบคีรีขันธ์', district: 'เมืองประจวบคีรีขันธ์' },
-  { name: 'โรงพยาบาลราชบุรี', province: 'ราชบุรี', district: 'เมืองราชบุรี' },
-  { name: 'โรงพยาบาลเพชรบุรี', province: 'เพชรบุรี', district: 'เมืองเพชรบุรี' },
-  { name: 'โรงพยาบาลกาญจนบุรี', province: 'กาญจนบุรี', district: 'เมืองกาญจนบุรี' },
-  { name: 'โรงพยาบาลมะการักษ์', province: 'กาญจนบุรี', district: 'ท่ามะกา' },
-  { name: 'โรงพยาบาลสุพรรณบุรี', province: 'สุพรรณบุรี', district: 'เมืองสุพรรณบุรี' },
-  { name: 'โรงพยาบาลเจ้าพระยายมราช', province: 'สุพรรณบุรี', district: 'เมืองสุพรรณบุรี' },
-  
-  // ภาคใต้
-  { name: 'โรงพยาบาลสงขลานครินทร์', province: 'สงขลา', district: 'หาดใหญ่' },
-  { name: 'โรงพยาบาลหาดใหญ่', province: 'สงขลา', district: 'หาดใหญ่' },
-  { name: 'โรงพยาบาลสงขลา', province: 'สงขลา', district: 'เมืองสงขลา' },
-  { name: 'โรงพยาบาลกรุงเทพหาดใหญ่', province: 'สงขลา', district: 'หาดใหญ่' },
-  { name: 'โรงพยาบาลมหาราชนครศรีธรรมราช', province: 'นครศรีธรรมราช', district: 'เมืองนครศรีธรรมราช' },
-  { name: 'โรงพยาบาลสุราษฎร์ธานี', province: 'สุราษฎร์ธานี', district: 'เมืองสุราษฎร์ธานี' },
-  { name: 'โรงพยาบาลกรุงเทพสมุย', province: 'สุราษฎร์ธานี', district: 'เกาะสมุย' },
-  { name: 'โรงพยาบาลวชิระภูเก็ต', province: 'ภูเก็ต', district: 'เมืองภูเก็ต' },
-  { name: 'โรงพยาบาลกรุงเทพภูเก็ต', province: 'ภูเก็ต', district: 'เมืองภูเก็ต' },
-  { name: 'โรงพยาบาลดีบุก', province: 'ภูเก็ต', district: 'เมืองภูเก็ต' },
-  { name: 'โรงพยาบาลกระบี่', province: 'กระบี่', district: 'เมืองกระบี่' },
-  { name: 'โรงพยาบาลตรัง', province: 'ตรัง', district: 'เมืองตรัง' },
-  { name: 'โรงพยาบาลพัทลุง', province: 'พัทลุง', district: 'เมืองพัทลุง' },
-  { name: 'โรงพยาบาลนราธิวาสราชนครินทร์', province: 'นราธิวาส', district: 'เมืองนราธิวาส' },
-  { name: 'โรงพยาบาลปัตตานี', province: 'ปัตตานี', district: 'เมืองปัตตานี' },
-  { name: 'โรงพยาบาลยะลา', province: 'ยะลา', district: 'เมืองยะลา' },
-  { name: 'โรงพยาบาลสตูล', province: 'สตูล', district: 'เมืองสตูล' },
-  { name: 'โรงพยาบาลชุมพรเขตรอุดมศักดิ์', province: 'ชุมพร', district: 'เมืองชุมพร' },
-  { name: 'โรงพยาบาลระนอง', province: 'ระนอง', district: 'เมืองระนอง' },
-  { name: 'โรงพยาบาลพังงา', province: 'พังงา', district: 'เมืองพังงา' },
-  
-  // ====== คลินิก - Clinics ======
-  // คลินิกความงาม/ผิวหนัง - กรุงเทพ
-  { name: 'คลินิกนิติพล', province: 'กรุงเทพมหานคร', district: 'พญาไท' },
-  { name: 'คลินิกธนพร', province: 'กรุงเทพมหานคร', district: 'ห้วยขวาง' },
-  { name: 'คลินิกพรเกษม', province: 'กรุงเทพมหานคร', district: 'บางแค' },
-  { name: 'SLC Clinic สยาม', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Dermaster Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Pan Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Romrawin Clinic', province: 'กรุงเทพมหานคร', district: 'จตุจักร' },
-  { name: 'Siam Laser Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'KTOP Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Apex Medical Center', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Rattinan Clinic', province: 'กรุงเทพมหานคร', district: 'พระโขนง' },
-  { name: 'Nida Skin Clinic', province: 'กรุงเทพมหานคร', district: 'ลาดพร้าว' },
-  { name: 'Pongsak Clinic', province: 'กรุงเทพมหานคร', district: 'บางกะปิ' },
-  { name: 'The Klinique', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Gangnam Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Masterpiece Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Proud Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Medisci Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Absolute Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Let Me In Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Metro Beauty Centers', province: 'กรุงเทพมหานคร', district: 'บางนา' },
-  { name: 'Skinserity Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'Blusky Clinic', province: 'กรุงเทพมหานคร', district: 'จตุจักร' },
-  { name: 'Lovely Eye Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'PSC Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  
-  // คลินิกเวชกรรมทั่วไป - กรุงเทพ
-  { name: 'คลินิกหมอครอบครัว', province: 'กรุงเทพมหานคร', district: 'บางกะปิ' },
-  { name: 'คลินิกแพทย์รวมใจ', province: 'กรุงเทพมหานคร', district: 'ห้วยขวาง' },
-  { name: 'คลินิกเซ็นทรัลเมดิคอล', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'คลินิกสุขภาพดี', province: 'กรุงเทพมหานคร', district: 'บางนา' },
-  { name: 'คลินิกหมอเมืองทอง', province: 'นนทบุรี', district: 'ปากเกร็ด' },
-  { name: 'คลินิกเวชกรรมบางแค', province: 'กรุงเทพมหานคร', district: 'บางแค' },
-  { name: 'คลินิกนายแพทย์สมชาย', province: 'กรุงเทพมหานคร', district: 'ดอนเมือง' },
-  
-  // คลินิกเฉพาะทาง
-  { name: 'คลินิกกระดูกและข้อ', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'คลินิกตา หู คอ จมูก', province: 'กรุงเทพมหานคร', district: 'ห้วยขวาง' },
-  { name: 'คลินิกเด็ก', province: 'กรุงเทพมหานคร', district: 'บางกะปิ' },
-  { name: 'คลินิกสูติ-นรีเวช', province: 'กรุงเทพมหานคร', district: 'ลาดพร้าว' },
-  { name: 'คลินิกหัวใจ', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'คลินิกไต', province: 'กรุงเทพมหานคร', district: 'ห้วยขวาง' },
-  { name: 'คลินิกเบาหวาน', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'คลินิกโรคผิวหนัง', province: 'กรุงเทพมหานคร', district: 'พญาไท' },
-  
-  // ศูนย์ไตเทียม/ฟอกไต
-  { name: 'ศูนย์ไตเทียม ราชวิถี', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'ศูนย์ไตเทียม รามาธิบดี', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'ศูนย์ไตเทียม บางนา', province: 'กรุงเทพมหานคร', district: 'บางนา' },
-  { name: 'คลินิกฟอกไต เพรสซิเดนท์', province: 'กรุงเทพมหานคร', district: 'จตุจักร' },
-  { name: 'ศูนย์ไตเทียมธนบุรี', province: 'กรุงเทพมหานคร', district: 'ธนบุรี' },
-  
-  // คลินิกความงาม - ปริมณฑล
-  { name: 'Siam Clinic นนทบุรี', province: 'นนทบุรี', district: 'เมืองนนทบุรี' },
-  { name: 'คลินิกหมอกานต์ รังสิต', province: 'ปทุมธานี', district: 'ธัญบุรี' },
-  { name: 'Pan Clinic รังสิต', province: 'ปทุมธานี', district: 'ธัญบุรี' },
-  { name: 'SLC Clinic ฟิวเจอร์พาร์ค', province: 'ปทุมธานี', district: 'ธัญบุรี' },
-  { name: 'Dermaster ซีคอนบางแค', province: 'กรุงเทพมหานคร', district: 'บางแค' },
-  
-  // คลินิกความงาม - ต่างจังหวัด
-  { name: 'SLC Clinic เชียงใหม่', province: 'เชียงใหม่', district: 'เมืองเชียงใหม่' },
-  { name: 'Pan Clinic เชียงใหม่', province: 'เชียงใหม่', district: 'เมืองเชียงใหม่' },
-  { name: 'Nida Skin Clinic เชียงใหม่', province: 'เชียงใหม่', district: 'เมืองเชียงใหม่' },
-  { name: 'คลินิกนิติพล เชียงใหม่', province: 'เชียงใหม่', district: 'เมืองเชียงใหม่' },
-  { name: 'คลินิกความงาม ขอนแก่น', province: 'ขอนแก่น', district: 'เมืองขอนแก่น' },
-  { name: 'Dermaster ขอนแก่น', province: 'ขอนแก่น', district: 'เมืองขอนแก่น' },
-  { name: 'SLC Clinic ภูเก็ต', province: 'ภูเก็ต', district: 'เมืองภูเก็ต' },
-  { name: 'Pan Clinic พัทยา', province: 'ชลบุรี', district: 'บางละมุง' },
-  { name: 'คลินิกความงาม หาดใหญ่', province: 'สงขลา', district: 'หาดใหญ่' },
-  { name: 'Nida Skin หาดใหญ่', province: 'สงขลา', district: 'หาดใหญ่' },
-  { name: 'SLC Clinic นครราชสีมา', province: 'นครราชสีมา', district: 'เมืองนครราชสีมา' },
-  { name: 'คลินิกความงาม อุดรธานี', province: 'อุดรธานี', district: 'เมืองอุดรธานี' },
-  
-  // คลินิกศัลยกรรม
-  { name: 'Bangmod Aesthetic Center', province: 'กรุงเทพมหานคร', district: 'ทุ่งครุ' },
-  { name: 'Yoskarn Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Bangkok Plastic Surgery', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'DRK Beauty Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Kamol Hospital', province: 'กรุงเทพมหานคร', district: 'ห้วยขวาง' },
-  { name: 'Lelux Hospital', province: 'กรุงเทพมหานคร', district: 'สวนหลวง' },
-  
-  // คลินิกทันตกรรม (พยาบาลทันตกรรม)
-  { name: 'คลินิกทันตกรรม BIDC', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'DentAsia Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'คลินิกทันตกรรม พระราม 2', province: 'กรุงเทพมหานคร', district: 'บางขุนเทียน' },
-  { name: 'SmileDC Clinic', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  
-  // คลินิกกายภาพบำบัด
-  { name: 'คลินิกกายภาพบำบัด ฟิสิโอ', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  { name: 'PhysioTherapy Clinic', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'ศูนย์กายภาพบำบัด สมิติเวช', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-  
-  // คลินิกเสริมความงาม หลายสาขา
-  { name: 'Medisci Clinic ราชประสงค์', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Romrawin Clinic สยาม', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Romrawin Clinic ลาดพร้าว', province: 'กรุงเทพมหานคร', district: 'ลาดพร้าว' },
-  { name: 'Romrawin Clinic เซ็นทรัลเวิลด์', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Apex สาขาสยามพารากอน', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'Apex สาขาเอ็มควอเทียร์', province: 'กรุงเทพมหานคร', district: 'วัฒนา' },
-];
-
-
-// ====== FUZZY SEARCH FUNCTION ======
-function fuzzyMatch(text: string, query: string): boolean {
-  const textLower = text.toLowerCase();
-  const queryLower = query.toLowerCase();
-  
-  // Direct include
-  if (textLower.includes(queryLower)) return true;
-  
-  // Remove common prefixes for matching
-  const cleanText = textLower.replace(/^(โรงพยาบาล|รพ\.?|รพ |hospital|clinic|คลินิก)/i, '').trim();
-  const cleanQuery = queryLower.replace(/^(โรงพยาบาล|รพ\.?|รพ |hospital|clinic|คลินิก)/i, '').trim();
-  
-  if (cleanText.includes(cleanQuery)) return true;
-  if (cleanQuery.length > 2 && cleanText.includes(cleanQuery.substring(0, cleanQuery.length - 1))) return true;
-  
-  return false;
-}
-
-function searchLocalHospitals(query: string): Array<{ name: string; province: string; district: string }> {
-  if (!query || query.length < 1) return [];
-  
-  return LOCAL_HOSPITALS.filter(h => 
-    fuzzyMatch(h.name, query) || 
-    fuzzyMatch(h.province, query) || 
-    fuzzyMatch(h.district, query)
-  ).slice(0, 8);
-}
+import { searchPlacesGoogle, getPlaceDetailsGoogle, PlaceResult } from '../../services/placesService';
 
 // Re-export PlaceResult type for compatibility
 interface LocalPlaceResult {
@@ -314,6 +25,7 @@ interface LocalPlaceResult {
   address?: string;
   lat?: number;
   lng?: number;
+  place_id?: string;
 }
 
 interface PlaceAutocompleteProps {
@@ -344,13 +56,14 @@ export function PlaceAutocomplete({
   const [results, setResults] = useState<LocalPlaceResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [apiError, setApiError] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     setQuery(value);
   }, [value]);
 
-  // Search using Google Places API first, fallback เป็น local hospital DB
+  // Search using Google Places API only
   const searchOnlineDebounced = useCallback(
     debounce(async (text: string) => {
       if (!text || text.length < 2) {
@@ -358,41 +71,20 @@ export function PlaceAutocomplete({
         return;
       }
 
+      setApiError(false);
       try {
-        // 1) พยายามใช้ Google Places (หรือ Longdo) จาก service ก่อน
         const apiResults = await searchPlacesGoogle(text);
-
-        if (apiResults.length > 0) {
-          setResults(apiResults);
-          setShowResults(true);
-          return;
-        }
-
-        // 2) ถ้า API ไม่ได้ผลลัพธ์ ให้ fallback มาใช้ local hospital DB
-        const localResults = searchLocalHospitals(text).map(h => ({
-          name: h.name,
-          province: h.province,
-          district: h.district,
-          address: `${h.name}, ${h.district}, ${h.province}`,
-        }));
-
-        setResults(localResults);
-        setShowResults(localResults.length > 0);
-      } catch (error) {
-        console.error('Place search error:', error);
-        // Fallback local เวลามี error
-        const localResults = searchLocalHospitals(text).map(h => ({
-          name: h.name,
-          province: h.province,
-          district: h.district,
-          address: `${h.name}, ${h.district}, ${h.province}`,
-        }));
-        setResults(localResults);
-        setShowResults(localResults.length > 0);
+        setResults(apiResults);
+        setShowResults(true);
+      } catch (err) {
+        console.error('Place search error:', err);
+        setApiError(true);
+        setResults([]);
+        setShowResults(true);
       } finally {
         setIsLoading(false);
       }
-    }, 400),
+    }, 500),
     []
   );
 
@@ -403,6 +95,7 @@ export function PlaceAutocomplete({
       setResults([]);
       setShowResults(false);
       setIsLoading(false);
+      setApiError(false);
       return;
     }
 
@@ -416,10 +109,26 @@ export function PlaceAutocomplete({
     }
   };
 
-  const handleSelect = (place: LocalPlaceResult) => {
+  const handleSelect = async (place: LocalPlaceResult) => {
     setQuery(place.name);
     setShowResults(false);
     Keyboard.dismiss();
+    // Fetch lat/lng in background if we have a place_id (only fires once on selection)
+    if (place.place_id) {
+      try {
+        const details = await getPlaceDetailsGoogle(place.place_id);
+        if (details) {
+          onSelect({
+            ...place,
+            lat: details.lat,
+            lng: details.lng,
+            province: details.province || place.province,
+            district: details.district || place.district,
+          });
+          return;
+        }
+      } catch (_) { /* fall through */ }
+    }
     onSelect(place);
   };
 
@@ -427,6 +136,7 @@ export function PlaceAutocomplete({
     setQuery('');
     setResults([]);
     setShowResults(false);
+    setApiError(false);
     onSelect({ name: '', province: '', district: '' });
   };
 
@@ -483,30 +193,45 @@ export function PlaceAutocomplete({
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      {/* Results dropdown */}
+      {/* Results dropdown — use ScrollView instead of FlatList to avoid VirtualizedList nesting warning */}
       {showResults && results.length > 0 && (
         <View style={styles.resultsContainer}>
-          <FlatList
-            data={results}
-            renderItem={renderResultItem}
-            keyExtractor={(item, index) => `${item.name}-${index}`}
+          <ScrollView
             keyboardShouldPersistTaps="handled"
             style={styles.resultsList}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-          />
+            nestedScrollEnabled
+          >
+            {results.map((item, index) => (
+              <React.Fragment key={`${item.name}-${index}`}>
+                {renderResultItem({ item })}
+                {index < results.length - 1 && <View style={styles.separator} />}
+              </React.Fragment>
+            ))}
+          </ScrollView>
         </View>
       )}
 
-      {/* No results */}
-      {showResults && query.length >= 2 && results.length === 0 && !isLoading && (
+      {/* No results / error panel */}
+      {showResults && results.length === 0 && !isLoading && (
         <View style={styles.noResultsContainer}>
-          <Text style={styles.noResultsText}>ไม่พบสถานที่ที่ค้นหา</Text>
-          <Text style={styles.noResultsHint}>ลองพิมพ์ชื่อโรงพยาบาลหรือคลินิก</Text>
+          {apiError ? (
+            <>
+              <Ionicons name="wifi-outline" size={28} color={COLORS.textMuted} />
+              <Text style={styles.noResultsText}>เชื่อมต่อ Google Maps ไม่ได้</Text>
+              <Text style={styles.noResultsHint}>ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="search-outline" size={28} color={COLORS.textMuted} />
+              <Text style={styles.noResultsText}>ไม่พบสถานที่</Text>
+              <Text style={styles.noResultsHint}>ลองพิมพ์ชื่อเต็มหรือพิมพ์เป็นภาษาอังกฤษ</Text>
+            </>
+          )}
           <TouchableOpacity
             style={styles.useTypedButton}
             onPress={() => handleSelect({ name: query, province: '', district: '' })}
           >
-            <Text style={styles.useTypedText}>ใช้สถานที่ที่พิมพ์: "{query}"</Text>
+            <Text style={styles.useTypedText}>ใช้ชื่อที่พิมพ์: "{query}"</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -522,42 +247,10 @@ interface QuickPlacePickerProps {
   onSelect: (place: PlaceResult) => void;
 }
 
-const POPULAR_HOSPITALS = [
-  { name: 'โรงพยาบาลศิริราช', province: 'กรุงเทพมหานคร', district: 'บางกอกน้อย' },
-  { name: 'โรงพยาบาลจุฬาลงกรณ์', province: 'กรุงเทพมหานคร', district: 'ปทุมวัน' },
-  { name: 'โรงพยาบาลรามาธิบดี', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลราชวิถี', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลพระมงกุฎเกล้า', province: 'กรุงเทพมหานคร', district: 'ราชเทวี' },
-  { name: 'โรงพยาบาลภูมิพลอดุลยเดช', province: 'กรุงเทพมหานคร', district: 'สายไหม' },
-];
-
-export function QuickPlacePicker({ province, onSelect }: QuickPlacePickerProps) {
-  const hospitals = province
-    ? POPULAR_HOSPITALS.filter((h) => h.province === province).slice(0, 4)
-    : POPULAR_HOSPITALS.slice(0, 4);
-
-  if (hospitals.length === 0) return null;
-
-  return (
-    <View style={styles.quickPickerContainer}>
-      <Text style={styles.quickPickerTitle}>⚡ เลือกเร็ว</Text>
-      <View style={styles.quickPickerList}>
-        {hospitals.map((hospital, index) => (
-          <TouchableOpacity
-            key={`${hospital.name}-${index}`}
-            style={styles.quickPickerItem}
-            onPress={() => onSelect({
-              name: hospital.name,
-              province: hospital.province,
-              district: hospital.district,
-            })}
-          >
-            <Text style={styles.quickPickerItemText}>🏥 {hospital.name}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
+// QuickPlacePicker — no longer uses a local database.
+// Returns null; kept for API compatibility.
+export function QuickPlacePicker(_props: QuickPlacePickerProps) {
+  return null;
 }
 
 // ============================================
@@ -682,31 +375,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Quick picker
-  quickPickerContainer: {
-    marginTop: SPACING.md,
-  },
-  quickPickerTitle: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-  },
-  quickPickerList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.xs,
-  },
-  quickPickerItem: {
-    backgroundColor: COLORS.primaryLight,
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  quickPickerItemText: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
-  },
+
 });
 
 export default PlaceAutocomplete;

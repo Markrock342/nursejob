@@ -311,8 +311,8 @@ class IAPManager {
   private async getRNIap(): Promise<any> {
     try {
       // Dynamic import — จะ fail ถ้ายังไม่ได้ install package
-      const module = await import('react-native-iap');
-      return module.default || module;
+      const mod: any = await import('react-native-iap');
+      return mod?.default ?? mod;
     } catch {
       console.warn('⚠️ react-native-iap not installed. Running in mock mode.');
       return null;
