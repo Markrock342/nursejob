@@ -21,6 +21,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Sentry from '@sentry/react-native';
 
+// Init Sentry early (before any component renders)
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
+  enabled: !__DEV__, // ปิดใน dev เพื่อไม่ให้ส่ง event ตอนทดสอบ
+  tracesSampleRate: 0.2,
+  debug: false,
+});
+
 // Context Providers
 import { AuthProvider } from './src/context/AuthContext';
 import { NotificationProvider } from './src/context/NotificationContext';
