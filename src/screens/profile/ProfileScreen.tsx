@@ -9,7 +9,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   TextInput,
   RefreshControl,
   Platform,
@@ -19,7 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { KittenButton as Button, Avatar, Card, Loading, ModalContainer, Input, Badge, Divider, ConfirmModal, ProfileProgressBar } from '../../components/common';
+import { KittenButton as Button, Avatar, Card, Loading, ModalContainer, Input, Badge, Divider, ConfirmModal, SuccessModal, ErrorModal, ProfileProgressBar } from '../../components/common';
 import { sendOTP, verifyOTP } from '../../services/otpService';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, POSITIONS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -64,6 +63,12 @@ export default function ProfileScreen({ navigation }: Props) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showDeleteContactModal, setShowDeleteContactModal] = useState(false);
+  const [pendingDeleteContact, setPendingDeleteContact] = useState<{ id: string; title: string } | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalMessage, setModalMessage] = useState('');
   const [favoritesCount, setFavoritesCount] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   // OTP states
@@ -150,28 +155,25 @@ export default function ProfileScreen({ navigation }: Props) {
 
   // Delete contact from history
   const handleDeleteContact = (contactId: string, jobTitle: string) => {
-    Alert.alert(
-      'ลบออกจากประวัติ',
-      `ต้องการลบ "${jobTitle}" ออกจากประวัติการติดต่อ?`,
-      [
-        { text: 'ยกเลิก', style: 'cancel' },
-        {
-          text: 'ลบ',
-          style: 'destructive',
-          onPress: async () => {
-            setDeletingContactId(contactId);
-            try {
-              await deleteShiftContact(contactId);
-              setContacts(prev => prev.filter(c => c.id !== contactId));
-            } catch (e) {
-              Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถลบได้ กรุณาลองใหม่');
-            } finally {
-              setDeletingContactId(null);
-            }
-          },
-        },
-      ]
-    );
+    setPendingDeleteContact({ id: contactId, title: jobTitle });
+    setShowDeleteContactModal(true);
+  };
+
+  const confirmDeleteContact = async () => {
+    if (!pendingDeleteContact) return;
+    setShowDeleteContactModal(false);
+    setDeletingContactId(pendingDeleteContact.id);
+    try {
+      await deleteShiftContact(pendingDeleteContact.id);
+      setContacts(prev => prev.filter(c => c.id !== pendingDeleteContact.id));
+    } catch (e) {
+      setModalTitle('เกิดข้อผิดพลาด');
+      setModalMessage('ไม่สามารถลบได้ กรุณาลองใหม่');
+      setShowErrorModal(true);
+    } finally {
+      setDeletingContactId(null);
+      setPendingDeleteContact(null);
+    }
   };
 
   // Get status config for contact history
@@ -208,7 +210,9 @@ export default function ProfileScreen({ navigation }: Props) {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
     
     if (!permissionResult.granted) {
-      Alert.alert('ไม่มีสิทธิ์', 'กรุณาอนุญาตการเข้าถึงรูปภาพ');
+      setModalTitle('ไม่มีสิทธิ์');
+      setModalMessage('กรุณาอนุญาตการเข้าถึงรูปภาพในการตั้งค่าของคุณ');
+      setShowErrorModal(true);
       return;
     }
 
@@ -228,10 +232,14 @@ export default function ProfileScreen({ navigation }: Props) {
         // Update user profile with new photo URL
         await updateUser({ photoURL });
         
-        Alert.alert('สำเร็จ', 'อัพโหลดรูปโปรไฟล์เรียบร้อยแล้ว');
+        setModalTitle('สำเร็จ');
+        setModalMessage('อัพโหลดรูปโปรไฟล์เรียบร้อยแล้ว');
+        setShowSuccessModal(true);
       } catch (error: any) {
         console.error('Upload photo error:', error);
-        Alert.alert('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถอัพโหลดรูปได้');
+        setModalTitle('เกิดข้อผิดพลาด');
+        setModalMessage(error.message || 'ไม่สามารถอัพโหลดรูปได้');
+        setShowErrorModal(true);
       } finally {
         setIsUploadingPhoto(false);
       }
@@ -322,16 +330,18 @@ export default function ProfileScreen({ navigation }: Props) {
       setPhoneStep('idle');
 
       if (licenseChanged) {
-        Alert.alert(
-          '✅ บันทึกสำเร็จ',
-          'ข้อมูลถูกบันทึกแล้ว\n\nเลขใบประกอบวิชาชีพที่กรอกใหม่จะรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์',
-          [{ text: 'รับทราบ' }]
-        );
+        setModalTitle('บันทึกสำเร็จ');
+        setModalMessage('ข้อมูลถูกบันทึกแล้ว\n\nเลขใบประกอบวิชาชีพที่กรอกใหม่จะรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์');
+        setShowSuccessModal(true);
       } else {
-        Alert.alert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อยแล้ว');
+        setModalTitle('สำเร็จ');
+        setModalMessage('บันทึกข้อมูลเรียบร้อยแล้ว');
+        setShowSuccessModal(true);
       }
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถบันทึกข้อมูลได้');
+      setModalTitle('เกิดข้อผิดพลาด');
+      setModalMessage(error.message || 'ไม่สามารถบันทึกข้อมูลได้');
+      setShowErrorModal(true);
     }
   };
 
@@ -980,6 +990,35 @@ export default function ProfileScreen({ navigation }: Props) {
         type="danger"
         onConfirm={confirmLogout}
         onCancel={() => setShowLogoutModal(false)}
+      />
+
+      {/* Delete Contact Confirmation Modal */}
+      <ConfirmModal
+        visible={showDeleteContactModal}
+        title="ลบออกจากประวัติ"
+        message={pendingDeleteContact ? `ต้องการลบ "${pendingDeleteContact.title}" ออกจากประวัติการติดต่อ?` : ''}
+        icon="🗑️"
+        confirmText="ลบ"
+        cancelText="ยกเลิก"
+        type="danger"
+        onConfirm={confirmDeleteContact}
+        onCancel={() => { setShowDeleteContactModal(false); setPendingDeleteContact(null); }}
+      />
+
+      {/* Success Modal */}
+      <SuccessModal
+        visible={showSuccessModal}
+        title={modalTitle}
+        message={modalMessage}
+        onClose={() => setShowSuccessModal(false)}
+      />
+
+      {/* Error Modal */}
+      <ErrorModal
+        visible={showErrorModal}
+        title={modalTitle}
+        message={modalMessage}
+        onClose={() => setShowErrorModal(false)}
       />
     </SafeAreaView>
   );

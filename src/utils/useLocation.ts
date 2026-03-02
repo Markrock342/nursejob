@@ -29,6 +29,12 @@ export function useLocation() {
 
   const requestPermission = useCallback(async () => {
     if (Platform.OS === 'android') {
+      // Check first — avoids showing the OS popup when permission is already granted
+      const alreadyGranted = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+      );
+      if (alreadyGranted) return true;
+
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         {
