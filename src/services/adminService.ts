@@ -320,6 +320,15 @@ export async function getAllJobs(limitCount: number = 50): Promise<AdminJob[]> {
     return snapshot.docs.map((docSnap) => {
       const data = docSnap.data();
       const loc = data.location || {};
+
+      // Parse shiftDate safely (ternary precedence bug fix)
+      let shiftDate: Date | undefined;
+      if (data.shiftDate?.toDate) {
+        shiftDate = data.shiftDate.toDate();
+      } else if (Array.isArray(data.shiftDates) && data.shiftDates.length > 0) {
+        try { shiftDate = new Date(data.shiftDates[0]); } catch (_) { /* skip */ }
+      }
+
       return {
         id: docSnap.id,
         title: data.title || 'ไม่ระบุชื่อ',
@@ -331,7 +340,7 @@ export async function getAllJobs(limitCount: number = 50): Promise<AdminJob[]> {
         shiftRate: data.shiftRate || 0,
         province: data.province || loc.province || '',
         hospital: data.hospital || loc.hospital || '',
-        shiftDate: data.shiftDate?.toDate?.() || data.shiftDates?.[0] ? new Date(data.shiftDates[0]) : undefined,
+        shiftDate,
         shiftTime: data.shiftTime || (data.startTime && data.endTime ? `${data.startTime}-${data.endTime}` : ''),
         createdAt: data.createdAt?.toDate?.() || new Date(),
         contactsCount: data.contactsCount || 0,

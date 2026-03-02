@@ -1,9 +1,8 @@
 // ============================================
-// ADMIN DASHBOARD SCREEN - Production Ready
-// หน้าจัดการระบบสำหรับผู้ดูแล
+// ADMIN DASHBOARD - ศูนย์ควบคุมระบบ NurseGo
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,1249 +10,1074 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  TextInput,
   ActivityIndicator,
+  TextInput,
+  Alert,
+  Modal,
+  Animated,
+  Dimensions,
   Platform,
+  StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
-import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
-import { Avatar, ConfirmModal, SuccessModal, ErrorModal } from '../../components/common';
+import { RootStackParamList } from '../../types';
 import {
   getDashboardStats,
   getAllUsers,
+  searchUsers,
   getAllJobs,
   getAllConversations,
   updateUserStatus,
   verifyUser,
+  updateUserRole,
   deleteUser,
   updateJobStatus,
-  deleteJob as deleteJobAdmin,
+  deleteJob,
   deleteConversation,
-  getConversationMessages,
-  searchUsers,
   DashboardStats,
   AdminUser,
   AdminJob,
   AdminConversation,
 } from '../../services/adminService';
-import { getUserSubscription, updateUserSubscription } from '../../services/subscriptionService';
-import { Subscription, SubscriptionPlan, SUBSCRIPTION_PLANS } from '../../types';
-import { formatRelativeTime } from '../../utils/helpers';
+
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ============================================
-// Types
+// Tab Type
 // ============================================
-type TabType = 'overview' | 'users' | 'jobs' | 'chats';
-type UserFilterRole = 'all' | 'nurse' | 'hospital' | 'admin' | 'pending';
-type JobFilterStatus = 'all' | 'active' | 'closed' | 'urgent';
+type TabKey = 'overview' | 'users' | 'jobs' | 'chats';
 
-// Selected user for profile view
-interface SelectedUserProfile {
-  user: AdminUser;
-  conversations: AdminConversation[];
-}
-
-// ============================================
-// Stat Card Component
-// ============================================
-interface StatCardProps {
-  title: string;
-  value: number;
-  icon: string;
-  color: string;
-  subtitle?: string;
-}
-
-function StatCard({ title, value, icon, color, subtitle }: StatCardProps) {
-  return (
-    <View style={[styles.statCard, { borderLeftColor: color }]}>
-      <View style={styles.statCardHeader}>
-        <Ionicons name={icon as any} size={24} color={color} />
-        <Text style={[styles.statValue, { color }]}>{value.toLocaleString()}</Text>
-      </View>
-      <Text style={styles.statTitle}>{title}</Text>
-      {subtitle && <Text style={styles.statSubtitle}>{subtitle}</Text>}
-    </View>
-  );
-}
+const TABS: { key: TabKey; label: string; icon: string }[] = [
+  { key: 'overview', label: 'ภาพรวม', icon: 'grid-outline' },
+  { key: 'users', label: 'ผู้ใช้', icon: 'people-outline' },
+  { key: 'jobs', label: 'งาน', icon: 'briefcase-outline' },
+  { key: 'chats', label: 'แชท', icon: 'chatbubbles-outline' },
+];
 
 // ============================================
-// Component
+// MAIN COMPONENT
 // ============================================
 export default function AdminDashboardScreen() {
-  const { user, logout, isAdmin } = useAuth();
-  const { colors } = useTheme();
-  const navigation = useNavigation();
-  
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<Nav>();
+
   // State
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [refreshing, setRefreshing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterRole, setFilterRole] = useState<UserFilterRole>('all');
-  const [filterJobStatus, setFilterJobStatus] = useState<JobFilterStatus>('all');
-  const [jobSearchQuery, setJobSearchQuery] = useState('');
-  
+  const [loading, setLoading] = useState(true);
+
   // Data
-  const [stats, setStats] = useState<DashboardStats>({
-    totalUsers: 0,
-    totalJobs: 0,
-    activeJobs: 0,
-    totalConversations: 0,
-    todayNewUsers: 0,
-    todayNewJobs: 0,
-    pendingVerifications: 0,
-  });
+  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [jobs, setJobs] = useState<AdminJob[]>([]);
-  const [conversations, setConversations] = useState<AdminConversation[]>([]);
-  
-  // Modal states
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [showErrorModal, setShowErrorModal] = useState(false);
-  const [modalAction, setModalAction] = useState<{
-    type: string;
-    id: string;
-    title: string;
-    message: string;
-    onConfirm: () => Promise<void>;
-  } | null>(null);
+  const [chats, setChats] = useState<AdminConversation[]>([]);
 
-  // Helper to blur active element on web to avoid aria-hidden focus warnings
-  const safeBlur = () => {
-    if (typeof document !== 'undefined') {
-      try {
-        const active = document.activeElement as HTMLElement | null;
-        if (active && active !== document.body) active.blur();
-      } catch (e) {
-        // ignore
-      }
-    }
-  };
-  const [successMessage, setSuccessMessage] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
-  
-  // Selected chat for viewing
-  const [selectedChat, setSelectedChat] = useState<AdminConversation | null>(null);
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  
-  // Selected user profile
-  const [selectedUserProfile, setSelectedUserProfile] = useState<SelectedUserProfile | null>(null);
-  const [isLoadingUserProfile, setIsLoadingUserProfile] = useState(false);
-  const [selectedUserSubscription, setSelectedUserSubscription] = useState<Subscription | null>(null);
-  const [subLoading, setSubLoading] = useState(false);
-  const [subEditPosts, setSubEditPosts] = useState('0');
-  const [subSelectedPlan, setSubSelectedPlan] = useState<SubscriptionPlan>('free');
+  // Filters
+  const [userSearch, setUserSearch] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
+  const [jobStatusFilter, setJobStatusFilter] = useState<string>('all');
 
-  // Load data
-  const loadData = useCallback(async () => {
+  // Modal
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  const [userModalVisible, setUserModalVisible] = useState(false);
+  const [selectedJob, setSelectedJob] = useState<AdminJob | null>(null);
+  const [jobModalVisible, setJobModalVisible] = useState(false);
+
+  // ============================================
+  // Data Fetching
+  // ============================================
+  const fetchAll = useCallback(async () => {
     try {
-      setIsLoading(true);
-      
-      const [statsData, usersData, jobsData, chatsData] = await Promise.all([
+      const [s, u, j, c] = await Promise.all([
         getDashboardStats(),
-        getAllUsers(100),
+        getAllUsers(200),
         getAllJobs(100),
-        getAllConversations(100),
+        getAllConversations(50),
       ]);
-      
-      setStats(statsData);
-      setUsers(usersData);
-      setJobs(jobsData);
-      setConversations(chatsData);
-    } catch (error) {
-      console.error('Error loading admin data:', error);
+      setStats(s);
+      setUsers(u);
+      setJobs(j);
+      setChats(c);
+    } catch (err) {
+      console.error('Admin fetch error:', err);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    if (isAdmin) {
-      loadData();
-    }
-  }, [isAdmin, loadData]);
+    fetchAll();
+  }, [fetchAll]);
 
-  // Refresh data
-  const onRefresh = useCallback(async () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  }, [loadData]);
+    fetchAll();
+  }, [fetchAll]);
 
-  // Search users
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      const usersData = await getAllUsers(100);
-      setUsers(usersData);
-      return;
-    }
-    
-    const results = await searchUsers(searchQuery);
-    setUsers(results);
-  }, [searchQuery]);
-
-  // User actions
-  const handleToggleUserStatus = (userItem: AdminUser) => {
-    const action = userItem.isActive ? 'ปิดใช้งาน' : 'เปิดใช้งาน';
-    setModalAction({
-      type: 'toggleStatus',
-      id: userItem.id,
-      title: `${action}บัญชี`,
-      message: `คุณต้องการ${action}บัญชี "${userItem.displayName}" หรือไม่?`,
-      onConfirm: async () => {
-        await updateUserStatus(userItem.id, !userItem.isActive);
-        setUsers(prev => prev.map(u => 
-          u.id === userItem.id ? { ...u, isActive: !u.isActive } : u
-        ));
+  // ============================================
+  // User Actions
+  // ============================================
+  const handleToggleUserActive = async (user: AdminUser) => {
+    const newStatus = !user.isActive;
+    const action = newStatus ? 'เปิดใช้งาน' : 'ระงับ';
+    Alert.alert(`${action}ผู้ใช้`, `ต้องการ${action} "${user.displayName}" ?`, [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ยืนยัน',
+        style: newStatus ? 'default' : 'destructive',
+        onPress: async () => {
+          try {
+            await updateUserStatus(user.id, newStatus);
+            setUsers((prev) =>
+              prev.map((u) => (u.id === user.id ? { ...u, isActive: newStatus } : u))
+            );
+            setUserModalVisible(false);
+          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถดำเนินการได้'); }
+        },
       },
-    });
-    safeBlur();
-    setShowConfirmModal(true);
+    ]);
   };
 
-  const handleVerifyUser = (userItem: AdminUser) => {
-    const action = userItem.isVerified ? 'ยกเลิกการยืนยัน' : 'ยืนยัน';
-    setModalAction({
-      type: 'verify',
-      id: userItem.id,
-      title: `${action}บัญชี`,
-      message: `คุณต้องการ${action}บัญชี "${userItem.displayName}" หรือไม่?`,
-      onConfirm: async () => {
-        await verifyUser(userItem.id, !userItem.isVerified);
-        setUsers(prev => prev.map(u => 
-          u.id === userItem.id ? { ...u, isVerified: !u.isVerified } : u
-        ));
+  const handleVerifyUser = async (user: AdminUser) => {
+    const newVerified = !user.isVerified;
+    const action = newVerified ? 'ยืนยันตัวตน' : 'ยกเลิกการยืนยัน';
+    Alert.alert(action, `${action} "${user.displayName}" ?`, [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ยืนยัน',
+        onPress: async () => {
+          try {
+            await verifyUser(user.id, newVerified);
+            setUsers((prev) =>
+              prev.map((u) =>
+                u.id === user.id
+                  ? { ...u, isVerified: newVerified, role: newVerified ? 'nurse' : 'user' }
+                  : u
+              )
+            );
+            setUserModalVisible(false);
+          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถดำเนินการได้'); }
+        },
       },
-    });
-    safeBlur();
-    setShowConfirmModal(true);
+    ]);
   };
 
-  const handleDeleteUser = (userItem: AdminUser) => {
-    setModalAction({
-      type: 'deleteUser',
-      id: userItem.id,
-      title: 'ลบบัญชี',
-      message: `คุณต้องการลบบัญชี "${userItem.displayName}" หรือไม่?\n\nการดำเนินการนี้ไม่สามารถย้อนกลับได้`,
-      onConfirm: async () => {
-        await deleteUser(userItem.id);
-        setUsers(prev => prev.filter(u => u.id !== userItem.id));
-        setStats(prev => ({ ...prev, totalUsers: prev.totalUsers - 1 }));
+  const handleChangeRole = async (user: AdminUser, role: 'user' | 'nurse' | 'hospital' | 'admin') => {
+    if (user.role === role) return;
+    Alert.alert('เปลี่ยน Role', `เปลี่ยน "${user.displayName}" เป็น ${role.toUpperCase()} ?`, [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ยืนยัน',
+        onPress: async () => {
+          try {
+            await updateUserRole(user.id, role);
+            setUsers((prev) =>
+              prev.map((u) =>
+                u.id === user.id ? { ...u, role, isAdmin: role === 'admin' } : u
+              )
+            );
+            setUserModalVisible(false);
+          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถดำเนินการได้'); }
+        },
       },
-    });
-    safeBlur();
-    setShowConfirmModal(true);
+    ]);
   };
 
-  // View user profile with their chats
-  const handleViewUserProfile = async (userItem: AdminUser) => {
-    setIsLoadingUserProfile(true);
+  const handleDeleteUser = async (user: AdminUser) => {
+    Alert.alert('ลบผู้ใช้', `ลบ "${user.displayName}" ถาวร? ข้อมูลจะหายไปทั้งหมด`, [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ลบถาวร',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteUser(user.id);
+            setUsers((prev) => prev.filter((u) => u.id !== user.id));
+            setUserModalVisible(false);
+          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถลบได้'); }
+        },
+      },
+    ]);
+  };
+
+  // ============================================
+  // Job Actions
+  // ============================================
+  const handleChangeJobStatus = async (job: AdminJob, status: 'active' | 'closed' | 'urgent') => {
     try {
-      // Filter conversations where this user is a participant
-      const userConversations = conversations.filter(chat => 
-        chat.participants?.includes(userItem.id) || 
-        chat.participantDetails?.some(p => p.id === userItem.id)
-      );
-      setSelectedUserProfile({
-        user: userItem,
-        conversations: userConversations,
-      });
-
-      // Load subscription info for this user
-      try {
-        setSubLoading(true);
-        const sub = await getUserSubscription(userItem.uid || userItem.id);
-        setSelectedUserSubscription(sub);
-        setSubSelectedPlan(sub.plan || 'free');
-        setSubEditPosts(String(sub.postsToday || 0));
-      } catch (err) {
-        console.error('Error loading subscription for user:', err);
-        setSelectedUserSubscription(null);
-      } finally {
-        setSubLoading(false);
-      }
-    } catch (error) {
-      setErrorMessage('ไม่สามารถโหลดข้อมูลได้');
-      setShowErrorModal(true);
-    } finally {
-      setIsLoadingUserProfile(false);
-    }
+      await updateJobStatus(job.id, status);
+      setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, status } : j)));
+      setJobModalVisible(false);
+    } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะได้'); }
   };
 
-  // Job actions
-  const handleToggleJobStatus = (job: AdminJob) => {
-    const newStatus = job.status === 'active' ? 'closed' : 'active';
-    const action = newStatus === 'closed' ? 'ปิด' : 'เปิด';
-    setModalAction({
-      type: 'toggleJobStatus',
-      id: job.id,
-      title: `${action}ประกาศ`,
-      message: `คุณต้องการ${action}ประกาศ "${job.title}" หรือไม่?`,
-      onConfirm: async () => {
-        await updateJobStatus(job.id, newStatus);
-        setJobs(prev => prev.map(j => 
-          j.id === job.id ? { ...j, status: newStatus } : j
-        ));
+  const handleDeleteJob = async (job: AdminJob) => {
+    Alert.alert('ลบงาน', `ลบ "${job.title}" ถาวร?`, [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ลบถาวร',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteJob(job.id);
+            setJobs((prev) => prev.filter((j) => j.id !== job.id));
+            setJobModalVisible(false);
+          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถลบได้'); }
+        },
       },
-    });
-    safeBlur();
-    setShowConfirmModal(true);
+    ]);
   };
 
-  const handleDeleteJob = (job: AdminJob) => {
-    setModalAction({
-      type: 'deleteJob',
-      id: job.id,
-      title: 'ลบประกาศ',
-      message: `คุณต้องการลบประกาศ "${job.title}" หรือไม่?\n\nการดำเนินการนี้ไม่สามารถย้อนกลับได้`,
-      onConfirm: async () => {
-        await deleteJobAdmin(job.id);
-        setJobs(prev => prev.filter(j => j.id !== job.id));
-        setStats(prev => ({ ...prev, totalJobs: prev.totalJobs - 1 }));
+  // ============================================
+  // Chat Actions
+  // ============================================
+  const handleDeleteChat = async (chat: AdminConversation) => {
+    Alert.alert('ลบการสนทนา', `ลบแชทนี้และข้อความทั้งหมดถาวร?`, [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'ลบถาวร',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteConversation(chat.id);
+            setChats((prev) => prev.filter((c) => c.id !== chat.id));
+          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถลบได้'); }
+        },
       },
+    ]);
+  };
+
+  // ============================================
+  // Filtered Data
+  // ============================================
+  const filteredUsers = users.filter((u) => {
+    const matchSearch =
+      !userSearch ||
+      u.displayName.toLowerCase().includes(userSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
+      (u.phone && u.phone.includes(userSearch));
+    const matchRole = userRoleFilter === 'all' || u.role === userRoleFilter;
+    return matchSearch && matchRole;
+  });
+
+  const filteredJobs = jobs.filter((j) => {
+    return jobStatusFilter === 'all' || j.status === jobStatusFilter;
+  });
+
+  // ============================================
+  // Helpers
+  // ============================================
+  const formatDate = (d?: Date) => {
+    if (!d) return '-';
+    return d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' });
+  };
+
+  const formatDateTime = (d?: Date) => {
+    if (!d) return '-';
+    return d.toLocaleDateString('th-TH', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
     });
-    safeBlur();
-    setShowConfirmModal(true);
   };
 
-  // Chat actions
-  const handleViewChat = async (chat: AdminConversation) => {
-    setSelectedChat(chat);
-    setIsLoadingMessages(true);
-    try {
-      const messages = await getConversationMessages(chat.id);
-      setChatMessages(messages);
-    } catch (error) {
-      setErrorMessage('ไม่สามารถโหลดข้อความได้');
-      setShowErrorModal(true);
-    } finally {
-      setIsLoadingMessages(false);
+  const getRoleBadge = (role: string) => {
+    switch (role) {
+      case 'admin': return { label: 'Admin', color: COLORS.error, bg: COLORS.errorLight };
+      case 'nurse': return { label: 'พยาบาล', color: COLORS.primary, bg: COLORS.primaryBackground };
+      case 'hospital': return { label: 'โรงพยาบาล', color: '#7C3AED', bg: '#F3E8FF' };
+      default: return { label: 'ผู้ใช้', color: COLORS.textSecondary, bg: COLORS.backgroundSecondary };
     }
   };
 
-  const handleDeleteChat = (chat: AdminConversation) => {
-    setModalAction({
-      type: 'deleteChat',
-      id: chat.id,
-      title: 'ลบการสนทนา',
-      message: `คุณต้องการลบการสนทนานี้หรือไม่?\n\nข้อความทั้งหมดจะถูกลบ`,
-      onConfirm: async () => {
-        await deleteConversation(chat.id);
-        setConversations(prev => prev.filter(c => c.id !== chat.id));
-        setStats(prev => ({ ...prev, totalConversations: prev.totalConversations - 1 }));
-      },
-    });
-    safeBlur();
-    setShowConfirmModal(true);
-  };
-
-  // Confirm modal action
-  const handleConfirmAction = async () => {
-    if (!modalAction) return;
-    
-    try {
-      await modalAction.onConfirm();
-      setShowConfirmModal(false);
-      setSuccessMessage('ดำเนินการสำเร็จ');
-      setShowSuccessModal(true);
-    } catch (error: any) {
-      setShowConfirmModal(false);
-      setErrorMessage(error.message || 'เกิดข้อผิดพลาด');
-      setShowErrorModal(true);
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'active': return { label: 'เปิดรับ', color: COLORS.success, bg: COLORS.successLight };
+      case 'urgent': return { label: 'ด่วน', color: COLORS.error, bg: COLORS.errorLight };
+      case 'closed': return { label: 'ปิดแล้ว', color: COLORS.textLight, bg: COLORS.backgroundSecondary };
+      default: return { label: status, color: COLORS.textSecondary, bg: COLORS.backgroundSecondary };
     }
   };
 
-  // Subscription management helpers (admin)
-  const handleSaveSubscription = async () => {
-    if (!selectedUserProfile) return;
-    const userId = selectedUserProfile.user.uid || selectedUserProfile.user.id;
-    setSubLoading(true);
-    try {
-      const partial: any = {
-        plan: subSelectedPlan,
-      };
-      // Only set postsToday when provided
-      const postsNum = parseInt(subEditPosts || '0');
-      partial.postsToday = isNaN(postsNum) ? 0 : postsNum;
-      // If free plan, set lastPostDate to today to align counters
-      if (subSelectedPlan === 'free') {
-        partial.lastPostDate = new Date().toISOString().split('T')[0];
-      } else {
-        // Do not send undefined to Firestore update (causes invalid-data error)
-        // Remove any lastPostDate field so updateDoc won't receive an undefined value
-        if ('lastPostDate' in partial) delete (partial as any).lastPostDate;
-      }
-
-      await updateUserSubscription(userId, partial);
-      // reload subscription
-      const sub = await getUserSubscription(userId);
-      setSelectedUserSubscription(sub);
-      setSuccessMessage('อัพเดทข้อมูลสมาชิกเรียบร้อย');
-      setShowSuccessModal(true);
-    } catch (err: any) {
-      console.error('Error updating subscription:', err);
-      setErrorMessage(err.message || 'ไม่สามารถอัพเดทข้อมูลสมาชิกได้');
-      setShowErrorModal(true);
-    } finally {
-      setSubLoading(false);
-    }
-  };
-
-  const handleResetPosts = async () => {
-    if (!selectedUserProfile) return;
-    const userId = selectedUserProfile.user.uid || selectedUserProfile.user.id;
-    setSubLoading(true);
-    try {
-      await updateUserSubscription(userId, {
-        postsToday: 0,
-        lastPostDate: new Date().toISOString().split('T')[0],
-      });
-      const sub = await getUserSubscription(userId);
-      setSelectedUserSubscription(sub);
-      setSubEditPosts(String(sub.postsToday || 0));
-      setSuccessMessage('รีเซ็ทจำนวนโพสต์เรียบร้อย');
-      setShowSuccessModal(true);
-    } catch (err: any) {
-      console.error('Error resetting posts:', err);
-      setErrorMessage(err.message || 'ไม่สามารถรีเซ็ทโพสต์ได้');
-      setShowErrorModal(true);
-    } finally {
-      setSubLoading(false);
-    }
-  };
-
-  // Check admin access
-  if (!isAdmin) {
+  // ============================================
+  // LOADING STATE
+  // ============================================
+  if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.accessDenied}>
-          <Ionicons name="lock-closed" size={64} color={COLORS.danger} />
-          <Text style={styles.accessDeniedTitle}>ไม่มีสิทธิ์เข้าถึง</Text>
-          <Text style={styles.accessDeniedText}>
-            คุณไม่มีสิทธิ์ในการเข้าถึงหน้านี้
-          </Text>
-        </View>
-      </SafeAreaView>
+      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>กำลังโหลดข้อมูล...</Text>
+      </View>
     );
   }
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>กำลังโหลดข้อมูล...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // Render tabs
-  const renderTabButton = (tab: TabType, label: string, icon: string) => (
-    <TouchableOpacity
-      key={tab}
-      style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
-      onPress={() => setActiveTab(tab)}
-    >
-      <Ionicons
-        name={icon as any}
-        size={20}
-        color={activeTab === tab ? COLORS.white : COLORS.textSecondary}
-      />
-      <Text style={[styles.tabButtonText, activeTab === tab && styles.tabButtonTextActive]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-
-  // Computed filtered lists
-  const filteredUsers = users.filter(u => {
-    if (filterRole === 'all') return true;
-    if (filterRole === 'pending') return !u.isVerified && u.role !== 'admin';
-    return u.role === filterRole;
-  });
-
-  const filteredJobs = jobs.filter(j => {
-    const matchStatus = filterJobStatus === 'all' || j.status === filterJobStatus;
-    const q = jobSearchQuery.trim().toLowerCase();
-    const matchSearch = !q || j.title.toLowerCase().includes(q) || j.posterName.toLowerCase().includes(q) || (j.province || '').toLowerCase().includes(q);
-    return matchStatus && matchSearch;
-  });
-
-  // Render overview tab
-  const renderOverview = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>ภาพรวมระบบ</Text>
-      
-      <View style={styles.statsGrid}>
-        <StatCard
-          title="ผู้ใช้ทั้งหมด"
-          value={stats.totalUsers}
-          icon="people"
-          color={COLORS.primary}
-          subtitle={`+${stats.todayNewUsers} วันนี้`}
-        />
-        <StatCard
-          title="ประกาศทั้งหมด"
-          value={stats.totalJobs}
-          icon="briefcase"
-          color={COLORS.success}
-          subtitle={`+${stats.todayNewJobs} วันนี้`}
-        />
-        <StatCard
-          title="ประกาศเปิดรับ"
-          value={stats.activeJobs}
-          icon="checkmark-circle"
-          color="#10B981"
-        />
-        <StatCard
-          title="รอยืนยันใบอนุญาต"
-          value={stats.pendingVerifications ?? 0}
-          icon="shield-checkmark"
-          color={COLORS.warning}
-          subtitle="แตะเพื่อตรวจสอบ"
-        />
-        <StatCard
-          title="การสนทนา"
-          value={stats.totalConversations}
-          icon="chatbubbles"
-          color={COLORS.info}
-        />
-        <StatCard
-          title="โหลดวันนี้ (งาน)"
-          value={stats.todayNewJobs}
-          icon="flash"
-          color="#8B5CF6"
-        />
-      </View>
-
-      {/* Quick Actions */}
-      <Text style={[styles.sectionTitle, { marginTop: SPACING.lg }]}>เครื่องมือจัดการ</Text>
-      <View style={styles.quickActions}>
-        <TouchableOpacity style={styles.quickActionButton} onPress={() => { setFilterRole('all'); setActiveTab('users'); }}>
-          <Ionicons name="people" size={26} color={COLORS.primary} />
-          <Text style={styles.quickActionText}>ผู้ใช้ทั้งหมด</Text>
-          <Text style={styles.quickActionBadge}>{stats.totalUsers}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.quickActionButton, { borderColor: COLORS.warning, borderWidth: 1.5 }]} onPress={() => { setFilterRole('pending'); setActiveTab('users'); }}>
-          <Ionicons name="time" size={26} color={COLORS.warning} />
-          <Text style={styles.quickActionText}>รอยืนยัน</Text>
-          <Text style={[styles.quickActionBadge, { backgroundColor: COLORS.warning }]}>{stats.pendingVerifications ?? 0}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.quickActionButton} onPress={() => { setFilterJobStatus('all'); setActiveTab('jobs'); }}>
-          <Ionicons name="document-text" size={26} color={COLORS.success} />
-          <Text style={styles.quickActionText}>ประกาศงาน</Text>
-          <Text style={styles.quickActionBadge}>{stats.totalJobs}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.quickActionButton} onPress={() => setActiveTab('chats')}>
-          <Ionicons name="chatbubbles" size={26} color={COLORS.info} />
-          <Text style={styles.quickActionText}>แชท</Text>
-          <Text style={styles.quickActionBadge}>{stats.totalConversations}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.quickActionButton} 
-          onPress={() => navigation.navigate('AdminVerification' as never)}
-        >
-          <Ionicons name="shield-checkmark" size={26} color="#10B981" />
-          <Text style={styles.quickActionText}>ตรวจใบอนุญาต</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.quickActionButton} 
-          onPress={() => navigation.navigate('AdminReports' as never)}
-        >
-          <Ionicons name="flag" size={26} color={COLORS.danger} />
-          <Text style={styles.quickActionText}>รายงาน</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.quickActionButton} 
-          onPress={() => navigation.navigate('AdminFeedback' as never)}
-        >
-          <Ionicons name="chatbox-ellipses" size={26} color="#8B5CF6" />
-          <Text style={styles.quickActionText}>Feedback</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.quickActionButton} onPress={onRefresh}>
-          <Ionicons name="refresh" size={26} color={COLORS.warning} />
-          <Text style={styles.quickActionText}>รีเฟรช</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Recent Users */}
-      <Text style={[styles.sectionTitle, { marginTop: SPACING.lg }]}>ผู้ใช้ล่าสุด</Text>
-      {users.slice(0, 5).map((userItem) => (
-        <View key={userItem.id} style={styles.listItem}>
-          <Avatar uri={userItem.photoURL} name={userItem.displayName} size={40} />
-          <View style={styles.listItemInfo}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.listItemName}>{userItem.displayName}</Text>
-              {userItem.isVerified && <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />}
-            </View>
-            <Text style={styles.listItemSubtext}>{userItem.email}</Text>
-          </View>
-          <View style={[styles.statusBadge, { backgroundColor: userItem.isActive ? COLORS.successLight : COLORS.dangerLight }]}>
-            <Text style={[styles.statusBadgeText, { color: userItem.isActive ? COLORS.success : COLORS.danger }]}>
-              {userItem.isActive ? 'ใช้งาน' : 'ปิด'}
-            </Text>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-
-  // Render users tab
-  const renderUsers = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>จัดการผู้ใช้ ({filteredUsers.length})</Text>
-      
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color={colors.textSecondary} />
-        <TextInput
-          style={[styles.searchInput, { color: colors.text }]}
-          placeholder="ค้นหาด้วย ชื่อ, อีเมล, เบอร์โทร..."
-          placeholderTextColor={colors.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          onSubmitEditing={handleSearch}
-          returnKeyType="search"
-        />
-        {searchQuery ? (
-          <TouchableOpacity onPress={() => { setSearchQuery(''); handleSearch(); }}>
-            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* Role Filter Chips */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.md }}>
-        {([
-          { key: 'all', label: 'ทั้งหมด', icon: 'people', color: COLORS.primary },
-          { key: 'nurse', label: 'พยาบาล', icon: 'medkit', color: '#10B981' },
-          { key: 'hospital', label: 'โรงพยาบาล', icon: 'business', color: COLORS.info },
-          { key: 'admin', label: 'Admin', icon: 'shield', color: COLORS.danger },
-          { key: 'pending', label: 'รอยืนยัน', icon: 'time', color: COLORS.warning },
-        ] as { key: UserFilterRole; label: string; icon: string; color: string }[]).map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.filterChip, filterRole === f.key && { backgroundColor: f.color, borderColor: f.color }]}
-            onPress={() => setFilterRole(f.key)}
-          >
-            <Ionicons name={f.icon as any} size={13} color={filterRole === f.key ? '#fff' : f.color} />
-            <Text style={[styles.filterChipText, filterRole === f.key && { color: '#fff' }]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {filteredUsers.map((userItem) => (
-        <View key={userItem.id} style={styles.userCard}>
-          <TouchableOpacity 
-            style={styles.userCardHeader}
-            onPress={() => handleViewUserProfile(userItem)}
-            activeOpacity={0.7}
-          >
-            <Avatar uri={userItem.photoURL} name={userItem.displayName} size={50} />
-            <View style={styles.userCardInfo}>
-              <View style={styles.userNameRow}>
-                <Text style={styles.userName}>{userItem.displayName}</Text>
-                {userItem.isVerified && (
-                  <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-                )}
-                {userItem.isAdmin && (
-                  <View style={styles.adminBadge}>
-                    <Text style={styles.adminBadgeText}>Admin</Text>
-                  </View>
-                )}
-                <View style={[styles.roleBadge, {
-                  backgroundColor: userItem.role === 'nurse' ? '#D1FAE5' :
-                    userItem.role === 'hospital' ? '#DBEAFE' :
-                    userItem.role === 'admin' ? '#FEE2E2' : '#F3F4F6'
-                }]}>
-                  <Text style={[styles.roleBadgeText, {
-                    color: userItem.role === 'nurse' ? '#059669' :
-                      userItem.role === 'hospital' ? '#2563EB' :
-                      userItem.role === 'admin' ? '#DC2626' : '#6B7280'
-                  }]}>
-                    {userItem.role === 'nurse' ? 'พยาบาล' :
-                      userItem.role === 'hospital' ? 'รพ./คลินิก' :
-                      userItem.role === 'admin' ? 'Admin' : 'ผู้ใช้'}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.userEmail}>{userItem.email}</Text>
-              {userItem.phone && <Text style={styles.userPhone}>📞 {userItem.phone}</Text>}
-              {userItem.username && <Text style={styles.userUsername}>@{userItem.username}</Text>}
-              <Text style={styles.userDate}>สมัคร: {formatRelativeTime(userItem.createdAt)}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.primary} />
-          </TouchableOpacity>
-          
-          <View style={styles.userCardActions}>
-            <TouchableOpacity
-              style={[styles.userActionButton, { backgroundColor: userItem.isVerified ? COLORS.warningLight : COLORS.successLight }]}
-              onPress={() => handleVerifyUser(userItem)}
-            >
-              <Ionicons name={userItem.isVerified ? "close-circle" : "checkmark-circle"} size={16} color={userItem.isVerified ? COLORS.warning : COLORS.success} />
-              <Text style={[styles.userActionText, { color: userItem.isVerified ? COLORS.warning : COLORS.success }]}>
-                {userItem.isVerified ? 'ยกเลิกยืนยัน' : 'ยืนยัน'}
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.userActionButton, { backgroundColor: userItem.isActive ? COLORS.warningLight : COLORS.successLight }]}
-              onPress={() => handleToggleUserStatus(userItem)}
-            >
-              <Ionicons name={userItem.isActive ? "pause" : "play"} size={16} color={userItem.isActive ? COLORS.warning : COLORS.success} />
-              <Text style={[styles.userActionText, { color: userItem.isActive ? COLORS.warning : COLORS.success }]}>
-                {userItem.isActive ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.userActionButton, { backgroundColor: COLORS.dangerLight }]}
-              onPress={() => handleDeleteUser(userItem)}
-            >
-              <Ionicons name="trash" size={16} color={COLORS.danger} />
-              <Text style={[styles.userActionText, { color: COLORS.danger }]}>ลบ</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ))}
-      
-      {filteredUsers.length === 0 && (
-        <View style={styles.emptyState}>
-          <Ionicons name="people-outline" size={48} color={COLORS.textMuted} />
-          <Text style={styles.emptyStateText}>
-            {filterRole === 'pending' ? 'ไม่มีผู้ใช้ที่รอยืนยัน' :
-             filterRole !== 'all' ? `ไม่พบผู้ใช้ประเภท ${filterRole}` : 'ไม่พบผู้ใช้'}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-
-  // Render jobs tab
-  const renderJobs = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>จัดการประกาศ ({filteredJobs.length}/{jobs.length})</Text>
-
-      {/* Job Search */}
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color={colors.textSecondary} />
-        <TextInput
-          style={[styles.searchInput, { color: colors.text }]}
-          placeholder="ค้นหาชื่องาน, ผู้โพสต์, จังหวัด..."
-          placeholderTextColor={colors.textMuted}
-          value={jobSearchQuery}
-          onChangeText={setJobSearchQuery}
-          returnKeyType="search"
-        />
-        {jobSearchQuery ? (
-          <TouchableOpacity onPress={() => setJobSearchQuery('')}>
-            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* Status Filter Chips */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.md }}>
-        {([
-          { key: 'all', label: 'ทั้งหมด', color: COLORS.primary },
-          { key: 'active', label: 'เปิดรับ', color: '#10B981' },
-          { key: 'urgent', label: 'ด่วน', color: COLORS.danger },
-          { key: 'closed', label: 'ปิดแล้ว', color: COLORS.textMuted },
-        ] as { key: JobFilterStatus; label: string; color: string }[]).map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.filterChip, filterJobStatus === f.key && { backgroundColor: f.color, borderColor: f.color }]}
-            onPress={() => setFilterJobStatus(f.key)}
-          >
-            <Text style={[styles.filterChipText, filterJobStatus === f.key && { color: '#fff' }]}>{f.label}</Text>
-            {f.key !== 'all' && (
-              <Text style={[styles.filterChipCount, filterJobStatus === f.key && { color: '#fff' }]}>
-                {jobs.filter(j => j.status === f.key).length}
-              </Text>
-            )}
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-      
-      {filteredJobs.map((job) => (
-        <View key={job.id} style={styles.jobCard}>
-          <View style={styles.jobCardHeader}>
-            <View style={styles.jobCardInfo}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <Text style={styles.jobTitle}>{job.title}</Text>
-                {job.staffType && (
-                  <View style={styles.staffTypeBadge}>
-                    <Text style={styles.staffTypeBadgeText}>{job.staffType}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.jobPoster}>
-                <Ionicons name="person-outline" size={12} /> {job.posterName}
-              </Text>
-              {(job.province || job.hospital) && (
-                <Text style={styles.jobLocation}>
-                  <Ionicons name="location-outline" size={12} /> {[job.hospital, job.province].filter(Boolean).join(' · ')}
-                </Text>
-              )}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 2 }}>
-                <Text style={styles.jobRate}>฿{job.shiftRate.toLocaleString()}</Text>
-                {job.shiftTime && <Text style={styles.jobShiftTime}>{job.shiftTime}</Text>}
-              </View>
-              <View style={{ flexDirection: 'row', gap: 12, marginTop: 2 }}>
-                <Text style={styles.jobStat}>
-                  <Ionicons name="eye-outline" size={11} /> {job.viewsCount}
-                </Text>
-                <Text style={styles.jobStat}>
-                  <Ionicons name="people-outline" size={11} /> {job.applicantsCount}
-                </Text>
-                <Text style={styles.jobDate}>{formatRelativeTime(job.createdAt)}</Text>
-              </View>
-            </View>
-            <View style={[
-              styles.jobStatusBadge,
-              { backgroundColor: job.status === 'active' ? '#D1FAE5' : 
-                job.status === 'urgent' ? COLORS.dangerLight : '#F3F4F6' }
-            ]}>
-              <Text style={[
-                styles.jobStatusText,
-                { color: job.status === 'active' ? '#059669' : 
-                  job.status === 'urgent' ? COLORS.danger : COLORS.textMuted }
-              ]}>
-                {job.status === 'active' ? 'เปิดรับ' : job.status === 'urgent' ? 'ด่วน' : 'ปิดแล้ว'}
-              </Text>
-            </View>
-          </View>
-          
-          <View style={styles.jobCardActions}>
-            {job.status !== 'urgent' && (
-              <TouchableOpacity
-                style={[styles.userActionButton, { backgroundColor: COLORS.dangerLight }]}
-                onPress={() => {
-                  setModalAction({
-                    type: 'urgentJob',
-                    id: job.id,
-                    title: 'ทำเครื่องหมายด่วน',
-                    message: `ต้องการทำประกาศ "${job.title}" เป็นงานด่วนหรือไม่?`,
-                    onConfirm: async () => {
-                      await updateJobStatus(job.id, 'urgent');
-                      setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'urgent' } : j));
-                    },
-                  });
-                  safeBlur();
-                  setShowConfirmModal(true);
-                }}
-              >
-                <Ionicons name="flash" size={16} color={COLORS.danger} />
-                <Text style={[styles.userActionText, { color: COLORS.danger }]}>ด่วน</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[styles.userActionButton, { backgroundColor: job.status === 'active' ? COLORS.warningLight : '#D1FAE5' }]}
-              onPress={() => handleToggleJobStatus(job)}
-            >
-              <Ionicons name={job.status === 'active' || job.status === 'urgent' ? "close-circle" : "checkmark-circle"} size={16} color={job.status !== 'closed' ? COLORS.warning : '#059669'} />
-              <Text style={[styles.userActionText, { color: job.status !== 'closed' ? COLORS.warning : '#059669' }]}>
-                {job.status !== 'closed' ? 'ปิดประกาศ' : 'เปิดประกาศ'}
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.userActionButton, { backgroundColor: COLORS.dangerLight }]}
-              onPress={() => handleDeleteJob(job)}
-            >
-              <Ionicons name="trash" size={16} color={COLORS.danger} />
-              <Text style={[styles.userActionText, { color: COLORS.danger }]}>ลบ</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ))}
-      
-      {filteredJobs.length === 0 && (
-        <View style={styles.emptyState}>
-          <Ionicons name="briefcase-outline" size={48} color={COLORS.textMuted} />
-          <Text style={styles.emptyStateText}>
-            {jobSearchQuery ? `ไม่พบประกาศที่ตรงกับ "${jobSearchQuery}"` : 'ไม่มีประกาศ'}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-
-  // Standalone chats tab
-  const renderChats = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>การสนทนาทั้งหมด ({conversations.length})</Text>
-
-      {/* Chat viewer */}
-      {selectedChat && (
-        <View style={styles.chatViewer}>
-          <View style={styles.chatViewerHeader}>
-            <Text style={styles.chatViewerTitle}>
-              {selectedChat.participantDetails?.map(p => p.name || p.displayName).join(' ↔ ')}
-            </Text>
-            <TouchableOpacity onPress={() => setSelectedChat(null)}>
-              <Ionicons name="close" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-          </View>
-          {selectedChat.jobTitle && (
-            <Text style={styles.chatViewerJob}>งาน: {selectedChat.jobTitle}</Text>
-          )}
-          {isLoadingMessages ? (
-            <ActivityIndicator style={{ marginVertical: SPACING.lg }} />
-          ) : (
-            <ScrollView style={styles.chatMessages}>
-              {chatMessages.map((msg, index) => (
-                <View key={index} style={styles.chatMessage}>
-                  <Text style={styles.chatMessageSender}>{msg.senderName}</Text>
-                  <Text style={styles.chatMessageText}>{msg.text}</Text>
-                  <Text style={styles.chatMessageTime}>{formatRelativeTime(msg.createdAt)}</Text>
-                </View>
-              ))}
-              {chatMessages.length === 0 && (
-                <Text style={styles.noMessages}>ไม่มีข้อความ</Text>
-              )}
-            </ScrollView>
-          )}
-        </View>
-      )}
-
-      {conversations.map((chat) => (
-        <View key={chat.id} style={styles.chatCard}>
-          <TouchableOpacity style={styles.chatCardContent} onPress={() => handleViewChat(chat)}>
-            <View style={styles.chatCardInfo}>
-              <Text style={styles.chatParticipants}>
-                {chat.participantDetails?.map(p => p.name || p.displayName).join(' ↔ ') || 'ไม่ทราบ'}
-              </Text>
-              {chat.jobTitle && (
-                <Text style={styles.chatJobTitle}>งาน: {chat.jobTitle}</Text>
-              )}
-              <Text style={styles.chatLastMessage} numberOfLines={1}>
-                {chat.lastMessage || 'ไม่มีข้อความ'}
-              </Text>
-              <Text style={styles.chatDate}>{formatRelativeTime(chat.lastMessageAt)}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.chatDeleteButton} onPress={() => handleDeleteChat(chat)}>
-            <Ionicons name="trash" size={18} color={COLORS.danger} />
-          </TouchableOpacity>
-        </View>
-      ))}
-
-      {conversations.length === 0 && (
-        <View style={styles.emptyState}>
-          <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textMuted} />
-          <Text style={styles.emptyStateText}>ไม่มีการสนทนา</Text>
-        </View>
-      )}
-    </View>
-  );
-
-  // Render user profile view
-  const renderUserProfile = () => {
-    if (!selectedUserProfile) {
-      return (
-        <View style={styles.section}>
-          <View style={styles.emptyState}>
-            <Ionicons name="person-outline" size={64} color={COLORS.textMuted} />
-            <Text style={styles.emptyStateTitle}>เลือกผู้ใช้เพื่อดูโปรไฟล์</Text>
-            <Text style={styles.emptyStateText}>กดที่ผู้ใช้ในแท็บ "ผู้ใช้" เพื่อดูรายละเอียดและแชทของเขา</Text>
-          </View>
-        </View>
-      );
-    }
-    
-    const { user: profileUser, conversations: userChats } = selectedUserProfile;
-    
-    return (
-      <View style={styles.section}>
-        {/* Close Button */}
-        <TouchableOpacity 
-          style={styles.closeProfileButton}
-          onPress={() => setSelectedUserProfile(null)}
-        >
-          <Ionicons name="close" size={24} color={COLORS.text} />
-          <Text style={styles.closeProfileText}>ปิดโปรไฟล์</Text>
-        </TouchableOpacity>
-        
-        {/* User Profile Card */}
-        <View style={styles.profileCard}>
-          <Avatar uri={profileUser.photoURL} name={profileUser.displayName} size={80} />
-          <View style={styles.profileInfo}>
-            <View style={styles.userNameRow}>
-              <Text style={styles.profileName}>{profileUser.displayName}</Text>
-              {profileUser.isVerified && (
-                <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
-              )}
-              {profileUser.isAdmin && (
-                <View style={styles.adminBadge}>
-                  <Text style={styles.adminBadgeText}>Admin</Text>
-                </View>
-              )}
-            </View>
-            
-            <View style={styles.profileDetails}>
-              <View style={styles.profileDetailRow}>
-                <Ionicons name="mail-outline" size={16} color={COLORS.textSecondary} />
-                <Text style={styles.profileDetailText}>{profileUser.email}</Text>
-              </View>
-              
-              {profileUser.phone && (
-                <View style={styles.profileDetailRow}>
-                  <Ionicons name="call-outline" size={16} color={COLORS.textSecondary} />
-                  <Text style={styles.profileDetailText}>{profileUser.phone}</Text>
-                </View>
-              )}
-              
-              {profileUser.username && (
-                <View style={styles.profileDetailRow}>
-                  <Ionicons name="at-outline" size={16} color={COLORS.textSecondary} />
-                  <Text style={styles.profileDetailText}>@{profileUser.username}</Text>
-                </View>
-              )}
-              
-              <View style={styles.profileDetailRow}>
-                <Ionicons name="calendar-outline" size={16} color={COLORS.textSecondary} />
-                <Text style={styles.profileDetailText}>สมัคร {formatRelativeTime(profileUser.createdAt)}</Text>
-              </View>
-              
-              <View style={styles.profileDetailRow}>
-                <Ionicons name="id-card-outline" size={16} color={COLORS.textSecondary} />
-                <Text style={styles.profileDetailText}>ID: {profileUser.id}</Text>
-              </View>
-            </View>
-            
-            {/* Status badges */}
-            <View style={styles.profileBadges}>
-              <View style={[styles.profileBadge, { backgroundColor: profileUser.isActive ? COLORS.successLight : COLORS.dangerLight }]}>
-                <Text style={[styles.profileBadgeText, { color: profileUser.isActive ? COLORS.success : COLORS.danger }]}>
-                  {profileUser.isActive ? '✓ ใช้งานอยู่' : '✗ ปิดใช้งาน'}
-                </Text>
-              </View>
-              <View style={[styles.profileBadge, { backgroundColor: profileUser.isVerified ? COLORS.successLight : COLORS.warningLight }]}>
-                <Text style={[styles.profileBadgeText, { color: profileUser.isVerified ? COLORS.success : COLORS.warning }]}>
-                  {profileUser.isVerified ? '✓ ยืนยันแล้ว' : '⏳ รอยืนยัน'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-        
-            {/* Subscription Controls */}
-        <View style={[styles.subscriptionBox, { padding: SPACING.md, marginTop: SPACING.md, borderRadius: 12, backgroundColor: COLORS.surface }]}>
-          <Text style={[styles.sectionTitle, { marginBottom: SPACING.sm }]}>ข้อมูลสมาชิก / แพ็กเกจ</Text>
-          {subLoading ? (
-            <ActivityIndicator />
-          ) : selectedUserSubscription ? (
-            <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.sm }}>
-                <Text style={{ color: COLORS.textSecondary }}>แพ็กเกจปัจจุบัน</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity onPress={() => setSubSelectedPlan('free')} style={[styles.planButton, subSelectedPlan === 'free' && styles.planButtonActive]}>
-                    <Text style={subSelectedPlan === 'free' ? styles.planButtonTextActive : styles.planButtonText}>ฟรี</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setSubSelectedPlan('premium')} style={[styles.planButton, subSelectedPlan === 'premium' && styles.planButtonActive]}>
-                    <Text style={subSelectedPlan === 'premium' ? styles.planButtonTextActive : styles.planButtonText}>Premium</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={{ marginBottom: SPACING.sm }}>
-                <Text style={{ color: COLORS.textSecondary }}>โพสต์วันนี้</Text>
-                <TextInput
-                  value={subEditPosts}
-                  onChangeText={setSubEditPosts}
-                  keyboardType="number-pad"
-                  style={[styles.input, { marginTop: 6, paddingVertical: 8, paddingHorizontal: 10 }]}
-                />
-              </View>
-
-              <Text style={{ color: COLORS.textSecondary, marginBottom: SPACING.sm }}>
-                ที่เหลือ: {(() => {
-                  const planKey = (selectedUserSubscription?.plan as keyof typeof SUBSCRIPTION_PLANS) || 'free';
-                  const planInfo = SUBSCRIPTION_PLANS[planKey] || SUBSCRIPTION_PLANS.free;
-                  const max = planInfo.maxPostsPerDay;
-                  if (max == null) return 'ไม่จำกัด';
-                  const used = Number(selectedUserSubscription?.postsToday || 0);
-                  return Math.max(0, (max || 0) - used) + ' โพสต์';
-                })()}
-              </Text>
-
-              <View style={{ flexDirection: 'row', marginTop: SPACING.sm }}>
-                <TouchableOpacity style={[styles.adminActionButton, { marginRight: SPACING.sm }]} onPress={handleSaveSubscription}>
-                  <Text style={styles.adminActionText}>บันทึก</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.adminActionButton, { backgroundColor: COLORS.warning }]} onPress={handleResetPosts}>
-                  <Text style={styles.adminActionText}>รีเซ็ทโพสต์</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <Text style={{ color: COLORS.textSecondary }}>ไม่มีข้อมูลสมาชิก</Text>
-          )}
-        </View>
-
-        {/* User's Conversations */}
-        <Text style={styles.sectionTitle}>แชทของ {profileUser.displayName} ({userChats.length})</Text>
-        
-        {/* Chat viewer modal */}
-        {selectedChat && (
-          <View style={styles.chatViewer}>
-            <View style={styles.chatViewerHeader}>
-              <Text style={styles.chatViewerTitle}>
-                {selectedChat.participantDetails?.map(p => p.name || p.displayName).join(' ↔ ')}
-              </Text>
-              <TouchableOpacity onPress={() => setSelectedChat(null)}>
-                <Ionicons name="close" size={24} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-            {selectedChat.jobTitle && (
-              <Text style={styles.chatViewerJob}>งาน: {selectedChat.jobTitle}</Text>
-            )}
-            
-            {isLoadingMessages ? (
-              <ActivityIndicator style={{ marginVertical: SPACING.lg }} />
-            ) : (
-              <ScrollView style={styles.chatMessages}>
-                {chatMessages.map((msg, index) => (
-                  <View key={index} style={styles.chatMessage}>
-                    <Text style={styles.chatMessageSender}>{msg.senderName}</Text>
-                    <Text style={styles.chatMessageText}>{msg.text}</Text>
-                    <Text style={styles.chatMessageTime}>{formatRelativeTime(msg.createdAt)}</Text>
-                  </View>
-                ))}
-                {chatMessages.length === 0 && (
-                  <Text style={styles.noMessages}>ไม่มีข้อความ</Text>
-                )}
-              </ScrollView>
-            )}
-          </View>
-        )}
-        
-        {userChats.length > 0 ? (
-          userChats.map((chat) => (
-            <View key={chat.id} style={styles.chatCard}>
-              <TouchableOpacity style={styles.chatCardContent} onPress={() => handleViewChat(chat)}>
-                <View style={styles.chatCardInfo}>
-                  <Text style={styles.chatParticipants}>
-                    คุยกับ: {chat.participantDetails?.filter(p => p.id !== profileUser.id).map(p => p.name || p.displayName).join(', ') || 'ไม่ทราบ'}
-                  </Text>
-                  {chat.jobTitle && (
-                    <Text style={styles.chatJobTitle}>งาน: {chat.jobTitle}</Text>
-                  )}
-                  <Text style={styles.chatLastMessage} numberOfLines={1}>
-                    {chat.lastMessage || 'ไม่มีข้อความ'}
-                  </Text>
-                  <Text style={styles.chatDate}>{formatRelativeTime(chat.lastMessageAt)}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[styles.chatDeleteButton]}
-                onPress={() => handleDeleteChat(chat)}
-              >
-                <Ionicons name="trash" size={18} color={COLORS.danger} />
-              </TouchableOpacity>
-            </View>
-          ))
-        ) : (
-          <View style={styles.emptyState}>
-            <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textMuted} />
-            <Text style={styles.emptyStateText}>ไม่มีแชท</Text>
-          </View>
-        )}
-      </View>
-    );
-  };
-
+  // ============================================
+  // RENDER
+  // ============================================
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="light-content" />
+
+      {/* ====== HEADER ====== */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity 
-            style={styles.backButton} 
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+        <View style={styles.headerTop}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={COLORS.white} />
           </TouchableOpacity>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>Admin Dashboard</Text>
-            <Text style={styles.headerSubtitle}>สวัสดี, {user?.displayName}</Text>
+            <Text style={styles.headerSubtitle}>ศูนย์ควบคุมระบบ NurseGo</Text>
           </View>
+          <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
+            <Ionicons name="refresh-outline" size={22} color={COLORS.white} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.logoutButton} onPress={logout}>
-          <Ionicons name="log-out-outline" size={24} color={COLORS.danger} />
-        </TouchableOpacity>
+
+        {/* ====== TABS ====== */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabBar}
+        >
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                onPress={() => setActiveTab(tab.key)}
+                style={[styles.tab, isActive && styles.tabActive]}
+              >
+                <Ionicons
+                  name={tab.icon as any}
+                  size={18}
+                  color={isActive ? COLORS.primary : 'rgba(255,255,255,0.6)'}
+                />
+                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabs}>
-        {renderTabButton('overview', 'ภาพรวม', 'grid')}
-        {renderTabButton('users', `ผู้ใช้(${stats.totalUsers})`, 'people')}
-        {renderTabButton('jobs', `ประกาศ(${stats.totalJobs})`, 'briefcase')}
-        {renderTabButton('chats', `แชท(${stats.totalConversations})`, 'chatbubbles')}
-      </View>
-
-      {/* Content */}
+      {/* ====== CONTENT ====== */}
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
       >
         {activeTab === 'overview' && renderOverview()}
-        {activeTab === 'users' && (selectedUserProfile ? renderUserProfile() : renderUsers())}
+        {activeTab === 'users' && renderUsers()}
         {activeTab === 'jobs' && renderJobs()}
         {activeTab === 'chats' && renderChats()}
-        
-        <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Confirm Modal */}
-      <ConfirmModal
-        visible={showConfirmModal}
-        title={modalAction?.title || 'ยืนยัน'}
-        message={modalAction?.message || ''}
-        confirmText="ยืนยัน"
-        cancelText="ยกเลิก"
-        onConfirm={handleConfirmAction}
-        onCancel={() => setShowConfirmModal(false)}
-        type={modalAction?.type.includes('delete') ? 'danger' : 'warning'}
-      />
+      {/* ====== MODALS ====== */}
+      {renderUserModal()}
+      {renderJobModal()}
+    </View>
+  );
 
-      {/* Success Modal */}
-      <SuccessModal
-        visible={showSuccessModal}
-        title="สำเร็จ"
-        message={successMessage}
-        onClose={() => setShowSuccessModal(false)}
-      />
+  // ============================================
+  // TAB: OVERVIEW
+  // ============================================
+  function renderOverview() {
+    if (!stats) return null;
 
-      {/* Error Modal */}
-      <ErrorModal
-        visible={showErrorModal}
-        title="เกิดข้อผิดพลาด"
-        message={errorMessage}
-        onClose={() => setShowErrorModal(false)}
-      />
-    </SafeAreaView>
+    return (
+      <View>
+        {/* Stats Cards Grid */}
+        <Text style={styles.sectionTitle}>สถิติภาพรวม</Text>
+        <View style={styles.statsGrid}>
+          <StatCard
+            icon="people"
+            label="ผู้ใช้ทั้งหมด"
+            value={stats.totalUsers}
+            color={COLORS.primary}
+            sub={`+${stats.todayNewUsers} วันนี้`}
+          />
+          <StatCard
+            icon="briefcase"
+            label="ประกาศงาน"
+            value={stats.totalJobs}
+            color="#7C3AED"
+            sub={`${stats.activeJobs} เปิดรับ`}
+          />
+          <StatCard
+            icon="checkmark-shield"
+            label="รอตรวจสอบ"
+            value={stats.pendingVerifications || 0}
+            color={COLORS.accent}
+            sub="ใบอนุญาต"
+          />
+          <StatCard
+            icon="chatbubbles"
+            label="การสนทนา"
+            value={stats.totalConversations}
+            color={COLORS.secondary}
+            sub="ทั้งหมด"
+          />
+        </View>
+
+        {/* Quick Actions */}
+        <Text style={styles.sectionTitle}>การจัดการด่วน</Text>
+        <View style={styles.quickActions}>
+          <QuickAction
+            icon="shield-checkmark-outline"
+            label="ตรวจใบอนุญาต"
+            color={COLORS.accent}
+            badge={stats.pendingVerifications}
+            onPress={() => navigation.navigate('AdminVerification')}
+          />
+          <QuickAction
+            icon="flag-outline"
+            label="รายงาน"
+            color={COLORS.error}
+            onPress={() => navigation.navigate('AdminReports')}
+          />
+          <QuickAction
+            icon="chatbox-ellipses-outline"
+            label="Feedback"
+            color={COLORS.primary}
+            onPress={() => navigation.navigate('AdminFeedback')}
+          />
+          <QuickAction
+            icon="people-outline"
+            label="จัดการผู้ใช้"
+            color="#7C3AED"
+            onPress={() => setActiveTab('users')}
+          />
+        </View>
+
+        {/* User Breakdown */}
+        <Text style={styles.sectionTitle}>สรุปผู้ใช้ตาม Role</Text>
+        <View style={styles.card}>
+          {(['nurse', 'hospital', 'admin', 'user'] as const).map((role) => {
+            const count = users.filter((u) => u.role === role).length;
+            const badge = getRoleBadge(role);
+            const pct = users.length > 0 ? (count / users.length) * 100 : 0;
+            return (
+              <View key={role} style={styles.breakdownRow}>
+                <View style={[styles.roleDot, { backgroundColor: badge.color }]} />
+                <Text style={styles.breakdownLabel}>{badge.label}</Text>
+                <View style={styles.breakdownBarBg}>
+                  <View
+                    style={[styles.breakdownBarFill, { width: `${pct}%`, backgroundColor: badge.color }]}
+                  />
+                </View>
+                <Text style={styles.breakdownCount}>{count}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Job Overview */}
+        <Text style={styles.sectionTitle}>สรุปงานตามสถานะ</Text>
+        <View style={styles.card}>
+          {(['active', 'urgent', 'closed'] as const).map((status) => {
+            const count = jobs.filter((j) => j.status === status).length;
+            const badge = getStatusBadge(status);
+            const pct = jobs.length > 0 ? (count / jobs.length) * 100 : 0;
+            return (
+              <View key={status} style={styles.breakdownRow}>
+                <View style={[styles.roleDot, { backgroundColor: badge.color }]} />
+                <Text style={styles.breakdownLabel}>{badge.label}</Text>
+                <View style={styles.breakdownBarBg}>
+                  <View
+                    style={[styles.breakdownBarFill, { width: `${pct}%`, backgroundColor: badge.color }]}
+                  />
+                </View>
+                <Text style={styles.breakdownCount}>{count}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Recent Users */}
+        <Text style={styles.sectionTitle}>ผู้ใช้ล่าสุด</Text>
+        {users.slice(0, 5).map((u) => (
+          <TouchableOpacity
+            key={u.id}
+            style={styles.listItem}
+            onPress={() => { setSelectedUser(u); setUserModalVisible(true); }}
+          >
+            <View style={[styles.avatar, { backgroundColor: getRoleBadge(u.role).bg }]}>
+              <Text style={[styles.avatarText, { color: getRoleBadge(u.role).color }]}>
+                {u.displayName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.listItemTitle}>{u.displayName}</Text>
+              <Text style={styles.listItemSub}>{u.email}</Text>
+            </View>
+            <Badge {...getRoleBadge(u.role)} />
+          </TouchableOpacity>
+        ))}
+        {users.length > 5 && (
+          <TouchableOpacity style={styles.seeAllBtn} onPress={() => setActiveTab('users')}>
+            <Text style={styles.seeAllText}>ดูทั้งหมด ({users.length})</Text>
+            <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+          </TouchableOpacity>
+        )}
+
+        {/* Recent Jobs */}
+        <Text style={styles.sectionTitle}>งานล่าสุด</Text>
+        {jobs.slice(0, 5).map((j) => (
+          <TouchableOpacity
+            key={j.id}
+            style={styles.listItem}
+            onPress={() => { setSelectedJob(j); setJobModalVisible(true); }}
+          >
+            <View style={[styles.avatar, { backgroundColor: getStatusBadge(j.status).bg }]}>
+              <Ionicons name="briefcase" size={18} color={getStatusBadge(j.status).color} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.listItemTitle} numberOfLines={1}>{j.title}</Text>
+              <Text style={styles.listItemSub}>{j.posterName} · {formatDate(j.createdAt)}</Text>
+            </View>
+            <Badge {...getStatusBadge(j.status)} />
+          </TouchableOpacity>
+        ))}
+        {jobs.length > 5 && (
+          <TouchableOpacity style={styles.seeAllBtn} onPress={() => setActiveTab('jobs')}>
+            <Text style={styles.seeAllText}>ดูทั้งหมด ({jobs.length})</Text>
+            <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+          </TouchableOpacity>
+        )}
+
+        <View style={{ height: 40 }} />
+      </View>
+    );
+  }
+
+  // ============================================
+  // TAB: USERS
+  // ============================================
+  function renderUsers() {
+    return (
+      <View>
+        {/* Search */}
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color={COLORS.textLight} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="ค้นหาชื่อ, อีเมล, เบอร์โทร..."
+            placeholderTextColor={COLORS.textLight}
+            value={userSearch}
+            onChangeText={setUserSearch}
+          />
+          {userSearch.length > 0 && (
+            <TouchableOpacity onPress={() => setUserSearch('')}>
+              <Ionicons name="close-circle" size={18} color={COLORS.textLight} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Role Filter Chips */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
+          {[{ key: 'all', label: 'ทั้งหมด' }, { key: 'nurse', label: 'พยาบาล' }, { key: 'hospital', label: 'โรงพยาบาล' }, { key: 'admin', label: 'Admin' }, { key: 'user', label: 'ผู้ใช้ทั่วไป' }].map((f) => (
+            <TouchableOpacity
+              key={f.key}
+              onPress={() => setUserRoleFilter(f.key)}
+              style={[styles.filterChip, userRoleFilter === f.key && styles.filterChipActive]}
+            >
+              <Text style={[styles.filterChipText, userRoleFilter === f.key && styles.filterChipTextActive]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        <Text style={styles.resultCount}>
+          แสดง {filteredUsers.length} จาก {users.length} คน
+        </Text>
+
+        {/* User List */}
+        {filteredUsers.map((u) => (
+          <TouchableOpacity
+            key={u.id}
+            style={styles.userCard}
+            onPress={() => { setSelectedUser(u); setUserModalVisible(true); }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.userCardHeader}>
+              <View style={[styles.avatar, { backgroundColor: getRoleBadge(u.role).bg }]}>
+                <Text style={[styles.avatarText, { color: getRoleBadge(u.role).color }]}>
+                  {u.displayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.userCardName} numberOfLines={1}>{u.displayName}</Text>
+                  {u.isVerified && (
+                    <Ionicons name="checkmark-circle" size={16} color={COLORS.verified} />
+                  )}
+                  {!u.isActive && (
+                    <View style={styles.suspendedChip}>
+                      <Text style={styles.suspendedChipText}>ระงับ</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.userCardEmail} numberOfLines={1}>{u.email}</Text>
+              </View>
+              <Badge {...getRoleBadge(u.role)} />
+            </View>
+            <View style={styles.userCardFooter}>
+              <View style={styles.userCardMeta}>
+                <Ionicons name="calendar-outline" size={12} color={COLORS.textLight} />
+                <Text style={styles.userCardMetaText}>สมัคร {formatDate(u.createdAt)}</Text>
+              </View>
+              {u.phone && (
+                <View style={styles.userCardMeta}>
+                  <Ionicons name="call-outline" size={12} color={COLORS.textLight} />
+                  <Text style={styles.userCardMetaText}>{u.phone}</Text>
+                </View>
+              )}
+              {u.licenseNumber && (
+                <View style={styles.userCardMeta}>
+                  <Ionicons name="document-text-outline" size={12} color={COLORS.textLight} />
+                  <Text style={styles.userCardMetaText}>{u.licenseNumber}</Text>
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
+        ))}
+
+        {filteredUsers.length === 0 && (
+          <View style={styles.emptyState}>
+            <Ionicons name="search-outline" size={48} color={COLORS.textLight} />
+            <Text style={styles.emptyText}>ไม่พบผู้ใช้ที่ตรงเงื่อนไข</Text>
+          </View>
+        )}
+
+        <View style={{ height: 40 }} />
+      </View>
+    );
+  }
+
+  // ============================================
+  // TAB: JOBS
+  // ============================================
+  function renderJobs() {
+    return (
+      <View>
+        {/* Status Filter */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
+          {[{ key: 'all', label: 'ทั้งหมด' }, { key: 'active', label: 'เปิดรับ' }, { key: 'urgent', label: 'ด่วน' }, { key: 'closed', label: 'ปิดแล้ว' }].map((f) => (
+            <TouchableOpacity
+              key={f.key}
+              onPress={() => setJobStatusFilter(f.key)}
+              style={[styles.filterChip, jobStatusFilter === f.key && styles.filterChipActive]}
+            >
+              <Text style={[styles.filterChipText, jobStatusFilter === f.key && styles.filterChipTextActive]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        <Text style={styles.resultCount}>
+          แสดง {filteredJobs.length} จาก {jobs.length} งาน
+        </Text>
+
+        {/* Jobs List */}
+        {filteredJobs.map((j) => (
+          <TouchableOpacity
+            key={j.id}
+            style={styles.jobCard}
+            onPress={() => { setSelectedJob(j); setJobModalVisible(true); }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.jobCardHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.jobCardTitle} numberOfLines={1}>{j.title}</Text>
+                <Text style={styles.jobCardPoster}>{j.posterName}</Text>
+              </View>
+              <Badge {...getStatusBadge(j.status)} />
+            </View>
+
+            <View style={styles.jobCardBody}>
+              {j.department ? (
+                <View style={styles.jobCardTag}>
+                  <Ionicons name="medical-outline" size={12} color={COLORS.textSecondary} />
+                  <Text style={styles.jobCardTagText}>{j.department}</Text>
+                </View>
+              ) : null}
+              {j.province ? (
+                <View style={styles.jobCardTag}>
+                  <Ionicons name="location-outline" size={12} color={COLORS.textSecondary} />
+                  <Text style={styles.jobCardTagText}>{j.province}</Text>
+                </View>
+              ) : null}
+              {j.shiftRate > 0 && (
+                <View style={styles.jobCardTag}>
+                  <Ionicons name="cash-outline" size={12} color={COLORS.textSecondary} />
+                  <Text style={styles.jobCardTagText}>฿{j.shiftRate.toLocaleString()}</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.jobCardFooter}>
+              <Text style={styles.jobCardFooterText}>
+                {formatDate(j.createdAt)}
+                {j.shiftDate ? ` · กะ ${formatDate(j.shiftDate)}` : ''}
+                {j.shiftTime ? ` ${j.shiftTime}` : ''}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={styles.jobCardStat}>
+                  <Ionicons name="eye-outline" size={12} color={COLORS.textLight} />
+                  <Text style={styles.jobCardStatText}>{j.viewsCount}</Text>
+                </View>
+                <View style={styles.jobCardStat}>
+                  <Ionicons name="people-outline" size={12} color={COLORS.textLight} />
+                  <Text style={styles.jobCardStatText}>{j.applicantsCount}</Text>
+                </View>
+              </View>
+            </View>
+          </TouchableOpacity>
+        ))}
+
+        {filteredJobs.length === 0 && (
+          <View style={styles.emptyState}>
+            <Ionicons name="briefcase-outline" size={48} color={COLORS.textLight} />
+            <Text style={styles.emptyText}>ไม่พบงานที่ตรงเงื่อนไข</Text>
+          </View>
+        )}
+
+        <View style={{ height: 40 }} />
+      </View>
+    );
+  }
+
+  // ============================================
+  // TAB: CHATS
+  // ============================================
+  function renderChats() {
+    return (
+      <View>
+        <Text style={styles.resultCount}>{chats.length} การสนทนา</Text>
+
+        {chats.map((c) => {
+          const names = c.participantDetails?.map((p) => p.displayName || p.name).join(' ↔ ') || c.participants.join(', ');
+          return (
+            <View key={c.id} style={styles.chatCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.chatParticipants} numberOfLines={1}>{names}</Text>
+                {c.jobTitle && (
+                  <Text style={styles.chatJob} numberOfLines={1}>
+                    <Ionicons name="briefcase-outline" size={11} color={COLORS.textLight} /> {c.jobTitle}
+                  </Text>
+                )}
+                <Text style={styles.chatLastMsg} numberOfLines={1}>{c.lastMessage || '(ไม่มีข้อความ)'}</Text>
+                <Text style={styles.chatTime}>{formatDateTime(c.lastMessageAt)}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => handleDeleteChat(c)}
+                style={styles.chatDeleteBtn}
+              >
+                <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+
+        {chats.length === 0 && (
+          <View style={styles.emptyState}>
+            <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textLight} />
+            <Text style={styles.emptyText}>ยังไม่มีการสนทนา</Text>
+          </View>
+        )}
+
+        <View style={{ height: 40 }} />
+      </View>
+    );
+  }
+
+  // ============================================
+  // MODAL: USER DETAIL
+  // ============================================
+  function renderUserModal() {
+    if (!selectedUser) return null;
+    const u = selectedUser;
+    const badge = getRoleBadge(u.role);
+
+    return (
+      <Modal visible={userModalVisible} transparent animationType="slide" onRequestClose={() => setUserModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 16 }]}>
+            {/* Header */}
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>ข้อมูลผู้ใช้</Text>
+              <TouchableOpacity onPress={() => setUserModalVisible(false)}>
+                <Ionicons name="close" size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Profile */}
+              <View style={styles.modalProfileRow}>
+                <View style={[styles.avatarLg, { backgroundColor: badge.bg }]}>
+                  <Text style={[styles.avatarLgText, { color: badge.color }]}>
+                    {u.displayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalProfileName}>{u.displayName}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    <Badge {...badge} />
+                    {u.isVerified && (
+                      <View style={[styles.miniChip, { backgroundColor: COLORS.successLight }]}>
+                        <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
+                        <Text style={[styles.miniChipText, { color: COLORS.success }]}>ยืนยันแล้ว</Text>
+                      </View>
+                    )}
+                    {!u.isActive && (
+                      <View style={[styles.miniChip, { backgroundColor: COLORS.errorLight }]}>
+                        <Text style={[styles.miniChipText, { color: COLORS.error }]}>ระงับแล้ว</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </View>
+
+              {/* Info Rows */}
+              <View style={styles.infoSection}>
+                <InfoRow icon="mail-outline" label="อีเมล" value={u.email} />
+                <InfoRow icon="call-outline" label="โทรศัพท์" value={u.phone || '-'} />
+                <InfoRow icon="document-text-outline" label="เลขใบอนุญาต" value={u.licenseNumber || '-'} />
+                <InfoRow icon="calendar-outline" label="สมัครเมื่อ" value={formatDate(u.createdAt)} />
+                <InfoRow icon="time-outline" label="เข้าใช้ล่าสุด" value={formatDateTime(u.lastLoginAt)} />
+                <InfoRow icon="finger-print-outline" label="UID" value={u.uid} mono />
+              </View>
+
+              {/* Role Change */}
+              <Text style={styles.modalSectionTitle}>เปลี่ยน Role</Text>
+              <View style={styles.roleGrid}>
+                {(['user', 'nurse', 'hospital', 'admin'] as const).map((role) => {
+                  const rb = getRoleBadge(role);
+                  const isCurrentRole = u.role === role;
+                  return (
+                    <TouchableOpacity
+                      key={role}
+                      style={[
+                        styles.roleBtn,
+                        { borderColor: rb.color },
+                        isCurrentRole && { backgroundColor: rb.bg },
+                      ]}
+                      onPress={() => handleChangeRole(u, role)}
+                      disabled={isCurrentRole}
+                    >
+                      <Text style={[styles.roleBtnText, { color: rb.color }]}>{rb.label}</Text>
+                      {isCurrentRole && <Ionicons name="checkmark" size={14} color={rb.color} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Actions */}
+              <Text style={styles.modalSectionTitle}>การดำเนินการ</Text>
+              <View style={styles.actionList}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: u.isVerified ? COLORS.warningLight : COLORS.successLight }]}
+                  onPress={() => handleVerifyUser(u)}
+                >
+                  <Ionicons name={u.isVerified ? 'close-circle-outline' : 'shield-checkmark-outline'} size={20} color={u.isVerified ? COLORS.accent : COLORS.success} />
+                  <Text style={[styles.actionBtnText, { color: u.isVerified ? COLORS.accent : COLORS.success }]}>
+                    {u.isVerified ? 'ยกเลิกยืนยัน' : 'ยืนยันตัวตน'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: u.isActive ? COLORS.warningLight : COLORS.successLight }]}
+                  onPress={() => handleToggleUserActive(u)}
+                >
+                  <Ionicons name={u.isActive ? 'ban-outline' : 'checkmark-circle-outline'} size={20} color={u.isActive ? COLORS.accent : COLORS.success} />
+                  <Text style={[styles.actionBtnText, { color: u.isActive ? COLORS.accent : COLORS.success }]}>
+                    {u.isActive ? 'ระงับผู้ใช้' : 'เปิดใช้งาน'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: COLORS.errorLight }]}
+                  onPress={() => handleDeleteUser(u)}
+                >
+                  <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+                  <Text style={[styles.actionBtnText, { color: COLORS.error }]}>ลบผู้ใช้ถาวร</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  // ============================================
+  // MODAL: JOB DETAIL
+  // ============================================
+  function renderJobModal() {
+    if (!selectedJob) return null;
+    const j = selectedJob;
+    const badge = getStatusBadge(j.status);
+
+    return (
+      <Modal visible={jobModalVisible} transparent animationType="slide" onRequestClose={() => setJobModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>รายละเอียดงาน</Text>
+              <TouchableOpacity onPress={() => setJobModalVisible(false)}>
+                <Ionicons name="close" size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.jobModalHeaderRow}>
+                <Text style={styles.jobModalTitle}>{j.title}</Text>
+                <Badge {...badge} />
+              </View>
+
+              <View style={styles.infoSection}>
+                <InfoRow icon="person-outline" label="ผู้ประกาศ" value={j.posterName} />
+                <InfoRow icon="medical-outline" label="แผนก" value={j.department || '-'} />
+                <InfoRow icon="people-outline" label="ประเภท" value={j.staffType || '-'} />
+                <InfoRow icon="location-outline" label="จังหวัด" value={j.province || '-'} />
+                <InfoRow icon="business-outline" label="สถานที่" value={j.hospital || '-'} />
+                <InfoRow icon="cash-outline" label="ค่าตอบแทน" value={j.shiftRate > 0 ? `฿${j.shiftRate.toLocaleString()}` : '-'} />
+                <InfoRow icon="calendar-outline" label="วันกะ" value={j.shiftDate ? formatDate(j.shiftDate) : '-'} />
+                <InfoRow icon="time-outline" label="เวลากะ" value={j.shiftTime || '-'} />
+                <InfoRow icon="create-outline" label="ประกาศเมื่อ" value={formatDate(j.createdAt)} />
+              </View>
+
+              {/* Stats */}
+              <View style={styles.jobModalStats}>
+                <View style={styles.jobModalStatItem}>
+                  <Ionicons name="eye" size={20} color={COLORS.primary} />
+                  <Text style={styles.jobModalStatValue}>{j.viewsCount}</Text>
+                  <Text style={styles.jobModalStatLabel}>เข้าชม</Text>
+                </View>
+                <View style={styles.jobModalStatItem}>
+                  <Ionicons name="people" size={20} color="#7C3AED" />
+                  <Text style={styles.jobModalStatValue}>{j.applicantsCount}</Text>
+                  <Text style={styles.jobModalStatLabel}>สมัคร</Text>
+                </View>
+                <View style={styles.jobModalStatItem}>
+                  <Ionicons name="chatbubble" size={20} color={COLORS.secondary} />
+                  <Text style={styles.jobModalStatValue}>{j.contactsCount}</Text>
+                  <Text style={styles.jobModalStatLabel}>ติดต่อ</Text>
+                </View>
+              </View>
+
+              {/* Status Change */}
+              <Text style={styles.modalSectionTitle}>เปลี่ยนสถานะ</Text>
+              <View style={styles.roleGrid}>
+                {(['active', 'urgent', 'closed'] as const).map((status) => {
+                  const sb = getStatusBadge(status);
+                  const isCurrent = j.status === status;
+                  return (
+                    <TouchableOpacity
+                      key={status}
+                      style={[styles.roleBtn, { borderColor: sb.color }, isCurrent && { backgroundColor: sb.bg }]}
+                      onPress={() => handleChangeJobStatus(j, status)}
+                      disabled={isCurrent}
+                    >
+                      <Text style={[styles.roleBtnText, { color: sb.color }]}>{sb.label}</Text>
+                      {isCurrent && <Ionicons name="checkmark" size={14} color={sb.color} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Delete */}
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: COLORS.errorLight, marginTop: 16 }]}
+                onPress={() => handleDeleteJob(j)}
+              >
+                <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+                <Text style={[styles.actionBtnText, { color: COLORS.error }]}>ลบงานถาวร</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+}
+
+// ============================================
+// SUB-COMPONENTS
+// ============================================
+
+function StatCard({ icon, label, value, color, sub }: {
+  icon: string; label: string; value: number; color: string; sub: string;
+}) {
+  return (
+    <View style={[styles.statCard, { borderLeftColor: color }]}>
+      <View style={[styles.statIconBg, { backgroundColor: color + '18' }]}>
+        <Ionicons name={icon as any} size={20} color={color} />
+      </View>
+      <Text style={styles.statValue}>{value.toLocaleString()}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statSub, { color }]}>{sub}</Text>
+    </View>
+  );
+}
+
+function QuickAction({ icon, label, color, badge, onPress }: {
+  icon: string; label: string; color: string; badge?: number; onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.quickActionBtn} onPress={onPress} activeOpacity={0.7}>
+      <View style={[styles.quickActionIcon, { backgroundColor: color + '18' }]}>
+        <Ionicons name={icon as any} size={24} color={color} />
+        {badge != null && badge > 0 && (
+          <View style={styles.quickActionBadge}>
+            <Text style={styles.quickActionBadgeText}>{badge > 99 ? '99+' : badge}</Text>
+          </View>
+        )}
+      </View>
+      <Text style={styles.quickActionLabel}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function Badge({ label, color, bg }: { label: string; color: string; bg: string }) {
+  return (
+    <View style={[styles.badge, { backgroundColor: bg }]}>
+      <Text style={[styles.badgeText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function InfoRow({ icon, label, value, mono }: {
+  icon: string; label: string; value: string; mono?: boolean;
+}) {
+  return (
+    <View style={styles.infoRow}>
+      <View style={styles.infoRowLeft}>
+        <Ionicons name={icon as any} size={16} color={COLORS.textLight} />
+        <Text style={styles.infoRowLabel}>{label}</Text>
+      </View>
+      <Text style={[styles.infoRowValue, mono && { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 11 }]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
 // ============================================
-// Styles
+// STYLES
 // ============================================
 const styles = StyleSheet.create({
   container: {
@@ -1264,91 +1088,78 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: COLORS.background,
   },
   loadingText: {
-    marginTop: SPACING.md,
-    fontSize: FONT_SIZES.md,
+    marginTop: 12,
     color: COLORS.textSecondary,
-  },
-  accessDenied: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.xl,
-  },
-  accessDeniedTitle: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: '700',
-    color: COLORS.danger,
-    marginTop: SPACING.lg,
-  },
-  accessDeniedText: {
     fontSize: FONT_SIZES.md,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.sm,
-    textAlign: 'center',
   },
 
   // Header
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: SPACING.md,
-    backgroundColor: COLORS.white,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.primaryDark,
+    paddingBottom: 0,
   },
-  headerLeft: {
+  headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    gap: 8,
   },
-  backButton: {
-    padding: SPACING.sm,
-    marginRight: SPACING.sm,
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  refreshBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: FONT_SIZES.xl,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.white,
   },
   headerSubtitle: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  logoutButton: {
-    padding: SPACING.sm,
+    fontSize: FONT_SIZES.xs,
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 1,
   },
 
   // Tabs
-  tabs: {
+  tabBar: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.sm,
+    gap: 4,
   },
-  tabButton: {
-    flex: 1,
+  tab: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.xs,
-    borderRadius: BORDER_RADIUS.md,
-    marginHorizontal: 2,
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.full,
   },
-  tabButtonActive: {
-    backgroundColor: COLORS.primary,
+  tabActive: {
+    backgroundColor: COLORS.white,
   },
-  tabButtonText: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.textSecondary,
-    marginLeft: 4,
+  tabLabel: {
+    fontSize: FONT_SIZES.sm,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '500',
   },
-  tabButtonTextActive: {
-    color: COLORS.white,
+  tabLabelActive: {
+    color: COLORS.primary,
     fontWeight: '600',
   },
 
@@ -1356,147 +1167,145 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  section: {
-    padding: SPACING.md,
+  contentContainer: {
+    padding: SPACING.lg,
   },
+
+  // Section
   sectionTitle: {
     fontSize: FONT_SIZES.lg,
     fontWeight: '700',
     color: COLORS.text,
-    marginBottom: SPACING.md,
+    marginTop: 20,
+    marginBottom: 12,
   },
 
   // Stats Grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginHorizontal: -SPACING.xs,
+    gap: 10,
   },
   statCard: {
-    width: '48%',
+    width: (SCREEN_WIDTH - SPACING.lg * 2 - 10) / 2,
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    margin: '1%',
-    borderLeftWidth: 4,
-    ...SHADOWS.small,
+    padding: 14,
+    borderLeftWidth: 3,
+    ...SHADOWS.sm,
   },
-  statCardHeader: {
-    flexDirection: 'row',
+  statIconBg: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   statValue: {
-    fontSize: FONT_SIZES.xxl,
+    fontSize: 22,
     fontWeight: '700',
+    color: COLORS.text,
   },
-  statTitle: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.xs,
-  },
-  statSubtitle: {
+  statLabel: {
     fontSize: FONT_SIZES.xs,
-    color: COLORS.success,
+    color: COLORS.textSecondary,
     marginTop: 2,
+  },
+  statSub: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '600',
+    marginTop: 4,
   },
 
   // Quick Actions
   quickActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -SPACING.xs,
+    gap: 10,
   },
-  quickActionButton: {
-    width: '23%',
+  quickActionBtn: {
+    flex: 1,
+    alignItems: 'center',
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    margin: '1%',
-    alignItems: 'center',
-    ...SHADOWS.small,
+    paddingVertical: 16,
+    ...SHADOWS.sm,
   },
-  quickActionText: {
+  quickActionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  quickActionLabel: {
     fontSize: FONT_SIZES.xs,
+    fontWeight: '600',
     color: COLORS.text,
-    marginTop: SPACING.xs,
     textAlign: 'center',
   },
   quickActionBadge: {
-    fontSize: FONT_SIZES.xs,
-    color: '#fff',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 8,
-    marginTop: 2,
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: COLORS.error,
+    borderRadius: 10,
     minWidth: 18,
-    textAlign: 'center',
-    overflow: 'hidden',
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  quickActionBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.white,
   },
 
-  // Filter Chips
-  filterChip: {
+  // Card
+  card: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.md,
+    padding: 16,
+    ...SHADOWS.sm,
+  },
+
+  // Breakdown Row
+  breakdownRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    marginRight: SPACING.sm,
-    backgroundColor: COLORS.white,
-    gap: 4,
+    paddingVertical: 8,
+    gap: 10,
   },
-  filterChipText: {
+  roleDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  breakdownLabel: {
+    width: 80,
     fontSize: FONT_SIZES.sm,
-    color: COLORS.text,
-    fontWeight: '500',
-  },
-  filterChipCount: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
-    fontWeight: '600',
-  },
-
-  // Role Badge
-  roleBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  roleBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-
-  // Staff Type Badge
-  staffTypeBadge: {
-    backgroundColor: '#EDE9FE',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  staffTypeBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#7C3AED',
-  },
-
-  // Job extra fields
-  jobLocation: {
-    fontSize: FONT_SIZES.xs,
     color: COLORS.textSecondary,
-    marginTop: 2,
   },
-  jobShiftTime: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.info,
+  breakdownBarBg: {
+    flex: 1,
+    height: 6,
+    backgroundColor: COLORS.backgroundSecondary,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  breakdownBarFill: {
+    height: '100%',
+    borderRadius: 3,
+    minWidth: 2,
+  },
+  breakdownCount: {
+    width: 32,
+    textAlign: 'right',
+    fontSize: FONT_SIZES.sm,
     fontWeight: '600',
-  },
-  jobStat: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
+    color: COLORS.text,
   },
 
   // List Item
@@ -1504,407 +1313,456 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
-    padding: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.sm,
-    ...SHADOWS.small,
+    padding: 12,
+    marginBottom: 8,
+    gap: 12,
+    ...SHADOWS.sm,
   },
-  listItemInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  listItemName: {
+  listItemTitle: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
     color: COLORS.text,
   },
-  listItemSubtext: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  statusBadge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.sm,
-  },
-  statusBadgeText: {
+  listItemSub: {
     fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
+    marginTop: 2,
+  },
+
+  // Avatar
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarText: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '700',
+  },
+  avatarLg: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarLgText: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+
+  // See All Button
+  seeAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 4,
+  },
+  seeAllText: {
+    fontSize: FONT_SIZES.sm,
     fontWeight: '600',
+    color: COLORS.primary,
   },
 
   // Search
-  searchContainer: {
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
-    ...SHADOWS.small,
+    paddingHorizontal: 12,
+    height: 44,
+    gap: 8,
+    ...SHADOWS.sm,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.sm,
     fontSize: FONT_SIZES.md,
+    color: COLORS.text,
+    height: '100%',
+  },
+
+  // Filter
+  filterRow: {
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  filterChip: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  filterChipText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  filterChipTextActive: {
+    color: COLORS.white,
+  },
+
+  resultCount: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
+    marginVertical: 10,
   },
 
   // User Card
   userCard: {
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    ...SHADOWS.small,
+    padding: 14,
+    marginBottom: 10,
+    ...SHADOWS.sm,
   },
   userCardHeader: {
     flexDirection: 'row',
-  },
-  userCardInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  userNameRow: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.xs,
-    flexWrap: 'wrap',
+    gap: 12,
   },
-  userName: {
+  userCardName: {
     fontSize: FONT_SIZES.md,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.text,
+    flexShrink: 1,
   },
-  userEmail: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  userPhone: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  userUsername: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
-  },
-  userDate: {
+  userCardEmail: {
     fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
+    color: COLORS.textLight,
     marginTop: 2,
   },
-  adminBadge: {
-    backgroundColor: COLORS.danger,
-    paddingHorizontal: SPACING.xs,
-    paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.sm,
-  },
-  adminBadgeText: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.white,
-    fontWeight: '600',
-  },
-  userCardActions: {
+  userCardFooter: {
     flexDirection: 'row',
-    marginTop: SPACING.md,
-    gap: SPACING.sm,
     flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
   },
-  userActionButton: {
+  userCardMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.sm,
     gap: 4,
   },
-  userActionText: {
+  userCardMetaText: {
     fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
+  },
+  suspendedChip: {
+    backgroundColor: COLORS.errorLight,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  suspendedChipText: {
+    fontSize: 10,
     fontWeight: '600',
+    color: COLORS.error,
   },
 
   // Job Card
   jobCard: {
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    ...SHADOWS.small,
+    padding: 14,
+    marginBottom: 10,
+    ...SHADOWS.sm,
   },
   jobCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
   },
-  jobCardInfo: {
-    flex: 1,
-  },
-  jobTitle: {
+  jobCardTitle: {
     fontSize: FONT_SIZES.md,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.text,
   },
-  jobPoster: {
-    fontSize: FONT_SIZES.sm,
+  jobCardPoster: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
+    marginTop: 2,
+  },
+  jobCardBody: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  jobCardTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.backgroundSecondary,
+    borderRadius: BORDER_RADIUS.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  jobCardTagText: {
+    fontSize: FONT_SIZES.xs,
     color: COLORS.textSecondary,
   },
-  jobRate: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '600',
-    color: COLORS.success,
-  },
-  jobDate: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
-  },
-  jobStatusBadge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.sm,
-    alignSelf: 'flex-start',
-  },
-  jobStatusText: {
-    fontSize: FONT_SIZES.xs,
-    fontWeight: '600',
-  },
-  jobCardActions: {
+  jobCardFooter: {
     flexDirection: 'row',
-    marginTop: SPACING.md,
-    gap: SPACING.sm,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+  },
+  jobCardFooterText: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
+  },
+  jobCardStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  jobCardStatText: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
   },
 
   // Chat Card
   chatCard: {
+    flexDirection: 'row',
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    ...SHADOWS.small,
-  },
-  chatCardContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.md,
-  },
-  chatCardInfo: {
-    flex: 1,
+    padding: 14,
+    marginBottom: 10,
+    gap: 12,
+    ...SHADOWS.sm,
   },
   chatParticipants: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
     color: COLORS.text,
   },
-  chatJobTitle: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
+  chatJob: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
+    marginTop: 2,
   },
-  chatLastMessage: {
+  chatLastMsg: {
     fontSize: FONT_SIZES.sm,
     color: COLORS.textSecondary,
-    marginTop: 2,
+    marginTop: 4,
   },
-  chatDate: {
+  chatTime: {
     fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
-    marginTop: 2,
+    color: COLORS.textLight,
+    marginTop: 4,
   },
-  chatDeleteButton: {
-    padding: SPACING.md,
-    borderLeftWidth: 1,
-    borderLeftColor: COLORS.border,
+  chatDeleteBtn: {
+    justifyContent: 'center',
+    padding: 8,
   },
 
-  // Chat Viewer
-  chatViewer: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-    maxHeight: 400,
-    ...SHADOWS.medium,
-  },
-  chatViewerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  chatViewerTitle: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '700',
-    color: COLORS.text,
-    flex: 1,
-  },
-  chatViewerJob: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
-    marginBottom: SPACING.sm,
-  },
-  chatMessages: {
-    maxHeight: 300,
-  },
-  chatMessage: {
-    backgroundColor: COLORS.background,
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.sm,
-    marginBottom: SPACING.xs,
-  },
-  chatMessageSender: {
-    fontSize: FONT_SIZES.xs,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
-  chatMessageText: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.text,
-    marginTop: 2,
-  },
-  chatMessageTime: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  noMessages: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: SPACING.lg,
-  },
-  
   // Empty State
   emptyState: {
     alignItems: 'center',
-    paddingVertical: SPACING.xl,
+    paddingVertical: 40,
+    gap: 12,
   },
-  emptyStateTitle: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginTop: SPACING.md,
-    textAlign: 'center',
-  },
-  emptyStateText: {
+  emptyText: {
     fontSize: FONT_SIZES.md,
-    color: COLORS.textMuted,
-    marginTop: SPACING.sm,
-    textAlign: 'center',
+    color: COLORS.textLight,
   },
-  
-  // View Profile Hint
-  viewProfileHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: SPACING.sm,
-    paddingTop: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+
+  // Badge
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.full,
   },
-  viewProfileHintText: {
+  badgeText: {
     fontSize: FONT_SIZES.xs,
-    color: COLORS.primary,
-    marginRight: SPACING.xs,
+    fontWeight: '600',
   },
-  
-  // Close Profile Button
-  closeProfileButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  closeProfileText: {
-    fontSize: FONT_SIZES.md,
-    color: COLORS.text,
-    marginLeft: SPACING.xs,
-  },
-  
-  // Profile Card
-  profileCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.lg,
-    marginBottom: SPACING.lg,
-    alignItems: 'center',
-    ...SHADOWS.medium,
-  },
-  profileInfo: {
+
+  // Modal
+  modalOverlay: {
     flex: 1,
-    alignItems: 'center',
-    marginTop: SPACING.md,
+    backgroundColor: COLORS.overlay,
+    justifyContent: 'flex-end',
   },
-  profileName: {
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: BORDER_RADIUS.xl,
+    borderTopRightRadius: BORDER_RADIUS.xl,
+    maxHeight: '85%',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
     fontSize: FONT_SIZES.xl,
     fontWeight: '700',
     color: COLORS.text,
-    marginRight: SPACING.xs,
   },
-  profileDetails: {
-    marginTop: SPACING.md,
-    width: '100%',
-  },
-  profileDetailRow: {
+  modalProfileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.xs,
-    justifyContent: 'center',
+    gap: 14,
+    marginBottom: 20,
   },
-  profileDetailText: {
+  modalProfileName: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  miniChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.xs,
+  },
+  miniChipText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+
+  // Info Section
+  infoSection: {
+    backgroundColor: COLORS.backgroundSecondary,
+    borderRadius: BORDER_RADIUS.md,
+    padding: 14,
+    marginBottom: 16,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 7,
+  },
+  infoRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  infoRowLabel: {
     fontSize: FONT_SIZES.sm,
     color: COLORS.textSecondary,
-    marginLeft: SPACING.xs,
   },
-  profileBadges: {
+  infoRowValue: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '500',
+    color: COLORS.text,
+    maxWidth: '55%',
+    textAlign: 'right',
+  },
+
+  // Modal Section
+  modalSectionTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 10,
+  },
+
+  // Role Grid
+  roleGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
-    marginTop: SPACING.md,
-    gap: SPACING.xs,
+    gap: 8,
+    marginBottom: 20,
   },
-  profileBadge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.sm,
-  },
-  profileBadgeText: {
-    fontSize: FONT_SIZES.xs,
-    fontWeight: '600',
-  },
-  subscriptionBox: {
-    marginVertical: SPACING.sm,
-  },
-  planButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  planButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  planButtonText: {
-    color: COLORS.textSecondary,
-  },
-  planButtonTextActive: {
-    color: '#fff',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: BORDER_RADIUS.md,
-    backgroundColor: COLORS.white,
-  },
-  adminActionButton: {
-    flex: 1,
-    backgroundColor: COLORS.primary,
-    paddingVertical: 10,
-    borderRadius: BORDER_RADIUS.md,
+  roleBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    borderWidth: 1.5,
+    borderRadius: BORDER_RADIUS.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  adminActionText: {
-    color: '#fff',
+  roleBtnText: {
+    fontSize: FONT_SIZES.sm,
     fontWeight: '600',
+  },
+
+  // Action List
+  actionList: {
+    gap: 8,
+    marginBottom: 20,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  actionBtnText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+  },
+
+  // Job Modal
+  jobModalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 16,
+  },
+  jobModalTitle: {
+    flex: 1,
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  jobModalStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: COLORS.backgroundSecondary,
+    borderRadius: BORDER_RADIUS.md,
+    paddingVertical: 16,
+    marginBottom: 20,
+  },
+  jobModalStatItem: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  jobModalStatValue: {
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  jobModalStatLabel: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textLight,
   },
 });
