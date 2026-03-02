@@ -8,6 +8,7 @@
       "ESNext"
     ],
     "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
     "noEmit": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
@@ -16,5 +17,8 @@
   "include": [
     "**/*.ts",
     "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules"
   ]
 }
