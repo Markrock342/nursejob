@@ -38,7 +38,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { JobCard } from '../../components/job/JobCard';
-import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, SimpleFAB } from '../../components/common';
+import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, FAB } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import {
   ALL_PROVINCES,
@@ -69,10 +69,10 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ─── Category Tabs ──────────────────────────────────────────────────
 const CATEGORY_TABS = [
-  { key: 'all',      label: 'ทั้งหมด',      icon: 'apps-outline'             as const },
-  { key: 'shift',    label: 'แทนเวร',       icon: 'swap-horizontal-outline'  as const },
-  { key: 'job',      label: 'รับสมัคร',    icon: 'briefcase-outline'        as const },
-  { key: 'homecare', label: 'ดูแลผู้ป่วย', icon: 'home-outline'             as const },
+  { key: 'all',      label: 'ทั้งหมด',      icon: 'apps-outline'             as const, color: '#0EA5E9' },
+  { key: 'shift',    label: 'แทนเวร',       icon: 'swap-horizontal-outline'  as const, color: '#8B5CF6' },
+  { key: 'job',      label: 'รับสมัคร',    icon: 'briefcase-outline'        as const, color: '#F59E0B' },
+  { key: 'homecare', label: 'ดูแลผู้ป่วย', icon: 'home-outline'             as const, color: '#10B981' },
 ] as const;
 type CategoryKey = typeof CATEGORY_TABS[number]['key'];
 
@@ -948,7 +948,10 @@ export default function HomeScreen({ navigation }: Props) {
             return (
               <TouchableOpacity
                 key={tab.key}
-                style={[styles.categoryTab, isActive && styles.categoryTabActive]}
+                style={[
+                  styles.categoryTab,
+                  isActive && { backgroundColor: '#FFFFFF' },
+                ]}
                 onPress={() =>
                   setFilters((prev) => ({
                     ...prev,
@@ -960,10 +963,15 @@ export default function HomeScreen({ navigation }: Props) {
                 <Ionicons
                   name={tab.icon}
                   size={16}
-                  color={isActive ? '#0284C7' : 'rgba(255,255,255,0.85)'}
+                  color={isActive ? tab.color : 'rgba(255,255,255,0.9)'}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.categoryTabLabel, isActive && styles.categoryTabLabelActive]}>
+                <Text
+                  style={[
+                    styles.categoryTabLabel,
+                    isActive && { color: tab.color, fontWeight: '700' as const },
+                  ]}
+                >
                   {tab.label}
                 </Text>
               </TouchableOpacity>
@@ -1146,11 +1154,30 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </ModalContainer>
 
-      {/* FAB - Post Job */}
-      <SimpleFAB
-        icon="add"
-        onPress={() => (navigation as any).navigate('Main', { screen: 'PostJob' })}
-        size={60}
+      {/* FAB - Quick Actions */}
+      <FAB
+        mainIcon="add"
+        size={64}
+        actions={[
+          {
+            icon: 'create-outline',
+            label: 'โพสต์งาน',
+            onPress: () => (navigation as any).navigate('Main', { screen: 'PostJob' }),
+            color: '#0EA5E9',
+          },
+          {
+            icon: 'map-outline',
+            label: 'ดูแผนที่',
+            onPress: () => (navigation as any).navigate('MapJobs'),
+            color: '#6366F1',
+          },
+          {
+            icon: 'heart-outline',
+            label: 'รายการโปรด',
+            onPress: () => (navigation as any).navigate('Favorites'),
+            color: '#EC4899',
+          },
+        ]}
       />
     </SafeAreaView>
   );
