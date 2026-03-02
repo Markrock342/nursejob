@@ -38,7 +38,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { JobCard } from '../../components/job/JobCard';
-import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, FAB } from '../../components/common';
+import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, SimpleFAB } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import {
   ALL_PROVINCES,
@@ -66,6 +66,15 @@ import { JobPost, MainTabParamList, JobFilters } from '../../types';
 import { debounce } from '../../utils/helpers';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// ─── Category Tabs ──────────────────────────────────────────────────
+const CATEGORY_TABS = [
+  { key: 'all',      label: 'ทั้งหมด',      icon: 'apps-outline'             as const },
+  { key: 'shift',    label: 'แทนเวร',       icon: 'swap-horizontal-outline'  as const },
+  { key: 'job',      label: 'รับสมัคร',    icon: 'briefcase-outline'        as const },
+  { key: 'homecare', label: 'ดูแลผู้ป่วย', icon: 'home-outline'             as const },
+] as const;
+type CategoryKey = typeof CATEGORY_TABS[number]['key'];
 
 // ============================================
 // Types
@@ -402,6 +411,9 @@ export default function HomeScreen({ navigation }: Props) {
       if (nearbyMode && location) {
         const { getJobsNearby } = await import('../../services/jobService');
         fetchedJobs = await getJobsNearby(location.latitude, location.longitude, 20);
+        if (filters.postType) {
+          fetchedJobs = fetchedJobs.filter(j => j.postType === filters.postType);
+        }
         lastDocRef.current = null;
         hasMoreRef.current = false;
         setJobs(fetchedJobs);
@@ -409,6 +421,9 @@ export default function HomeScreen({ navigation }: Props) {
         const cursor = loadMore ? lastDocRef.current : null;
         const result = await getJobs(filters, cursor);
         fetchedJobs = result.jobs;
+        if (filters.postType) {
+          fetchedJobs = fetchedJobs.filter(j => j.postType === filters.postType);
+        }
         lastDocRef.current = result.lastDoc;
         hasMoreRef.current = result.lastDoc !== null && fetchedJobs.length > 0;
 
@@ -481,7 +496,8 @@ export default function HomeScreen({ navigation }: Props) {
       } catch (_) {}
     };
     checkNearbyPromo();
-  }, [user?.uid]);
+  // ใช้ nearbyJobAlert?.enabled เป็น dep ด้วย เพื่อซ่อน banner ทันทีที่ user save ตั้งค่า
+  }, [user?.uid, user?.nearbyJobAlert?.enabled]);
 
   const dismissNearbyPromo = useCallback(async (navigate = false) => {
     setShowNearbyPromo(false);
@@ -576,6 +592,11 @@ export default function HomeScreen({ navigation }: Props) {
       // NEW: Filter home care only
       if (filters.homeCareOnly) {
         filteredJobs = filteredJobs.filter(job => job.locationType === 'HOME');
+      }
+
+      // Filter by postType (category tab)
+      if (filters.postType) {
+        filteredJobs = filteredJobs.filter(job => job.postType === filters.postType);
       }
       
       // Filter by shift time (morning/night) - only if explicitly selected
@@ -680,6 +701,7 @@ export default function HomeScreen({ navigation }: Props) {
       locationType: undefined,
       homeCareOnly: false,
       paymentType: undefined,
+      postType: undefined,
     });
   };
 
@@ -820,9 +842,18 @@ export default function HomeScreen({ navigation }: Props) {
 
       {/* Results count */}
       <View style={styles.resultsRow}>
-        <Text style={styles.resultsText}>
-          พบ <Text style={styles.resultsCount}>{jobs.length}</Text> งาน
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Ionicons
+            name={(CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.icon || 'apps-outline') as any}
+            size={14}
+            color="#475569"
+            style={{ marginRight: 4 }}
+          />
+          <Text style={styles.resultsText}>
+            พบ <Text style={styles.resultsCount}>{jobs.length}</Text>{' '}
+            {CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.label ?? 'งาน'}
+          </Text>
+        </View>
         {activeFilterCount > 0 && (
           <TouchableOpacity onPress={clearFilters}>
             <Text style={styles.clearFilters}>ล้างตัวกรอง</Text>
@@ -905,6 +936,40 @@ export default function HomeScreen({ navigation }: Props) {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Category Tabs */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoryTabs}
+        >
+          {CATEGORY_TABS.map((tab) => {
+            const isActive = (filters.postType ?? 'all') === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.categoryTab, isActive && styles.categoryTabActive]}
+                onPress={() =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    postType: tab.key === 'all' ? undefined : (tab.key as 'shift' | 'job' | 'homecare'),
+                  }))
+                }
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={tab.icon}
+                  size={16}
+                  color={isActive ? '#0284C7' : 'rgba(255,255,255,0.85)'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.categoryTabLabel, isActive && styles.categoryTabLabelActive]}>
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {/* Job List */}
@@ -1081,29 +1146,11 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </ModalContainer>
 
-      {/* FAB - Quick Actions */}
-      <FAB
-        mainIcon="add"
-        actions={[
-          {
-            icon: 'create-outline',
-            label: 'โพสต์งาน',
-            onPress: () => (navigation as any).navigate('Main', { screen: 'PostJob' }),
-            color: '#0EA5E9',
-          },
-          {
-            icon: 'map-outline',
-            label: 'ดูแผนที่',
-            onPress: () => (navigation as any).navigate('MapJobs'),
-            color: '#6366F1',
-          },
-          {
-            icon: 'heart-outline',
-            label: 'รายการโปรด',
-            onPress: () => (navigation as any).navigate('Favorites'),
-            color: '#EC4899',
-          },
-        ]}
+      {/* FAB - Post Job */}
+      <SimpleFAB
+        icon="add"
+        onPress={() => (navigation as any).navigate('Main', { screen: 'PostJob' })}
+        size={60}
       />
     </SafeAreaView>
   );
@@ -1739,6 +1786,36 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.sm,
     color: '#94A3B8',
     textDecorationLine: 'underline',
+  },
+
+  // ── Category Tabs ─────────────────────────────────────────────────
+  categoryTabs: {
+    flexDirection: 'row' as const,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 10,
+    backgroundColor: '#0284C7',
+    gap: 8,
+  },
+  categoryTab: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  categoryTabActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  categoryTabLabel: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '500' as const,
+  },
+  categoryTabLabelActive: {
+    color: '#0284C7',
+    fontWeight: '700' as const,
   },
 });
 
