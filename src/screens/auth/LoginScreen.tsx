@@ -37,11 +37,11 @@ const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId || '427547114323-87ibkaeo6k
 const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || '427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com';
 const GOOGLE_IOS_CLIENT_ID = extra.googleIosClientId || '';
 
-const GOOGLE_CLIENT_ID = {
-  expoClientId: GOOGLE_WEB_CLIENT_ID,
+// expo-auth-session v7: use `clientId` (expoClientId/webClientId are deprecated)
+const GOOGLE_AUTH_CONFIG = {
+  clientId: GOOGLE_WEB_CLIENT_ID,         // used for Expo Go + web proxy flow
   androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
   iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
-  webClientId: GOOGLE_WEB_CLIENT_ID,
 };
 
 // ============================================
@@ -74,7 +74,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 
   // Google Auth Request
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    ...GOOGLE_CLIENT_ID,
+    ...GOOGLE_AUTH_CONFIG,
   });
 
   // Handle Google Sign-In response

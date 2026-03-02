@@ -9,7 +9,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -21,9 +20,10 @@ import { KittenButton as Button, Input, SuccessModal, ErrorModal } from '../../c
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { sendMockOTP, verifyMockOTP, isValidThaiPhone } from '../../services/otpService';
-import { findUserByPhone } from '../../services/authService';
+import { sendOTP, verifyOTP, isValidThaiPhone } from '../../services/otpService';
 import { AuthStackParamList } from '../../types';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { firebaseConfig } from '../../config/firebase';
 
 // ============================================
 // Types
@@ -47,13 +47,14 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [countdown, setCountdown] = useState(0);
-  const [devOtp, setDevOtp] = useState<string>('');
+  const [verificationId, setVerificationId] = useState<string>('');
   const [phoneError, setPhoneError] = useState('');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
+  const recaptchaVerifierRef = useRef<FirebaseRecaptchaVerifierModal>(null);
   const { loginWithPhone } = useAuth();
 
   // Countdown timer
@@ -81,32 +82,19 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   // Handle send OTP
   const handleSendOTP = async () => {
     if (!validatePhone()) return;
+    if (!recaptchaVerifierRef.current) {
+      setErrorMessage('ระบบยังไม่พร้อม กรุณารอสักครู่แล้วลองใหม่');
+      setShowErrorModal(true);
+      return;
+    }
 
     setIsLoading(true);
     try {
-      // Check if user exists first
-      const existingUser = await findUserByPhone(phone);
-      if (!existingUser) {
-        setErrorMessage('ไม่พบบัญชีที่ลงทะเบียนด้วยเบอร์นี้\nกรุณาสมัครสมาชิกก่อน');
-        setShowErrorModal(true);
-        setIsLoading(false);
-        return;
-      }
-
-      // Send OTP
-      const result = await sendMockOTP(phone);
-      if (result.success) {
+      const result = await sendOTP(phone, recaptchaVerifierRef.current);
+      if (result.success && result.verificationId) {
+        setVerificationId(result.verificationId);
         setStep('otp');
         setCountdown(60);
-        // Show OTP in dev mode
-        if (result.otp) {
-          setDevOtp(result.otp);
-          Alert.alert(
-            '📱 รหัส OTP (Dev Mode)',
-            `รหัส OTP ของคุณคือ: ${result.otp}\n\nหมายเหตุ: ใน Production จะส่งผ่าน SMS จริง`,
-            [{ text: 'ตกลง' }]
-          );
-        }
       } else {
         setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
         setShowErrorModal(true);
@@ -121,25 +109,21 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 
   // Handle resend OTP
   const handleResendOTP = async () => {
+    if (!recaptchaVerifierRef.current) return;
     setIsResending(true);
     try {
-      const result = await sendMockOTP(phone);
-      if (result.success) {
+      const result = await sendOTP(phone, recaptchaVerifierRef.current);
+      if (result.success && result.verificationId) {
+        setVerificationId(result.verificationId);
         setCountdown(60);
         setOtp(['', '', '', '', '', '']);
-        if (result.otp) {
-          setDevOtp(result.otp);
-          Alert.alert(
-            '📱 รหัส OTP ใหม่',
-            `รหัส OTP ของคุณคือ: ${result.otp}`,
-            [{ text: 'ตกลง' }]
-          );
-        }
       } else {
-        Alert.alert('เกิดข้อผิดพลาด', result.error || 'ไม่สามารถส่ง OTP ได้');
+        setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
+        setShowErrorModal(true);
       }
     } catch (error) {
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถส่ง OTP ได้');
+      setErrorMessage('ไม่สามารถส่ง OTP ได้');
+      setShowErrorModal(true);
     } finally {
       setIsResending(false);
     }
@@ -178,16 +162,22 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   const handleVerifyOTP = async (otpCode?: string) => {
     const code = otpCode || otp.join('');
     if (code.length !== 6) {
-      Alert.alert('ข้อผิดพลาด', 'กรุณากรอกรหัส OTP 6 หลัก');
+      setErrorMessage('กรุณากรอกรหัส OTP 6 หลัก');
+      setShowErrorModal(true);
+      return;
+    }
+    if (!verificationId) {
+      setErrorMessage('กรุณาขอรหัส OTP ใหม่');
+      setShowErrorModal(true);
       return;
     }
 
     setIsLoading(true);
     try {
-      // Verify OTP
-      const isValid = verifyMockOTP(phone, code);
-      if (!isValid) {
-        setErrorMessage('รหัส OTP ไม่ถูกต้องหรือหมดอายุ');
+      // Verify OTP with Firebase Phone Auth
+      const result = await verifyOTP(verificationId, code);
+      if (!result.success) {
+        setErrorMessage(result.error || 'รหัส OTP ไม่ถูกต้องหรือหมดอายุ');
         setShowErrorModal(true);
         setOtp(['', '', '', '', '', '']);
         inputRefs.current[0]?.focus();
@@ -195,7 +185,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
         return;
       }
 
-      // Login with phone
+      // Load Firestore profile by phone (auth state listener also handles this)
       await loginWithPhone(phone);
       setShowSuccessModal(true);
     } catch (error: any) {
@@ -216,6 +206,12 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   };
 
   return (
+    <>
+    <FirebaseRecaptchaVerifierModal
+      ref={recaptchaVerifierRef}
+      firebaseConfig={firebaseConfig}
+      attemptInvisibleVerification={true}
+    />
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -323,13 +319,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
                 )}
               </View>
 
-              {/* Dev OTP Display */}
-              {__DEV__ && devOtp && (
-                <View style={styles.devOtpBox}>
-                  <Text style={styles.devOtpLabel}>Dev Mode OTP:</Text>
-                  <Text style={styles.devOtpCode}>{devOtp}</Text>
-                </View>
-              )}
+
 
               {/* Verify Button */}
               <Button
@@ -376,6 +366,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
         onClose={() => setShowErrorModal(false)}
       />
     </SafeAreaView>
+    </>
   );
 }
 
