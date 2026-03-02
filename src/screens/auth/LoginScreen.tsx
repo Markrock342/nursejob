@@ -11,7 +11,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,7 +33,8 @@ WebBrowser.maybeCompleteAuthSession();
 // ============================================
 const extra = Constants.expoConfig?.extra || {};
 const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId || '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com';
-const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || ''; // ต้องใส่ใน app.config.js หลัง setup
+// Android OAuth client (from google-services.json — auto-created when SHA-1 was added to Firebase)
+const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || '427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com';
 const GOOGLE_IOS_CLIENT_ID = extra.googleIosClientId || '';
 
 const GOOGLE_CLIENT_ID = {
@@ -83,7 +83,8 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
       const { id_token } = response.params;
       handleGoogleLogin(id_token);
     } else if (response?.type === 'error') {
-      Alert.alert('เข้าสู่ระบบไม่สำเร็จ', 'ไม่สามารถเข้าสู่ระบบด้วย Google ได้');
+      setErrorMessage('ไม่สามารถเข้าสู่ระบบด้วย Google ได้');
+      setShowErrorModal(true);
       setGoogleLoading(false);
     }
   }, [response]);
@@ -110,7 +111,8 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
     try {
       await promptAsync();
     } catch (err: any) {
-      Alert.alert('เข้าสู่ระบบไม่สำเร็จ', 'ไม่สามารถเปิดหน้า Google ได้');
+      setErrorMessage('ไม่สามารถเปิดหน้า Google ได้');
+      setShowErrorModal(true);
       setGoogleLoading(false);
     }
   };
