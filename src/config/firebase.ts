@@ -1,33 +1,47 @@
 import { initializeApp } from 'firebase/app';
-import { initializeAuth, getReactNativePersistence, getAuth, browserLocalPersistence, Auth } from 'firebase/auth';
+import { initializeAuth, getAuth, getReactNativePersistence, Auth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-// Firebase configuration - NurseGo project (nurse-go-th)
+// Extra values embedded at build time via app.config.js
+// Falls back to process.env for local dev (Expo Go)
+const extra = Constants.expoConfig?.extra || {};
+
+const get = (extraKey: string, envKey: string): string =>
+  extra[extraKey] || process.env[envKey] || '';
+
+// Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyCePlG5nmTJfOGa_P-j0Xm8c0GVF5xZ3zg",
-  authDomain: "nurse-go-th.firebaseapp.com",
-  projectId: "nurse-go-th",
-  storageBucket: "nurse-go-th.firebasestorage.app",
-  messagingSenderId: "427547114323",
-  appId: "1:427547114323:android:a89c6f0e5659ae8a19bfa6",
-  measurementId: "G-E5NBXHTMLR"
+  apiKey:            get('firebaseApiKey',            'EXPO_PUBLIC_FIREBASE_API_KEY'),
+  authDomain:        get('firebaseAuthDomain',        'EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN'),
+  projectId:         get('firebaseProjectId',         'EXPO_PUBLIC_FIREBASE_PROJECT_ID'),
+  storageBucket:     get('firebaseStorageBucket',     'EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET'),
+  messagingSenderId: get('firebaseMessagingSenderId', 'EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID'),
+  appId:             get('firebaseAppId',             'EXPO_PUBLIC_FIREBASE_APP_ID'),
 };
+
+if (__DEV__) {
+  const missing = Object.entries(firebaseConfig)
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (missing.length > 0) {
+    console.warn(`[Firebase] Missing config: ${missing.join(', ')}`);
+  }
+}
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Auth - ใช้ persistence ที่แตกต่างกันสำหรับ Web และ Native
+// Initialize Auth — แยก web กับ native เพื่อ persistence ที่ถูกต้อง
 let auth: Auth;
 if (Platform.OS === 'web') {
-  // สำหรับ Web ใช้ getAuth ปกติ
   auth = getAuth(app);
 } else {
-  // สำหรับ React Native ใช้ AsyncStorage persistence
   auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage)
+    persistence: getReactNativePersistence(AsyncStorage),
   });
 }
 

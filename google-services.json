@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "427547114323",
+    "project_id": "nurse-go-th",
+    "storage_bucket": "nurse-go-th.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:427547114323:android:a89c6f0e5659ae8a19bfa6",
+        "android_client_info": {
+          "package_name": "com.nursego.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCePlG5nmTJfOGa_P-j0Xm8c0GVF5xZ3zg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
