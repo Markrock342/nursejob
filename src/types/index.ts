@@ -394,6 +394,8 @@ export type AuthStackParamList = {
     phone: string; 
     phoneVerified: boolean;
     role?: 'user' | 'nurse' | 'hospital';
+    staffType?: string;   // nurse: ประเภทบุคลากรที่เลือก
+    orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency'; // hospital/agency
     registrationData?: any;
   };
   Terms: undefined;

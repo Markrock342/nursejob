@@ -926,6 +926,7 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
     </View>
   );
+  }; // end renderHeader
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: '#0EA5E9' }]} edges={['top']}>

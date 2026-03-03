@@ -6,7 +6,7 @@
 // ประเภทบุคลากร (Staff Types)
 // ============================================
 
-export type StaffType = 'RN' | 'PN' | 'NA' | 'CG' | 'SITTER' | 'OTHER';
+export type StaffType = 'RN' | 'PN' | 'NA' | 'CG' | 'SITTER' | 'ANES' | 'OTHER';
 
 export interface StaffTypeInfo {
   code: StaffType;
@@ -57,6 +57,14 @@ export const STAFF_TYPES: StaffTypeInfo[] = [
     shortName: 'เฝ้าไข้',
     description: 'ดูแลผู้ป่วยในโรงพยาบาลหรือที่บ้าน',
     requiresLicense: false,
+  },
+  {
+    code: 'ANES',
+    nameTH: 'ผู้ช่วยวิสัญญี / วิสัญญีพยาบาล',
+    nameEN: 'Anesthesia Nurse / CRNA',
+    shortName: 'ANES',
+    description: 'ผู้ช่วยวิสัญญีแพทย์ / วิสัญญีพยาบาลวิชาชีพ',
+    requiresLicense: true,
   },
   {
     code: 'OTHER',

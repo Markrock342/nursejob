@@ -43,7 +43,7 @@ interface AuthContextType extends AuthState {
   loginWithGoogle: (idToken: string) => Promise<void>;
   loginAsAdmin: (username: string, password: string) => Promise<void>;
   loginWithPhone: (phone: string) => Promise<void>;
-  register: (email: string, password: string, displayName: string, role?: 'user' | 'nurse' | 'hospital', username?: string, phone?: string) => Promise<void>;
+    register: (email: string, password: string, displayName: string, role?: 'user' | 'nurse' | 'hospital', username?: string, phone?: string, staffType?: string, orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency') => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<UserProfile>) => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
@@ -425,12 +425,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     displayName: string,
     role: 'user' | 'nurse' | 'hospital' = 'user', // Default = ผู้ใช้ทั่วไป
     username?: string,
-    phone?: string
+    phone?: string,
+    staffType?: string,
+    orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency'
   ) => {
     setIsLoading(true);
     setError(null);
     try {
-      const profile = await registerUser(email, password, displayName, role, username, phone);
+      const profile = await registerUser(email, password, displayName, role, username, phone, staffType, orgType);
       // Save to AsyncStorage first
       await AsyncStorage.setItem('user', JSON.stringify(profile));
       // ⚠️ Only update state if still mounted

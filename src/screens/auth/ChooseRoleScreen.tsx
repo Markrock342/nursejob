@@ -1,6 +1,7 @@
 // ============================================
 // CHOOSE ROLE SCREEN — "คุณเป็นใคร?"
 // 3 roles: nurse / hospital / user (คนทั่วไป)
+// Sub-type selection embedded in card after role pick
 // ============================================
 
 import React, { useState } from 'react';
@@ -23,6 +24,7 @@ import { AuthStackParamList } from '../../types';
 // Role definitions
 // ============================================
 type RoleKey = 'nurse' | 'hospital' | 'user';
+type OrgType = 'public_hospital' | 'private_hospital' | 'clinic' | 'agency';
 
 interface RoleOption {
   key: RoleKey;
@@ -53,7 +55,7 @@ const ROLES: RoleOption[] = [
     icon: 'business-outline',
     color: '#8B5CF6',
     bg: '#F5F3FF',
-    title: 'โรงพยาบาล / คลินิก / ผู้จ้างงาน',
+    title: 'โรงพยาบาล / คลินิก / เอเจนซี่',
     subtitle: 'ต้องการโพสต์หาบุคลากร',
     bullets: [
       'โพสต์งานหาพยาบาล / CG',
@@ -77,6 +79,26 @@ const ROLES: RoleOption[] = [
 ];
 
 // ============================================
+// Sub-type options
+// ============================================
+const NURSE_STAFF_TYPES = [
+  { code: 'RN',    label: 'RN — พยาบาลวิชาชีพ' },
+  { code: 'PN',    label: 'PN — พยาบาลเทคนิค' },
+  { code: 'NA',    label: 'NA — ผู้ช่วยพยาบาล' },
+  { code: 'ANES',  label: 'ANES — วิสัญญีพยาบาล' },
+  { code: 'CG',    label: 'CG — ผู้ดูแลผู้ป่วย' },
+  { code: 'SITTER',label: 'เฝ้าไข้' },
+  { code: 'OTHER', label: 'อื่นๆ' },
+];
+
+const ORG_TYPES: { code: OrgType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { code: 'public_hospital',  label: 'โรงพยาบาลรัฐ',    icon: 'medkit-outline' },
+  { code: 'private_hospital', label: 'โรงพยาบาลเอกชน',  icon: 'business-outline' },
+  { code: 'clinic',           label: 'คลินิก',           icon: 'bandage-outline' },
+  { code: 'agency',           label: 'เอเจนซี่จัดหางาน', icon: 'briefcase-outline' },
+];
+
+// ============================================
 // Component
 // ============================================
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'ChooseRole'>;
@@ -85,12 +107,16 @@ type Route = RouteProp<AuthStackParamList, 'ChooseRole'>;
 export default function ChooseRoleScreen({ navigation, route }: { navigation: Nav; route: Route }) {
   const { phone, registrationData } = route.params;
   const [selectedRole, setSelectedRole] = useState<RoleKey | null>(null);
+  const [selectedStaffType, setSelectedStaffType] = useState<string | null>(null);
+  const [selectedOrgType, setSelectedOrgType] = useState<OrgType | null>(null);
 
   const handleContinue = () => {
     navigation.navigate('CompleteRegistration', {
       phone,
       phoneVerified: true,
       role: selectedRole || 'user',
+      staffType: selectedRole === 'nurse' ? (selectedStaffType || undefined) : undefined,
+      orgType: selectedRole === 'hospital' ? (selectedOrgType || undefined) : undefined,
       ...registrationData,
     });
   };
@@ -100,8 +126,14 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
       phone,
       phoneVerified: true,
       role: 'user',
-      ...registrationData,
     });
+  };
+
+  // Clear sub-selection when role changes
+  const handleSelectRole = (role: RoleKey) => {
+    setSelectedRole(role);
+    setSelectedStaffType(null);
+    setSelectedOrgType(null);
   };
 
   return (
@@ -132,7 +164,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
                   { borderColor: selected ? role.color : COLORS.border },
                   selected && { backgroundColor: role.bg, borderWidth: 2.5 },
                 ]}
-                onPress={() => setSelectedRole(role.key)}
+                onPress={() => handleSelectRole(role.key)}
               >
                 <View style={styles.cardRow}>
                   {/* Icon */}
@@ -161,6 +193,51 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
                         <Text style={styles.bulletText}>{b}</Text>
                       </View>
                     ))}
+                  </View>
+                )}
+
+                {/* Sub-type picker: Nurse → staffType */}
+                {selected && role.key === 'nurse' && (
+                  <View style={styles.subSection}>
+                    <Text style={[styles.subLabel, { color: role.color }]}>คุณเป็นบุคลากรประเภทไหน? <Text style={styles.subOptional}>(ไม่บังคับ)</Text></Text>
+                    <View style={styles.subChipGrid}>
+                      {NURSE_STAFF_TYPES.map((st) => {
+                        const active = selectedStaffType === st.code;
+                        return (
+                          <TouchableOpacity
+                            key={st.code}
+                            style={[styles.subChip, active && { backgroundColor: role.color, borderColor: role.color }]}
+                            onPress={() => setSelectedStaffType(active ? null : st.code)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.subChipText, active && { color: '#FFF', fontWeight: '700' }]}>{st.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+
+                {/* Sub-type picker: Hospital → orgType */}
+                {selected && role.key === 'hospital' && (
+                  <View style={styles.subSection}>
+                    <Text style={[styles.subLabel, { color: role.color }]}>ประเภทองค์กรของคุณ? <Text style={styles.subOptional}>(ไม่บังคับ)</Text></Text>
+                    <View style={styles.subOrgGrid}>
+                      {ORG_TYPES.map((org) => {
+                        const active = selectedOrgType === org.code;
+                        return (
+                          <TouchableOpacity
+                            key={org.code}
+                            style={[styles.subOrgCard, active && { backgroundColor: role.color + '18', borderColor: role.color, borderWidth: 2 }]}
+                            onPress={() => setSelectedOrgType(active ? null : org.code)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name={org.icon} size={22} color={active ? role.color : COLORS.textSecondary} />
+                            <Text style={[styles.subOrgLabel, active && { color: role.color, fontWeight: '700' }]}>{org.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                   </View>
                 )}
               </TouchableOpacity>
@@ -227,6 +304,26 @@ const styles = StyleSheet.create({
   bullets: { marginTop: SPACING.sm, paddingLeft: 64 },
   bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
   bulletText: { fontSize: 13, color: COLORS.textSecondary },
+
+  // Sub-type section
+  subSection: { marginTop: SPACING.md, paddingTop: SPACING.md, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' },
+  subLabel: { fontSize: 13, fontWeight: '700', marginBottom: SPACING.sm },
+  subOptional: { fontWeight: '400', color: COLORS.textSecondary },
+  subChipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  subChip: {
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 16, borderWidth: 1.5, borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  subChipText: { fontSize: 13, color: COLORS.text },
+  subOrgGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  subOrgCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 9,
+    borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  subOrgLabel: { fontSize: 13, color: COLORS.text },
 
   continueBtn: { marginTop: SPACING.sm },
   skipBtn: { alignItems: 'center', marginTop: SPACING.md },

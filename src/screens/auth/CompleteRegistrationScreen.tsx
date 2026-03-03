@@ -37,7 +37,7 @@ interface Props {
 // Component
 // ============================================
 export default function CompleteRegistrationScreen({ navigation, route }: Props) {
-  const { phone, phoneVerified, role } = route.params;
+  const { phone, phoneVerified, role, staffType, orgType } = route.params;
   
   // Form State
   const [displayName, setDisplayName] = useState('');
@@ -97,7 +97,9 @@ const { register, isLoading, clearError, user } = useAuth();
         displayName.trim(),
         role || 'user', // ใช้ role ที่เลือก หรือ 'user' ถ้าไม่ได้เลือก
         undefined, // username
-        phone // verified phone
+        phone, // verified phone
+        staffType, // ประเภทบุคลากร (nurse)
+        orgType,  // ประเภทองค์กร (hospital)
       );
       
       // ถ้า register สำเร็จ ให้แสดง success modal
