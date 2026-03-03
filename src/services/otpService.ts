@@ -42,7 +42,7 @@ export function isValidThaiPhone(phone: string): boolean {
  */
 export async function sendOTP(
   phoneNumber: string,
-  recaptchaVerifier: ApplicationVerifier
+  recaptchaVerifier?: ApplicationVerifier
 ): Promise<{ success: boolean; verificationId?: string; message?: string; error?: string }> {
   try {
     if (!isValidThaiPhone(phoneNumber)) {

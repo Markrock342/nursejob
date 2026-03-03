@@ -86,6 +86,7 @@ export default function ProfileScreen({ navigation }: Props) {
     licenseNumber: '',
     experience: '',
     bio: '',
+    province: '',
   });
 
   // Check if user is hospital (no longer used but kept for reference)
@@ -144,6 +145,7 @@ export default function ProfileScreen({ navigation }: Props) {
         licenseNumber: user.licenseNumber || '',
         experience: user.experience?.toString() || '',
         bio: user.bio || '',
+        province: (user as any).location?.province || (user as any).preferredProvince || '',
       });
       // Reset OTP/phone state on open
       setPhoneStep('idle');
@@ -312,6 +314,8 @@ export default function ProfileScreen({ navigation }: Props) {
         displayName: editForm.displayName,
         experience: parseInt(editForm.experience) || 0,
         bio: editForm.bio,
+        location: { province: editForm.province.trim(), district: (user as any)?.location?.district || '' },
+        preferredProvince: editForm.province.trim(),
       };
 
       // Only update phone if verified (or unchanged)
@@ -478,6 +482,13 @@ export default function ProfileScreen({ navigation }: Props) {
               <View>
                 <Text style={{ color: colors.textSecondary, fontSize: 13 }}>ประสบการณ์</Text>
                 <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{user?.experience ? `${user.experience} ปี` : 'ยังไม่ระบุ'}</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Ionicons name="location-outline" size={20} color={colors.primary} />
+              <View>
+                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>จังหวัด</Text>
+                <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{(user as any)?.location?.province || (user as any)?.preferredProvince || 'ยังไม่ระบุ'}</Text>
               </View>
             </View>
             {user?.bio && (
@@ -918,6 +929,23 @@ export default function ProfileScreen({ navigation }: Props) {
                   placeholder="0"
                   placeholderTextColor={colors.textMuted}
                   keyboardType="number-pad"
+                />
+              </View>
+            </View>
+
+            {/* จังหวัด */}
+            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={profileEditStyles.fieldIcon}>
+                <Ionicons name="location-outline" size={18} color="#0EA5E9" />
+              </View>
+              <View style={profileEditStyles.fieldContent}>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
+                <TextInput
+                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
+                  value={editForm.province}
+                  onChangeText={(t) => setEditForm({ ...editForm, province: t })}
+                  placeholder="เช่น กรุงเทพมหานคร"
+                  placeholderTextColor={colors.textMuted}
                 />
               </View>
             </View>
