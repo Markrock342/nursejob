@@ -16,7 +16,14 @@ if (!(global as any).process.stdout) {
 
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
+import { View, Text, TextInput } from 'react-native';
+import * as ExpoFont from 'expo-font';
+import {
+  Sarabun_400Regular,
+  Sarabun_500Medium,
+  Sarabun_600SemiBold,
+  Sarabun_700Bold,
+} from '@expo-google-fonts/sarabun';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Sentry from '@sentry/react-native';
@@ -88,7 +95,25 @@ function AppContent() {
 // ============================================
 // MAIN APP COMPONENT
 // ============================================
+// Set Sarabun as default font for all Text/TextInput (applied once after font loads)
+function applyGlobalFont() {
+  const style = { fontFamily: 'Sarabun_400Regular' };
+  if (!(Text      as any).__fontPatched) { (Text      as any).defaultProps      = { ...(Text      as any).defaultProps,      style }; (Text      as any).__fontPatched      = true; }
+  if (!(TextInput as any).__fontPatched) { (TextInput as any).defaultProps = { ...(TextInput as any).defaultProps, style }; (TextInput as any).__fontPatched = true; }
+}
+
 export default Sentry.wrap(function App() {
+  const [fontsLoaded] = ExpoFont.useFonts({
+    Sarabun_400Regular,
+    Sarabun_500Medium,
+    Sarabun_600SemiBold,
+    Sarabun_700Bold,
+  });
+
+  if (!fontsLoaded) return null; // wait for Thai font before rendering
+
+  applyGlobalFont();
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
