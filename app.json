@@ -19,7 +19,14 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.nursego.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "ใช้กล้องเพื่ออัปโหลดรูปโปรไฟล์และเอกสาร",
+        "NSPhotoLibraryUsageDescription": "ใช้คลังรูปเพื่ออัปโหลดรูปโปรไฟล์และเอกสาร",
+        "NSPhotoLibraryAddUsageDescription": "บันทึกรูปไว้ในคลัง",
+        "NSLocationWhenInUseUsageDescription": "ใช้ตำแหน่งเพื่อหางานใกล้บ้านคุณ",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "ใช้ตำแหน่งเพื่อแจ้งเตือนงานใกล้บ้านแม้แอปทำงานอยู่เบื้องหลัง",
+        "UIBackgroundModes": ["remote-notification", "fetch"],
+        "NSFaceIDUsageDescription": "ใช้ Face ID เพื่อเข้าสู่ระบบ"
       }
     },
     "android": {
@@ -27,7 +34,21 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#4A90D9"
       },
-      "package": "com.nursego.app"
+      "package": "com.nursego.app",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
