@@ -40,3 +40,9 @@ yarn-error.*
 # Local
 .idea/
 *.log
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*.tmp
