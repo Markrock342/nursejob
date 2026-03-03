@@ -156,15 +156,31 @@ export default function PostJobScreen({ navigation, route }: Props) {
   
   const editJob = route?.params?.editJob;
   const isEditMode = Boolean(editJob);
-  
+
+  // กรองประเภทโพสต์ตาม role
+  const visiblePostTypes = POST_TYPES.filter((t) => {
+    if (!user) return true; // ยังไม่ล็อกอิน — แสดงทั้งหมด
+    switch (user.role) {
+      case 'nurse':   return t.value === 'shift'; // พยาบาล → หาคนแทนเวรเท่านั้น
+      case 'hospital': return t.value === 'job' || t.value === 'shift'; // รพ. → รับสมัคร + หาคนแทน
+      case 'user':    return t.value === 'homecare'; // คนทั่วไป → หาคนดูแลเท่านั้น
+      default:        return true;
+    }
+  });
+
+  // ถ้ามี postType เดียว → ข้าม step 0 เลย
+  const autoSkipTypeSelect = !isEditMode && visiblePostTypes.length === 1;
+
   // Current step (0 = select type, 1-4 = form steps)
-  const [currentStep, setCurrentStep] = useState(isEditMode ? 1 : 0);
+  const [currentStep, setCurrentStep] = useState(
+    isEditMode ? 1 : autoSkipTypeSelect ? 1 : 0
+  );
   const [slideAnim] = useState(new Animated.Value(0));
   const progressAnim = useRef(new Animated.Value(0)).current;
   
   // Form data
   const [form, setForm] = useState<FormData>({
-    postType: 'shift',
+    postType: (visiblePostTypes[0]?.value ?? 'shift'),
     title: '',
     description: '',
     staffType: 'RN',
@@ -567,8 +583,26 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <Text style={[styles.typeSelectTitle, { color: colors.text }]}>
         คุณต้องการลงประกาศแบบไหน?
       </Text>
-      
-      {POST_TYPES.map((type) => (
+
+      {/* แสดงหมายเหตุแต่ละ role */}
+      {user?.role === 'user' && (
+        <View style={[styles.infoBox, { backgroundColor: '#FEF3C7', marginBottom: 12 }]}>
+          <Ionicons name="person-circle-outline" size={20} color="#D97706" />
+          <Text style={[styles.infoText, { color: '#92400E' }]}>
+            ในฐานะ“คนทั่วไป” คุณสามารถลงประกาศ“หาคนดูแลผู้ป่วย” ได้เลย
+          </Text>
+        </View>
+      )}
+      {user?.role === 'nurse' && (
+        <View style={[styles.infoBox, { backgroundColor: '#EFF6FF', marginBottom: 12 }]}>
+          <Ionicons name="medical-outline" size={20} color="#2563EB" />
+          <Text style={[styles.infoText, { color: '#1E40AF' }]}>
+            สำหรับ“พยาบาล” ลงประกาศ“หาคนแทนเวร” เพื่อหาคนมารับงานแทนคุณ
+          </Text>
+        </View>
+      )}
+
+      {visiblePostTypes.map((type) => (
         <TouchableOpacity
           key={type.value}
           style={[
@@ -576,7 +610,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
             { borderColor: form.postType === type.value ? type.color : colors.border },
             form.postType === type.value && { backgroundColor: type.color + '10' },
           ]}
-          onPress={() => setForm({ ...form, postType: type.value })}
+          onPress={() => setForm({ ...form, postType: type.value as PostType })}
         >
           <Text style={styles.typeIcon}>{type.icon}</Text>
           <View style={styles.typeInfo}>

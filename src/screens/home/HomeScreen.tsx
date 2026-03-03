@@ -746,6 +746,31 @@ export default function HomeScreen({ navigation }: Props) {
   // Render header
   const renderHeader = () => (
     <View style={styles.listHeader}>
+      {/* Onboarding Banner — แสดงตอนเข้าแอปครั้งแรก */}
+      {user && !user.onboardingCompleted && (
+        <TouchableOpacity
+          style={styles.onboardingBanner}
+          onPress={() => (navigation as any).navigate('OnboardingSurvey')}
+          activeOpacity={0.85}
+        >
+          <View style={styles.onboardingBannerLeft}>
+            <View style={styles.onboardingBannerIcon}>
+              <Ionicons name="sparkles" size={18} color="#FFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.onboardingBannerTitle}>ตั้งค่าโปรไฟล์ของคุณ</Text>
+              <Text style={styles.onboardingBannerSub}>
+                บอกเราสักเล็กน้อย เราจะแนะนำงานที่ตรงกับคุณมากขึ้น
+              </Text>
+            </View>
+          </View>
+          <View style={styles.onboardingBannerCTA}>
+            <Text style={styles.onboardingBannerCTAText}>เริ่มเลย</Text>
+            <Ionicons name="chevron-forward" size={14} color="#7C3AED" />
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* Nearby Job Alert Banner — always visible until user sets up */}
       {user && !user.nearbyJobAlert?.enabled && (
         <TouchableOpacity
@@ -1683,6 +1708,61 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
+  },
+
+  // ── Onboarding Banner ─────────────────────────────────────────────
+  onboardingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5F3FF',
+    borderRadius: BORDER_RADIUS.lg,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+    marginTop: SPACING.sm,
+    padding: SPACING.md,
+    borderWidth: 1.5,
+    borderColor: '#DDD6FE',
+  },
+  onboardingBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    flex: 1,
+  },
+  onboardingBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#7C3AED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  onboardingBannerTitle: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+    color: '#3B0764',
+  },
+  onboardingBannerSub: {
+    fontSize: 11,
+    color: '#6D28D9',
+    marginTop: 2,
+  },
+  onboardingBannerCTA: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#7C3AED',
+    gap: 2,
+  },
+  onboardingBannerCTAText: {
+    fontSize: 12,
+    color: '#7C3AED',
+    fontWeight: '700',
   },
 
   // ── Nearby Job Alert Banner ───────────────────────────────────────
