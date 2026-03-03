@@ -29,10 +29,14 @@ export interface UserProfile {
   role: 'user' | 'nurse' | 'hospital' | 'admin'; // user = ผู้ใช้ทั่วไป, nurse = พยาบาล (verified)
   isAdmin: boolean; // Admin flag
   isVerified?: boolean; // สถานะการยืนยันตัวตน (true = พยาบาลที่ผ่านการ verify)
+  // Organisation type (hospital/agency only)
+  orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency'; // ประเภทองค์กร
+  // Care needs (user/family role)
+  careNeeds?: string[]; // ดูแลผู้สูงอายุ, เฝ้าไข้, homecare, rehab, child, other
   // Onboarding
   onboardingCompleted?: boolean;
-  staffType?: string;
-  staffTypes?: string[];
+  staffType?: string;   // primary staff type (nurse role)
+  staffTypes?: string[]; // all staff types (nurse role)
   interestedStaffTypes?: string[];
   preferredProvince?: string;
   emailVerified?: boolean; // สถานะการยืนยัน email
@@ -51,6 +55,9 @@ export interface UserProfile {
     preferredShifts: string[];
     preferredDays: string[];
   };
+  workStyle?: string[];      // nurse: fulltime/parttime/weekend/flexible
+  careTypes?: string[];      // user: elderly/bedridden/postsurg/child/terminal/other
+  hiringUrgency?: string;    // hospital: now/week/month/plan
   createdAt: Date;
   updatedAt?: Date;
   // การแจ้งเตือนงานใกล้ตัว
@@ -130,7 +137,9 @@ export async function registerUser(
   displayName: string,
   role: 'user' | 'nurse' | 'hospital' = 'user',
   username?: string,
-  phone?: string
+  phone?: string,
+  staffType?: string,
+  orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency'
 ): Promise<UserProfile> {
   try {
     // Check if username already exists (if provided)
@@ -179,6 +188,8 @@ export async function registerUser(
       isVerified: false,
       emailVerified: false,
       createdAt: new Date(),
+      ...(staffType ? { staffType } : {}),
+      ...(orgType ? { orgType } : {}),
     };
 
     await setDoc(doc(db, USERS_COLLECTION, user.uid), {

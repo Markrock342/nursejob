@@ -385,6 +385,19 @@ export default function HomeScreen({ navigation }: Props) {
     paymentType: undefined,
   });
 
+  // Set default tab based on role when user first loads
+  // user (คนทั่วไป) → homecare tab, hospital → job tab, nurse → all (default)
+  const roleDefaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!user?.uid || roleDefaultAppliedRef.current) return;
+    roleDefaultAppliedRef.current = true;
+    if (user.role === 'user') {
+      setFilters(prev => ({ ...prev, postType: 'homecare' }));
+    } else if (user.role === 'hospital') {
+      setFilters(prev => ({ ...prev, postType: 'job' }));
+    }
+  }, [user?.uid, user?.role]);
+
   // Get urgent jobs for banner (paid premium placement)
   const urgentJobs = useMemo(() => {
     return jobs.filter(job => job.status === 'urgent').slice(0, 5);
@@ -744,29 +757,55 @@ export default function HomeScreen({ navigation }: Props) {
   );
 
   // Render header
-  const renderHeader = () => (
+  const renderHeader = () => {
+    // Role-aware onboarding banner text
+    const onboardingTitle = user?.role === 'hospital'
+      ? 'ตั้งค่าองค์กรของคุณ'
+      : user?.role === 'user'
+      ? 'บอกเราว่าคุณต้องการอะไร'
+      : 'ตั้งค่าโปรไฟล์ของคุณ';
+    const onboardingSub = user?.role === 'hospital'
+      ? 'ระบุประเภทองค์กรและบุคลากรที่ต้องการ เพื่อให้การโพสต์งานง่ายขึ้น'
+      : user?.role === 'user'
+      ? 'บอกเราประเภทการดูแลที่ต้องการ เราจะแสดงผู้ดูแลที่ตรงกับคุณ'
+      : 'บอกเราสักเล็กน้อย เราจะแนะนำงานที่ตรงกับคุณยิ่งขึ้น';
+
+    return (
     <View style={styles.listHeader}>
       {/* Onboarding Banner — แสดงตอนเข้าแอปครั้งแรก */}
       {user && !user.onboardingCompleted && (
         <TouchableOpacity
           style={styles.onboardingBanner}
           onPress={() => (navigation as any).navigate('OnboardingSurvey')}
-          activeOpacity={0.85}
+          activeOpacity={0.88}
         >
-          <View style={styles.onboardingBannerLeft}>
-            <View style={styles.onboardingBannerIcon}>
-              <Ionicons name="sparkles" size={18} color="#FFF" />
+          {/* Left accent stripe */}
+          <View style={styles.onboardingBannerStripe} />
+
+          {/* Content */}
+          <View style={styles.onboardingBannerContent}>
+            <View style={styles.onboardingBannerRow}>
+              <View style={styles.onboardingBannerIcon}>
+                <Ionicons name="sparkles" size={16} color="#FFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.onboardingBannerTag}>เริ่มต้นใช้งาน</Text>
+                <Text style={styles.onboardingBannerTitle}>{onboardingTitle}</Text>
+                <Text style={styles.onboardingBannerSub}>{onboardingSub}</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.onboardingBannerTitle}>ตั้งค่าโปรไฟล์ของคุณ</Text>
-              <Text style={styles.onboardingBannerSub}>
-                บอกเราสักเล็กน้อย เราจะแนะนำงานที่ตรงกับคุณมากขึ้น
-              </Text>
+            {/* Progress dots + CTA row */}
+            <View style={styles.onboardingBannerFooter}>
+              <View style={styles.onboardingDots}>
+                {[0, 1, 2].map(i => (
+                  <View key={i} style={[styles.onboardingDot, i === 0 && styles.onboardingDotActive]} />
+                ))}
+              </View>
+              <View style={styles.onboardingBannerCTA}>
+                <Text style={styles.onboardingBannerCTAText}>เริ่มเลย</Text>
+                <Ionicons name="arrow-forward" size={13} color="#FFF" />
+              </View>
             </View>
-          </View>
-          <View style={styles.onboardingBannerCTA}>
-            <Text style={styles.onboardingBannerCTAText}>เริ่มเลย</Text>
-            <Ionicons name="chevron-forward" size={14} color="#7C3AED" />
           </View>
         </TouchableOpacity>
       )}
@@ -1713,55 +1752,97 @@ const styles = StyleSheet.create({
   // ── Onboarding Banner ─────────────────────────────────────────────
   onboardingBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F5F3FF',
-    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'stretch',
+    backgroundColor: '#FAFAFF',
+    borderRadius: 16,
     marginHorizontal: SPACING.md,
     marginBottom: SPACING.sm,
     marginTop: SPACING.sm,
-    padding: SPACING.md,
-    borderWidth: 1.5,
-    borderColor: '#DDD6FE',
+    overflow: 'hidden',
+    // Shadow
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: '#EDE9FE',
   },
-  onboardingBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
+  onboardingBannerStripe: {
+    width: 5,
+    backgroundColor: '#7C3AED',
+  },
+  onboardingBannerContent: {
     flex: 1,
+    padding: SPACING.md,
+    paddingLeft: 12,
+    gap: 10,
+  },
+  onboardingBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
   },
   onboardingBannerIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: '#7C3AED',
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 2,
+  },
+  onboardingBannerTag: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#7C3AED',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 2,
   },
   onboardingBannerTitle: {
     fontSize: FONT_SIZES.sm,
     fontWeight: '700',
-    color: '#3B0764',
+    color: '#1E1B4B',
   },
   onboardingBannerSub: {
     fontSize: 11,
     color: '#6D28D9',
     marginTop: 2,
+    lineHeight: 15,
+  },
+  onboardingBannerFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  onboardingDots: {
+    flexDirection: 'row',
+    gap: 5,
+    alignItems: 'center',
+  },
+  onboardingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#DDD6FE',
+  },
+  onboardingDotActive: {
+    width: 16,
+    backgroundColor: '#7C3AED',
   },
   onboardingBannerCTA: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 6,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
-    borderColor: '#7C3AED',
-    gap: 2,
+    backgroundColor: '#7C3AED',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    gap: 4,
   },
   onboardingBannerCTAText: {
     fontSize: 12,
-    color: '#7C3AED',
+    color: '#FFFFFF',
     fontWeight: '700',
   },
 
