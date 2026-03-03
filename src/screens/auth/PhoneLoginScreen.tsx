@@ -477,23 +477,5 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
 
-  // Dev OTP Box
-  devOtpBox: {
-    backgroundColor: '#FEF3C7',
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    marginTop: SPACING.md,
-    alignItems: 'center',
-  },
-  devOtpLabel: {
-    fontSize: FONT_SIZES.sm,
-    color: '#92400E',
-    marginBottom: 4,
-  },
-  devOtpCode: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: '700',
-    color: '#B45309',
-    letterSpacing: 4,
-  },
+  // Dev OTP Box (removed — real OTP only)
 });

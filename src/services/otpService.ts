@@ -59,6 +59,7 @@ export async function sendOTP(
     else if (error.code === 'auth/too-many-requests') errorMessage = 'ส่ง OTP มากเกินไป กรุณารอสักครู่';
     else if (error.code === 'auth/quota-exceeded') errorMessage = 'เกินโควต้าการส่ง SMS กรุณาลองใหม่ภายหลัง';
     else if (error.code === 'auth/captcha-check-failed') errorMessage = 'reCAPTCHA ล้มเหลว กรุณาลองใหม่';
+    else if (error.code === 'auth/operation-not-allowed') errorMessage = 'Phone Auth ยังไม่รองรับบน Expo Go — กรุณา build ด้วย EAS (eas build) หรือใช้ Firebase Test Phone Number';
     return { success: false, error: errorMessage };
   }
 }
@@ -107,39 +108,5 @@ export async function updatePhoneVerifiedStatus(userId: string): Promise<void> {
     });
   } catch (error) {
     console.error('Error updating phone status:', error);
-  }
-}
-
-// ==========================================
-// Mock OTP (ใช้แค่ใน dev / test เท่านั้น)
-// ==========================================
-
-const otpStore: Map<string, { otp: string; expiresAt: number }> = new Map();
-
-export function generateMockOTP(phoneNumber: string): { otp: string; expiresAt: number } {
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + 5 * 60 * 1000;
-  otpStore.set(phoneNumber, { otp, expiresAt });
-  console.log(`[DEV] OTP for ${phoneNumber}: ${otp}`);
-  return { otp, expiresAt };
-}
-
-export function verifyMockOTP(phoneNumber: string, inputOTP: string): boolean {
-  const stored = otpStore.get(phoneNumber);
-  if (!stored) return false;
-  if (Date.now() > stored.expiresAt) { otpStore.delete(phoneNumber); return false; }
-  if (stored.otp === inputOTP) { otpStore.delete(phoneNumber); return true; }
-  return false;
-}
-
-export async function sendMockOTP(phoneNumber: string): Promise<{ success: boolean; otp?: string; message?: string; error?: string }> {
-  try {
-    if (!isValidThaiPhone(phoneNumber)) {
-      return { success: false, error: 'เบอร์โทรศัพท์ไม่ถูกต้อง' };
-    }
-    const { otp } = generateMockOTP(phoneNumber);
-    return { success: true, otp, message: 'OTP ถูกส่งแล้ว' };
-  } catch {
-    return { success: false, error: 'ไม่สามารถส่ง OTP ได้' };
   }
 }
