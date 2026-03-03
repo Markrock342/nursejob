@@ -22,8 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { sendOTP, verifyOTP, isValidThaiPhone } from '../../services/otpService';
 import { AuthStackParamList } from '../../types';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import { firebaseConfig } from '../../config/firebase';
+
 
 // ============================================
 // Types
@@ -54,7 +53,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
-  const recaptchaVerifierRef = useRef<FirebaseRecaptchaVerifierModal>(null);
+
   const { loginWithPhone } = useAuth();
 
   // Countdown timer
@@ -82,15 +81,10 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   // Handle send OTP
   const handleSendOTP = async () => {
     if (!validatePhone()) return;
-    if (!recaptchaVerifierRef.current) {
-      setErrorMessage('ระบบยังไม่พร้อม กรุณารอสักครู่แล้วลองใหม่');
-      setShowErrorModal(true);
-      return;
-    }
 
     setIsLoading(true);
     try {
-      const result = await sendOTP(phone, recaptchaVerifierRef.current);
+      const result = await sendOTP(phone);
       if (result.success && result.verificationId) {
         setVerificationId(result.verificationId);
         setStep('otp');
@@ -109,10 +103,9 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 
   // Handle resend OTP
   const handleResendOTP = async () => {
-    if (!recaptchaVerifierRef.current) return;
     setIsResending(true);
     try {
-      const result = await sendOTP(phone, recaptchaVerifierRef.current);
+      const result = await sendOTP(phone);
       if (result.success && result.verificationId) {
         setVerificationId(result.verificationId);
         setCountdown(60);
@@ -207,11 +200,6 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 
   return (
     <>
-    <FirebaseRecaptchaVerifierModal
-      ref={recaptchaVerifierRef}
-      firebaseConfig={firebaseConfig}
-      attemptInvisibleVerification={true}
-    />
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardView}

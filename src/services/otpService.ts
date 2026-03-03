@@ -6,7 +6,6 @@ import {
   PhoneAuthProvider,
   signInWithCredential,
   linkWithCredential,
-  ApplicationVerifier,
 } from 'firebase/auth';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
@@ -42,7 +41,7 @@ export function isValidThaiPhone(phone: string): boolean {
  */
 export async function sendOTP(
   phoneNumber: string,
-  recaptchaVerifier?: ApplicationVerifier
+  recaptchaVerifier?: any
 ): Promise<{ success: boolean; verificationId?: string; message?: string; error?: string }> {
   try {
     if (!isValidThaiPhone(phoneNumber)) {
