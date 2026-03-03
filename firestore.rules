@@ -49,8 +49,8 @@ service cloud.firestore {
     // JOBS / SHIFTS
     // ==========================================
     match /shifts/{jobId} {
-      // อ่านได้เฉพาะ signed-in users (บังคับ login ก่อนดูงาน)
-      allow read: if isSignedIn();
+      // อ่านได้สาธารณะ — ให้ผู้ยังไม่ login ดูงานได้ก่อน
+      allow read: if true;
 
       // สร้างโพสได้เฉพาะ signed-in user และต้องมีฟิลด์บังคับ
       allow create: if isSignedIn()

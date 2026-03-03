@@ -115,8 +115,12 @@ export function subscribeToJobs(callback: (jobs: JobPost[]) => void): () => void
 
     callback(jobs);
   }, (error) => {
+    // ถ้า permission-denied → ไม่ต้อง callback และไม่ต้อง log error spam
+    if ((error as any)?.code === 'permission-denied') {
+      console.warn('[subscribeToJobs] Not signed in — skipping job subscription');
+      return;
+    }
     console.error('[subscribeToJobs] Firestore error:', error);
-    // ไม่ fallback ไป mock — ให้ caller จัดการ error state เอง
     callback([]);
   });
 }
@@ -163,7 +167,11 @@ export async function getJobs(
       : null;
 
     return { jobs, lastDoc };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') {
+      console.warn('[getJobs] Not signed in — returning empty list');
+      return { jobs: [], lastDoc: null };
+    }
     console.error('[getJobs] Firestore error:', error);
     throw error;
   }

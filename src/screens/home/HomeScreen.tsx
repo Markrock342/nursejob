@@ -449,9 +449,11 @@ export default function HomeScreen({ navigation }: Props) {
           setJobs(fetchedJobs);
         }
       }
-    } catch (error) {
-      console.error('Error fetching jobs:', error);
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถโหลดงานได้ กรุณาลองใหม่');
+    } catch (error: any) {
+      // ไม่แสดง Alert ถ้า permission-denied (ยังไม่ login) หรือ loadMore
+      if (error?.code !== 'permission-denied' && !loadMore) {
+        console.warn('Error fetching jobs:', error);
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -459,10 +461,10 @@ export default function HomeScreen({ navigation }: Props) {
     }
   }, [filters, nearbyMode, location]);
 
-  // Initial load
+  // Initial load — only for nearbyMode (normal mode uses subscription below)
   useEffect(() => {
-    fetchJobs();
-  }, [fetchJobs]);
+    if (nearbyMode) fetchJobs();
+  }, [fetchJobs, nearbyMode]);
 
   // Real-time notification subscription
   useEffect(() => {
