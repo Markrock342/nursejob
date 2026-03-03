@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
 import Constants from 'expo-constants';
 import { Button, Input, Divider, SuccessModal, ErrorModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
@@ -33,15 +34,24 @@ WebBrowser.maybeCompleteAuthSession();
 // ============================================
 const extra = Constants.expoConfig?.extra || {};
 const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId || '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com';
-// Android OAuth client (from google-services.json — auto-created when SHA-1 was added to Firebase)
 const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || '427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com';
 const GOOGLE_IOS_CLIENT_ID = extra.googleIosClientId || '';
 
-// expo-auth-session v7: use `clientId` (expoClientId/webClientId are deprecated)
+// Explicit redirect URI — ต้อง add URI นี้ใน Google Cloud Console → OAuth 2.0 → Authorized redirect URIs
+const REDIRECT_URI = makeRedirectUri({
+  scheme: 'nursego',
+  path: 'oauth2redirect/google',
+  // ใน Expo Go → จะได้ https://auth.expo.io/@markrock342/nurse-job-app
+  // ใน standalone build → จะได้ nursego://oauth2redirect/google
+});
+
+console.log('[Google OAuth] redirectUri:', REDIRECT_URI);
+
 const GOOGLE_AUTH_CONFIG = {
-  clientId: GOOGLE_WEB_CLIENT_ID,         // used for Expo Go + web proxy flow
+  clientId: GOOGLE_WEB_CLIENT_ID,
   androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
   iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
+  redirectUri: REDIRECT_URI,
 };
 
 // ============================================
@@ -83,8 +93,16 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
       const { id_token } = response.params;
       handleGoogleLogin(id_token);
     } else if (response?.type === 'error') {
-      setErrorMessage('ไม่สามารถเข้าสู่ระบบด้วย Google ได้');
+      const errCode = (response as any).error?.code || (response as any).params?.error || '';
+      console.log('[Google OAuth] error response:', JSON.stringify(response));
+      if (errCode === 'access_denied') {
+        setErrorMessage('คุณยกเลิกการเข้าสู่ระบบ Google');
+      } else {
+        setErrorMessage(`Google Sign-In ล้มเหลว (${errCode || 'unknown'}) — กรุณาลองใหม่`);
+      }
       setShowErrorModal(true);
+      setGoogleLoading(false);
+    } else if (response?.type === 'cancel' || response?.type === 'dismiss') {
       setGoogleLoading(false);
     }
   }, [response]);
