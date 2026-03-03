@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { KittenButton as Button, Input, ErrorModal, TermsConsentModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { AuthStackParamList } from '../../types';
 import { sendOTP, isValidThaiPhone } from '../../services/otpService';
-import { firebaseConfig } from '../../config/firebase';
 import { Ionicons } from '@expo/vector-icons';
 
 // ============================================
@@ -39,7 +37,7 @@ export default function RegisterScreen({ navigation }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
   const [showTermsModal, setShowTermsModal] = useState(false);
 
-  const recaptchaRef = useRef<FirebaseRecaptchaVerifierModal>(null);
+
 
   // Format phone number for display
   const formatPhoneInput = (text: string): string => {
@@ -86,11 +84,7 @@ export default function RegisterScreen({ navigation }: Props) {
     try {
       const cleanedPhone = phone.replace(/\D/g, '');
 
-      if (!recaptchaRef.current) {
-        throw new Error('ไม่พบ reCAPTCHA กรุณาลองใหม่');
-      }
-
-      const result = await sendOTP(cleanedPhone, recaptchaRef.current);
+      const result = await sendOTP(cleanedPhone);
 
       if (result.success && result.verificationId) {
         navigation.navigate('OTPVerification', {
@@ -116,12 +110,7 @@ export default function RegisterScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Firebase reCAPTCHA Verifier (ต้องอยู่ใน render เสมอ) */}
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaRef}
-        firebaseConfig={firebaseConfig}
-        attemptInvisibleVerification={true}
-      />
+
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

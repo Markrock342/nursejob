@@ -16,11 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { KittenButton as Button } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { sendOTP, verifyOTP } from '../../services/otpService';
-import { firebaseConfig } from '../../config/firebase';
 import { AuthStackParamList } from '../../types';
 
 type OTPVerificationScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'OTPVerification'>;
@@ -40,7 +38,6 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const [verificationId, setVerificationId] = useState(initialVerificationId);
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
-  const recaptchaRef = useRef<FirebaseRecaptchaVerifierModal>(null);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -68,10 +65,9 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   };
 
   const handleResendOTP = async () => {
-    if (!recaptchaRef.current) return;
     setIsResending(true);
     try {
-      const result = await sendOTP(phone, recaptchaRef.current);
+      const result = await sendOTP(phone);
       if (result.success && result.verificationId) {
         setVerificationId(result.verificationId);
         setCountdown(60);
@@ -125,12 +121,6 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaRef}
-        firebaseConfig={firebaseConfig}
-        attemptInvisibleVerification={true}
-      />
-
       <View style={styles.content}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />

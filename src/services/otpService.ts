@@ -35,9 +35,7 @@ export function isValidThaiPhone(phone: string): boolean {
 }
 
 /**
- * Send OTP via Firebase Phone Auth (Real SMS)
- * recaptchaVerifier = FirebaseRecaptchaVerifierModal ref from expo-firebase-recaptcha
- * Returns verificationId to pass to OTPVerificationScreen
+ * Send OTP via Firebase Phone Auth (Real SMS)\n * Returns verificationId to pass to OTPVerificationScreen
  */
 export async function sendOTP(
   phoneNumber: string,
