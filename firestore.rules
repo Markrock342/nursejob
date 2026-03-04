@@ -16,30 +16,23 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin';
     }
 
     // ==========================================
     // USERS
     // ==========================================
     match /users/{userId} {
-      // อ่านได้เฉพาะ: เจ้าของโปรไฟล์, admin, หรือ user อื่น (เฉพาะ public fields)
-      // Note: Firestore rules ไม่รองรับ field masking โดยตรง
-      // ดังนั้นเราอนุญาตให้ signed-in user อ่านได้ แต่
-      // ข้อมูล sensitive (idCard, bank) ควรอยู่ใน subcollection /private/
+      // Read: owner, admin, or any signed-in user (public profile — no sensitive fields at root)
       allow read: if isSignedIn();
       allow create: if isOwner(userId)
         && request.resource.data.uid == userId
         && request.resource.data.email is string
-        && request.resource.data.role in ['nurse', 'hospital', 'user'];
+        && request.resource.data.role in ['nurse', 'hospital', 'user', 'admin'];
       allow update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
 
-      // ข้อมูล sensitive — อ่าน/เขียนได้เฉพาะเจ้าของเท่านั้น
+      // Sensitive sub-data — owner only
       match /private/{docId} {
         allow read, write: if isOwner(userId);
       }
@@ -49,10 +42,9 @@ service cloud.firestore {
     // JOBS / SHIFTS
     // ==========================================
     match /shifts/{jobId} {
-      // อ่านได้สาธารณะ — ให้ผู้ยังไม่ login ดูงานได้ก่อน
+      // Public job board — anyone can browse without login
       allow read: if true;
 
-      // สร้างโพสได้เฉพาะ signed-in user และต้องมีฟิลด์บังคับ
       allow create: if isSignedIn()
         && request.resource.data.posterId == request.auth.uid
         && request.resource.data.title is string
@@ -61,12 +53,10 @@ service cloud.firestore {
         && request.resource.data.shiftRate is number
         && request.resource.data.shiftRate >= 0;
 
-      // แก้ไขได้เฉพาะเจ้าของโพสต์หรือ admin
       allow update: if isSignedIn() && (
         resource.data.posterId == request.auth.uid || isAdmin()
       );
 
-      // ลบได้เฉพาะเจ้าของหรือ admin
       allow delete: if isSignedIn() && (
         resource.data.posterId == request.auth.uid || isAdmin()
       );
@@ -76,20 +66,22 @@ service cloud.firestore {
     // SHIFT CONTACTS (Applications)
     // ==========================================
     match /shift_contacts/{contactId} {
-      // เจ้าของโพสต์และผู้สมัครอ่านได้ + admin
       allow read: if isSignedIn() && (
         resource.data.interestedUserId == request.auth.uid ||
+        resource.data.posterId == request.auth.uid ||
         isAdmin()
       );
-      // สมัครได้เฉพาะตัวเอง
       allow create: if isSignedIn()
         && request.resource.data.interestedUserId == request.auth.uid;
-      // อัปเดตสถานะ: เจ้าของโพสต์หรือผู้สมัครหรือ admin
       allow update: if isSignedIn() && (
-        resource.data.interestedUserId == request.auth.uid || isAdmin()
+        resource.data.interestedUserId == request.auth.uid ||
+        resource.data.posterId == request.auth.uid ||
+        isAdmin()
       );
       allow delete: if isSignedIn() && (
-        resource.data.interestedUserId == request.auth.uid || isAdmin()
+        resource.data.interestedUserId == request.auth.uid ||
+        resource.data.posterId == request.auth.uid ||
+        isAdmin()
       );
     }
 
@@ -132,7 +124,7 @@ service cloud.firestore {
     // ==========================================
     match /notifications/{notificationId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn(); // Cloud Functions จะสร้างเป็นหลัก
+      allow create: if isSignedIn();
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
@@ -141,7 +133,7 @@ service cloud.firestore {
     // REVIEWS
     // ==========================================
     match /reviews/{reviewId} {
-      allow read: if true; // Public
+      allow read: if true;
       allow create: if isSignedIn()
         && request.resource.data.reviewerId == request.auth.uid
         && request.resource.data.rating >= 1
@@ -153,7 +145,7 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // DOCUMENTS (User uploads)
+    // DOCUMENTS
     // ==========================================
     match /documents/{documentId} {
       allow read: if isSignedIn() && (
@@ -176,7 +168,7 @@ service cloud.firestore {
         resource.data.userId == request.auth.uid || isAdmin()
       );
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin(); // admin เท่านั้น approve/reject
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -193,14 +185,14 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // SUBSCRIPTIONS / PLANS
+    // SUBSCRIPTION PLANS (userPlans)
     // ==========================================
     match /userPlans/{planId} {
       allow read: if isSignedIn() && (
         resource.data.userId == request.auth.uid || isAdmin()
       );
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin(); // ป้องกัน self-upgrade
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -221,7 +213,7 @@ service cloud.firestore {
     // ==========================================
     match /iap_receipts/{receiptId} {
       allow read: if isAdmin();
-      allow write: if false; // Cloud Function เท่านั้น
+      allow write: if false;
     }
 
     // ==========================================
@@ -243,5 +235,6 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+
   }
 }

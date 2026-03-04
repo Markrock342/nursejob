@@ -651,7 +651,8 @@ export async function updateOnlineStatus(uid: string, isOnline: boolean): Promis
       isOnline: isOnline,
       lastActiveAt: serverTimestamp(),
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') return; // auth not ready yet — silent
     console.error('Error updating online status:', error);
   }
 }

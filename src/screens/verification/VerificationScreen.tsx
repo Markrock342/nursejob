@@ -42,7 +42,7 @@ interface Props {
 }
 
 export default function VerificationScreen({ navigation }: Props) {
-  const { user } = useAuth();
+  const { user, isInitialized } = useAuth();
   const { colors } = useTheme();
   
   // State
@@ -65,8 +65,10 @@ export default function VerificationScreen({ navigation }: Props) {
   const [currentImageType, setCurrentImageType] = useState<'license' | 'idcard' | 'selfie'>('license');
 
   useEffect(() => {
-    loadVerificationStatus();
-  }, [user?.uid]);
+    if (user?.uid && isInitialized) {
+      loadVerificationStatus();
+    }
+  }, [user?.uid, isInitialized]);
 
   const loadVerificationStatus = async () => {
     if (!user?.uid) return;

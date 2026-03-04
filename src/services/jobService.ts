@@ -540,7 +540,8 @@ export async function getUserShiftContacts(userId: string): Promise<ShiftContact
     });
 
     return contacts;
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') return []; // auth not ready yet
     console.error('Error fetching contacts:', error);
     return [];
   }

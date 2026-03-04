@@ -54,7 +54,8 @@ export async function getUserSubscription(userId: string): Promise<Subscription>
     
     // Default to free plan
     return { plan: 'free' };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') return { plan: 'free' }; // auth not ready yet
     console.error('Error getting subscription:', error);
     return { plan: 'free' };
   }

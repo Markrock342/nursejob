@@ -235,7 +235,8 @@ export async function getUserVerificationStatus(
       licenseExpiry: userData.licenseExpiry?.toDate(),
       pendingRequest: Boolean(pendingRequest),
     };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') return { isVerified: false }; // auth not ready yet
     console.error('Error getting verification status:', error);
     return { isVerified: false };
   }

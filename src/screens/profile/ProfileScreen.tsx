@@ -46,7 +46,7 @@ interface Props {
 // ============================================
 export default function ProfileScreen({ navigation }: Props) {
   // Auth context
-  const { user, isAuthenticated, logout, updateUser, isLoading: isAuthLoading, isAdmin } = useAuth();
+  const { user, isAuthenticated, logout, updateUser, isLoading: isAuthLoading, isAdmin, isInitialized } = useAuth();
   const { colors, isDark } = useTheme();
   const nav = useNavigation<any>();
   const insets = useSafeAreaInsets();
@@ -95,10 +95,11 @@ export default function ProfileScreen({ navigation }: Props) {
   // Load data when screen is focused
   useFocusEffect(
     useCallback(() => {
-      if (user?.uid) {
+      // Only load after real Firebase auth is confirmed (not cached user)
+      if (user?.uid && isInitialized) {
         loadAllData();
       }
-    }, [user?.uid])
+    }, [user?.uid, isInitialized])
   );
 
   // Load all data

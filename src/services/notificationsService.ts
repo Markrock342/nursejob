@@ -221,7 +221,8 @@ export async function getUnreadNotificationsCount(userId: string): Promise<numbe
     );
     const snapshot = await getDocs(q);
     return snapshot.size;
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') return 0; // auth not ready yet
     console.error('Error getting unread count:', error);
     return 0;
   }
