@@ -353,7 +353,7 @@ export default function HomeScreen({ navigation }: Props) {
     const { location, loading: locationLoading, error: locationError, getLocation } = useLocation();
     const [nearbyMode, setNearbyMode] = useState(false); // true = ใกล้ฉัน
   // Auth context
-  const { user, requireAuth } = useAuth();
+  const { user, requireAuth, isInitialized } = useAuth();
   const toast = useToast();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
@@ -468,7 +468,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   // Real-time notification subscription
   useEffect(() => {
-    if (!user?.uid) {
+    if (!user?.uid || !isInitialized) {
       setNotificationCount(0);
       return;
     }
@@ -480,7 +480,7 @@ export default function HomeScreen({ navigation }: Props) {
     });
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, isInitialized]);
 
   // Real-time favorites subscription
   useEffect(() => {
@@ -1230,19 +1230,19 @@ export default function HomeScreen({ navigation }: Props) {
           {
             icon: 'create-outline',
             label: 'โพสต์งาน',
-            onPress: () => (navigation as any).navigate('Main', { screen: 'PostJob' }),
+            onPress: () => navigation.navigate('PostJob' as any),
             color: '#0EA5E9',
           },
           {
             icon: 'map-outline',
             label: 'ดูแผนที่',
-            onPress: () => (navigation as any).navigate('MapJobs'),
+            onPress: () => (navigation as any).getParent()?.navigate('MapJobs'),
             color: '#6366F1',
           },
           {
             icon: 'heart-outline',
             label: 'รายการโปรด',
-            onPress: () => (navigation as any).navigate('Favorites'),
+            onPress: () => (navigation as any).getParent()?.navigate('Favorites'),
             color: '#EC4899',
           },
         ]}

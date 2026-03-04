@@ -8,7 +8,6 @@ import {
   StyleSheet,
   Pressable,
   Animated,
-  TouchableWithoutFeedback,
   ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -112,15 +111,16 @@ export default function FAB({
 
   return (
     <>
-      {/* Backdrop */}
-      {open && (
-        <TouchableWithoutFeedback onPress={() => setOpen(false)}>
-          <Animated.View
-            style={[styles.backdrop, { opacity: backdropOpacity }]}
-            pointerEvents={open ? 'auto' : 'none'}
-          />
-        </TouchableWithoutFeedback>
-      )}
+      {/* Backdrop — always rendered, pointerEvents toggled so Android touch works */}
+      <Pressable
+        onPress={() => setOpen(false)}
+        style={[StyleSheet.absoluteFillObject, { zIndex: 998 }]}
+        pointerEvents={open ? 'auto' : 'none'}
+      >
+        <Animated.View
+          style={[StyleSheet.absoluteFillObject, styles.backdrop, { opacity: backdropOpacity }]}
+        />
+      </Pressable>
 
       <View
         pointerEvents="box-none"
