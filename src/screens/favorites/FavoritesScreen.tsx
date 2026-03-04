@@ -1,221 +1,162 @@
 // ============================================
-// FAVORITES SCREEN - Production Ready
+// FAVORITES SCREEN - รายการโปรด
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   FlatList,
-  TouchableOpacity,
-  Alert,
+  StyleSheet,
+  ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import { COLORS, SPACING, FONT_SIZES, SHADOWS, BORDER_RADIUS } from '../../theme';
+
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Loading, EmptyState, Avatar } from '../../components/common';
-import { 
-  getUserFavorites, 
-  removeFromFavorites,
-  Favorite 
-} from '../../services/favoritesService';
-import { formatRelativeTime } from '../../utils/helpers';
+import { getUserFavorites, removeFromFavorites, Favorite } from '../../services/favoritesService';
+import { JobCard } from '../../components/job/JobCard';
+import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { RootStackParamList } from '../../types';
 
-// Format shift rate
-const formatShiftRate = (rate?: number, type?: string): string => {
-  if (!rate) return 'ไม่ระบุ';
-  const formattedRate = rate.toLocaleString('th-TH');
-  const unit = type === 'hour' ? '/ชม.' : type === 'day' ? '/วัน' : '/เวร';
-  return `฿${formattedRate}${unit}`;
-};
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export default function FavoritesScreen() {
-  const navigation = useNavigation();
-  const { user, requireAuth } = useAuth();
+  const { user, isInitialized } = useAuth();
   const { colors } = useTheme();
+  const navigation = useNavigation<Nav>();
+
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const loadFavorites = useCallback(async () => {
-    if (!user?.uid) return;
-    
+    if (!user?.uid || !isInitialized) {
+      setFavorites([]);
+      setIsLoading(false);
+      return;
+    }
     try {
       const data = await getUserFavorites(user.uid);
       setFavorites(data);
-    } catch (error) {
-      console.error('Error loading favorites:', error);
+    } catch (e) {
+      console.error('Error loading favorites:', e);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [user?.uid]);
+  }, [user?.uid, isInitialized]);
 
-  useEffect(() => {
-    loadFavorites();
-  }, [loadFavorites]);
+  useFocusEffect(
+    useCallback(() => {
+      setIsLoading(true);
+      loadFavorites();
+    }, [loadFavorites])
+  );
+
+  const handleRemove = async (fav: Favorite) => {
+    if (!user?.uid) return;
+    setRemovingId(fav.id);
+    try {
+      await removeFromFavorites(user.uid, fav.jobId);
+      setFavorites(prev => prev.filter(f => f.id !== fav.id));
+    } catch (e) {
+      console.error('Error removing favorite:', e);
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   const handleRefresh = () => {
     setIsRefreshing(true);
     loadFavorites();
   };
 
-  const handleRemove = (favorite: Favorite) => {
-    Alert.alert(
-      'นำออกจากรายการโปรด',
-      `ต้องการนำ "${favorite.job?.title}" ออกจากรายการโปรดหรือไม่?`,
-      [
-        { text: 'ยกเลิก', style: 'cancel' },
-        {
-          text: 'นำออก',
-          style: 'destructive',
-          onPress: async () => {
-            if (!user?.uid) return;
-            try {
-              await removeFromFavorites(user.uid, favorite.jobId);
-              setFavorites(prev => prev.filter(f => f.id !== favorite.id));
-            } catch (error) {
-              Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถนำออกได้');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleJobPress = (favorite: Favorite) => {
-    if (favorite.job) {
-      const job = favorite.job;
-      const serializedJob = {
-        ...job,
-        shiftDate: job.shiftDate ? (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : job.shiftDate) : undefined,
-        shiftDateEnd: (job as any).shiftDateEnd ? ((job as any).shiftDateEnd instanceof Date ? (job as any).shiftDateEnd.toISOString() : (job as any).shiftDateEnd) : undefined,
-      } as any;
-      (navigation as any).navigate('JobDetail', { job: serializedJob });
-    }
-  };
-
-  // Not logged in
-  if (!user) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-        <EmptyState
-          icon="🤍"
-          title="เข้าสู่ระบบเพื่อดูรายการโปรด"
-          description="บันทึกเวรที่สนใจไว้ดูภายหลัง"
-          actionText="เข้าสู่ระบบ"
-          onAction={() => requireAuth(() => {})}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  if (isLoading) {
-    return <Loading text="กำลังโหลด..." />;
-  }
-
-  const renderFavorite = ({ item }: { item: Favorite }) => {
-    const job = item.job;
-    if (!job) return null;
-
-    return (
+  // ── Empty State ──────────────────────────────
+  const EmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="heart-outline" size={72} color={colors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        ยังไม่มีรายการโปรด
+      </Text>
+      <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+        กดหัวใจบนประกาศงานที่สนใจ{'\n'}เพื่อบันทึกไว้ที่นี่
+      </Text>
       <TouchableOpacity
-        style={styles.card}
-        onPress={() => handleJobPress(item)}
-        activeOpacity={0.7}
+        style={[styles.browseBtn, { backgroundColor: colors.primary }]}
+        onPress={() => navigation.navigate('Main' as any)}
       >
-        <View style={styles.cardHeader}>
-          <Avatar
-            uri={job.posterPhoto}
-            name={job.posterName || 'ผู้โพสต์'}
-            size={48}
-          />
-          <View style={styles.cardInfo}>
-            <Text style={styles.jobTitle} numberOfLines={1}>{job.title}</Text>
-            <Text style={styles.posterName} numberOfLines={1}>
-              {job.posterName || 'ผู้โพสต์'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.removeButton}
-            onPress={() => handleRemove(item)}
-          >
-            <Ionicons name="heart" size={24} color={colors.error} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.cardBody}>
-          <View style={styles.tag}>
-            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-            <Text style={styles.tagText}>{job.location?.province || 'ไม่ระบุ'}</Text>
-          </View>
-          <View style={styles.tag}>
-            <Ionicons name="briefcase-outline" size={14} color={colors.textSecondary} />
-            <Text style={styles.tagText}>{job.department}</Text>
-          </View>
-        </View>
-
-        <View style={styles.cardFooter}>
-          <Text style={styles.salary}>
-            {formatShiftRate(job.shiftRate, job.rateType)}
-          </Text>
-          <Text style={styles.date}>
-            บันทึกเมื่อ {formatRelativeTime(item.createdAt)}
-          </Text>
-        </View>
-
-        {job.status === 'urgent' && (
-          <View style={styles.urgentBadge}>
-            <Text style={styles.urgentText}>🔥 ด่วน</Text>
-          </View>
-        )}
+        <Text style={styles.browseBtnText}>ดูประกาศงาน</Text>
       </TouchableOpacity>
-    );
-  };
+    </View>
+  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[styles.header, { backgroundColor: colors.surface }]}>
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backIcon}>←</Text>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>รายการโปรด</Text>
-          <Text style={styles.headerCount}>{favorites.length} เวร</Text>
-        </View>
-        <View style={{ width: 40 }} />
+        <Text style={[styles.headerTitle, { color: colors.text }]}>รายการโปรด</Text>
+        {favorites.length > 0 ? (
+          <View style={[styles.countBadge, { backgroundColor: colors.primary + '18' }]}>
+            <Text style={[styles.countText, { color: colors.primary }]}>{favorites.length}</Text>
+          </View>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
       </View>
 
-      <FlatList
-        data={favorites}
-        keyExtractor={(item) => item.id}
-        renderItem={renderFavorite}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            colors={[colors.primary]}
-          />
-        }
-        ListEmptyComponent={
-          <EmptyState
-            icon="heart-outline"
-            title="ยังไม่มีรายการโปรด"
-            subtitle="กดไอคอน ❤️ ที่งานที่สนใจเพื่อบันทึกไว้ดูภายหลัง"
-            actionLabel="ค้นหางาน"
-            onAction={() => navigation.goBack()}
-          />
-        }
-      />
+      {/* Content */}
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={favorites}
+          keyExtractor={item => item.id}
+          contentContainerStyle={[
+            styles.listContent,
+            favorites.length === 0 && styles.listContentEmpty,
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          ListEmptyComponent={<EmptyState />}
+          renderItem={({ item }) => {
+            if (!item.job) return null;
+            return (
+              <View style={styles.cardWrapper}>
+                <JobCard
+                  job={item.job}
+                  onPress={() => navigation.navigate('JobDetail', { jobId: item.jobId })}
+                  onSave={() => handleRemove(item)}
+                  isSaved={true}
+                />
+                {removingId === item.id && (
+                  <View style={styles.removingOverlay}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  </View>
+                )}
+              </View>
+            );
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -223,126 +164,85 @@ export default function FavoritesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
   },
   header: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: SPACING.lg,
-    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
   },
-  headerCenter: {
+  backBtn: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  headerCount: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  backButton: {
-    padding: SPACING.xs,
-  },
-  backIcon: {
-    fontSize: FONT_SIZES.xl,
-    color: COLORS.primary,
-  },
-  list: {
-    padding: SPACING.md,
-    paddingBottom: 100,
-  },
-  card: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.lg,
-    marginBottom: SPACING.md,
-    ...SHADOWS.md,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cardInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  jobTitle: {
     fontSize: FONT_SIZES.lg,
-    fontWeight: '600',
-    color: COLORS.text,
+    fontWeight: '700',
   },
-  hospitalName: {
+  countBadge: {
+    width: 40,
+    height: 28,
+    borderRadius: BORDER_RADIUS.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countText: {
     fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+    fontWeight: '700',
   },
-  posterName: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  verified: {
-    color: COLORS.success,
-  },
-  removeButton: {
-    padding: SPACING.sm,
-  },
-  cardBody: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: SPACING.md,
+  listContent: {
+    padding: SPACING.md,
     gap: SPACING.sm,
   },
-  tag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.sm,
-    gap: 4,
+  listContentEmpty: {
+    flex: 1,
   },
-  tagText: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.textSecondary,
+  cardWrapper: {
+    position: 'relative',
   },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  removingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.6)',
     alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  // Empty State
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
+    gap: SPACING.sm,
+  },
+  emptyTitle: {
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '700',
     marginTop: SPACING.md,
-    paddingTop: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
   },
-  salary: {
+  emptySubtitle: {
     fontSize: FONT_SIZES.md,
-    fontWeight: '600',
-    color: COLORS.success,
+    textAlign: 'center',
+    lineHeight: 22,
   },
-  date: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
+  browseBtn: {
+    marginTop: SPACING.md,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.sm + 2,
+    borderRadius: BORDER_RADIUS.full,
   },
-  urgentBadge: {
-    position: 'absolute',
-    top: SPACING.sm,
-    right: SPACING.sm,
-    backgroundColor: COLORS.errorLight,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.sm,
-  },
-  urgentText: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.error,
-    fontWeight: '600',
+  browseBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: FONT_SIZES.md,
   },
 });
-
