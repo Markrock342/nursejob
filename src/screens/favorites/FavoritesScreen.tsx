@@ -57,11 +57,15 @@ function FavoriteCard({ favorite, onPress, onRemove, removing }: FavoriteCardPro
   const wageMap: Record<string, string> = {
     hour: '/ชม.',
     day: '/วัน',
+    per_day: '/วัน',
     month: '/เดือน',
+    per_month: '/เดือน',
     shift: '/เวร',
+    per_shift: '/เวร',
+    negotiable: '',
   };
-  const wage = job.wage
-    ? '฿' + job.wage.toLocaleString('th-TH') + (wageMap[job.wageType as string] || '/เวร')
+  const wage = job.shiftRate
+    ? '฿' + job.shiftRate.toLocaleString('th-TH') + (wageMap[job.rateType] || '/เวร')
     : 'ตามตกลง';
 
   const savedDate = favorite.createdAt
@@ -71,7 +75,9 @@ function FavoriteCard({ favorite, onPress, onRemove, removing }: FavoriteCardPro
       })
     : '';
 
-  const isExpired = job.expiresAt ? new Date(job.expiresAt) < new Date() : false;
+  const toDate = (v: Date | import('@firebase/firestore').Timestamp | null | undefined): Date | null =>
+    !v ? null : v instanceof Date ? v : (v as any).toDate();
+  const isExpired = job.expiresAt ? (toDate(job.expiresAt) ?? new Date()) < new Date() : false;
 
   return (
     <TouchableOpacity
@@ -102,7 +108,7 @@ function FavoriteCard({ favorite, onPress, onRemove, removing }: FavoriteCardPro
           <View style={styles.metaRow}>
             <Ionicons name="business-outline" size={13} color={COLORS.textMuted} />
             <Text style={styles.metaText} numberOfLines={1}>
-              {job.hospitalName || 'ไม่ระบุสถานพยาบาล'}
+              {job.hospital || job.location?.hospital || 'ไม่ระบุสถานพยาบาล'}
             </Text>
           </View>
           {!!job.location?.address && (
@@ -117,9 +123,9 @@ function FavoriteCard({ favorite, onPress, onRemove, removing }: FavoriteCardPro
             <View style={styles.wageBadge}>
               <Text style={styles.wageText}>{wage}</Text>
             </View>
-            {!!job.shiftType && (
+            {!!job.shiftTime && (
               <View style={styles.shiftBadge}>
-                <Text style={styles.shiftText}>{job.shiftType}</Text>
+                <Text style={styles.shiftText}>{job.shiftTime}</Text>
               </View>
             )}
           </View>
@@ -220,7 +226,8 @@ export default function FavoritesScreen() {
     return favorites.filter(
       f =>
         f.job?.title?.toLowerCase().includes(q) ||
-        f.job?.hospitalName?.toLowerCase().includes(q) ||
+        f.job?.hospital?.toLowerCase().includes(q) ||
+        f.job?.location?.hospital?.toLowerCase().includes(q) ||
         f.job?.location?.address?.toLowerCase().includes(q),
     );
   }, [favorites, searchQuery]);
