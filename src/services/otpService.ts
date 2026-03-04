@@ -7,6 +7,7 @@ import {
   signInWithCredential,
   linkWithCredential,
 } from 'firebase/auth';
+import rnFirebaseAuth from '@react-native-firebase/auth';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
@@ -39,16 +40,17 @@ export function isValidThaiPhone(phone: string): boolean {
  */
 export async function sendOTP(
   phoneNumber: string,
-  recaptchaVerifier?: any
+  _recaptchaVerifier?: any
 ): Promise<{ success: boolean; verificationId?: string; message?: string; error?: string }> {
   try {
     if (!isValidThaiPhone(phoneNumber)) {
       return { success: false, error: 'เบอร์โทรศัพท์ไม่ถูกต้อง' };
     }
     const formattedPhone = formatPhoneNumber(phoneNumber);
-    const provider = new PhoneAuthProvider(auth);
-    const verificationId = await provider.verifyPhoneNumber(formattedPhone, recaptchaVerifier);
-    return { success: true, verificationId, message: 'OTP ถูกส่งแล้ว' };
+    // ใช้ @react-native-firebase/auth (native SDK) — ไม่ต้องการ reCAPTCHA verifier
+    // Android ใช้ Play Integrity API อัตโนมัติ
+    const confirmation = await rnFirebaseAuth().signInWithPhoneNumber(formattedPhone);
+    return { success: true, verificationId: confirmation.verificationId, message: 'OTP ถูกส่งแล้ว' };
   } catch (error: any) {
     console.error('Error sending OTP:', error);
     let errorMessage = 'ไม่สามารถส่ง OTP ได้';

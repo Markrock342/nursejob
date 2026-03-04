@@ -70,6 +70,8 @@ module.exports = {
       favicon: './assets/favicon.png',
     },
     plugins: [
+      '@react-native-firebase/app',
+      '@react-native-firebase/auth',
       'expo-web-browser',
       [
         'expo-location',
