@@ -1,5 +1,5 @@
 ﻿// ============================================
-// SHOP SCREEN - à¸£à¹‰à¸²à¸™à¸„à¹‰à¸² / à¸‹à¸·à¹‰à¸­à¸šà¸£à¸´à¸à¸²à¸£ (Role-aware)
+// SHOP SCREEN - ร้านค้า / ซื้อบริการ (Role-aware)
 // ============================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -19,10 +19,25 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Card, KittenButton as Button } from '../../components/common';
-import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
-import { getUserSubscription, getSubscriptionStatusDisplay, upgradePlan } from '../../services/subscriptionService';
+import CustomAlert, {
+  AlertState,
+  initialAlertState,
+  createAlert,
+} from '../../components/common/CustomAlert';
+import {
+  getUserSubscription,
+  getSubscriptionStatusDisplay,
+  upgradePlan,
+} from '../../services/subscriptionService';
 import { getReferralInfo } from '../../services/referralService';
-import { PRICING, SUBSCRIPTION_PLANS, Subscription, ReferralInfo, SubscriptionPlan, BillingCycle } from '../../types';
+import {
+  PRICING,
+  SUBSCRIPTION_PLANS,
+  Subscription,
+  ReferralInfo,
+  SubscriptionPlan,
+  BillingCycle,
+} from '../../types';
 import {
   initializeIAP,
   requestIAPPurchase,
@@ -44,7 +59,7 @@ const planColor: Record<string, string> = {
 };
 
 // ============================================
-// Component
+// Main Component
 // ============================================
 export default function ShopScreen() {
   const navigation = useNavigation();
@@ -63,7 +78,10 @@ export default function ShopScreen() {
   const closeAlert = () => setAlert(initialAlertState);
 
   const loadData = useCallback(async () => {
-    if (!user?.uid) { setIsLoading(false); return; }
+    if (!user?.uid) {
+      setIsLoading(false);
+      return;
+    }
     try {
       const [sub, ref] = await Promise.all([
         getUserSubscription(user.uid),
@@ -81,7 +99,9 @@ export default function ShopScreen() {
   useEffect(() => {
     initializeIAP();
     loadData();
-    return () => { cleanupIAP(); };
+    return () => {
+      cleanupIAP();
+    };
   }, [loadData]);
 
   // ----------------------------------------
@@ -89,25 +109,36 @@ export default function ShopScreen() {
   // ----------------------------------------
   const handleBuyPlan = async (plan: SubscriptionPlan) => {
     if (!user?.uid) {
-      setAlert({ ...createAlert.warning('à¸à¸£à¸¸à¸“à¸²à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸š', '') } as AlertState);
+      setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', '') } as AlertState);
       return;
     }
-    // All plans map to PREMIUM_MONTHLY product ID while USE_MOCK_IAP=true;
-    // swap in real product IDs once IAP is wired up.
     const productId = IAP_PRODUCTS.PREMIUM_MONTHLY;
 
     setIsPurchasing(true);
     try {
-      const result = await requestIAPPurchase(productId, user.uid, user.displayName || 'User');
+      const result = await requestIAPPurchase(
+        productId,
+        user.uid,
+        user.displayName || 'User',
+      );
       if (result.success) {
         await upgradePlan(user.uid, plan, billingCycle);
-        setAlert({ ...createAlert.success('âœ… à¸­à¸±à¸žà¹€à¸à¸£à¸”à¸ªà¸³à¹€à¸£à¹‡à¸ˆ!', 'à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸‚à¸­à¸‡à¸„à¸¸à¸“à¸–à¸¹à¸à¹€à¸›à¸´à¸”à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹à¸¥à¹‰à¸§') } as AlertState);
+        setAlert({
+          ...createAlert.success(
+            '✅ อัพเกรดสำเร็จ!',
+            'แพ็กเกจของคุณถูกเปิดใช้งานแล้ว',
+          ),
+        } as AlertState);
         loadData();
-      } else if (result.error && result.error !== 'à¸œà¸¹à¹‰à¹ƒà¸Šà¹‰à¸¢à¸à¹€à¸¥à¸´à¸') {
-        setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', result.error) } as AlertState);
+      } else if (result.error && result.error !== 'ผู้ใช้ยกเลิก') {
+        setAlert({
+          ...createAlert.error('❌ เกิดข้อผิดพลาด', result.error),
+        } as AlertState);
       }
     } catch (e: any) {
-      setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', e.message) } as AlertState);
+      setAlert({
+        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
+      } as AlertState);
     } finally {
       setIsPurchasing(false);
     }
@@ -116,25 +147,44 @@ export default function ShopScreen() {
   // ----------------------------------------
   // Purchase add-on
   // ----------------------------------------
-  const handleBuyAddon = async (item: 'extraPost' | 'extendPost' | 'urgent') => {
+  const handleBuyAddon = async (
+    item: 'extraPost' | 'extendPost' | 'urgent',
+  ) => {
     if (!user?.uid) return;
     const productIdMap = {
       extraPost: IAP_PRODUCTS.EXTRA_POST,
       extendPost: IAP_PRODUCTS.EXTEND_POST,
       urgent: IAP_PRODUCTS.URGENT_POST,
     };
-    const labels = { extraPost: 'à¹‚à¸žà¸ªà¸•à¹Œà¹€à¸žà¸´à¹ˆà¸¡', extendPost: 'à¸•à¹ˆà¸­à¸­à¸²à¸¢à¸¸à¹‚à¸žà¸ªà¸•à¹Œ', urgent: 'à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™' };
+    const labels = {
+      extraPost: 'โพสต์เพิ่ม',
+      extendPost: 'ต่ออายุโพสต์',
+      urgent: 'ปุ่มด่วน',
+    };
 
     setIsPurchasing(true);
     try {
-      const result = await requestIAPPurchase(productIdMap[item], user.uid, user.displayName || 'User');
+      const result = await requestIAPPurchase(
+        productIdMap[item],
+        user.uid,
+        user.displayName || 'User',
+      );
       if (result.success) {
-        setAlert({ ...createAlert.success('âœ… à¸‹à¸·à¹‰à¸­à¸ªà¸³à¹€à¸£à¹‡à¸ˆ!', `${labels[item]} à¹€à¸›à¸´à¸”à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹à¸¥à¹‰à¸§`) } as AlertState);
-      } else if (result.error && result.error !== 'à¸œà¸¹à¹‰à¹ƒà¸Šà¹‰à¸¢à¸à¹€à¸¥à¸´à¸') {
-        setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', result.error) } as AlertState);
+        setAlert({
+          ...createAlert.success(
+            '✅ ซื้อสำเร็จ!',
+            `${labels[item]} เปิดใช้งานแล้ว`,
+          ),
+        } as AlertState);
+      } else if (result.error && result.error !== 'ผู้ใช้ยกเลิก') {
+        setAlert({
+          ...createAlert.error('❌ เกิดข้อผิดพลาด', result.error),
+        } as AlertState);
       }
     } catch (e: any) {
-      setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', e.message) } as AlertState);
+      setAlert({
+        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
+      } as AlertState);
     } finally {
       setIsPurchasing(false);
     }
@@ -146,13 +196,22 @@ export default function ShopScreen() {
       const results = await restoreIAPPurchases();
       const ok = results.filter(r => r.success);
       if (ok.length > 0) {
-        setAlert({ ...createAlert.success('âœ… à¸à¸¹à¹‰à¸„à¸·à¸™à¸ªà¸³à¹€à¸£à¹‡à¸ˆ', `à¸žà¸š ${ok.length} à¸£à¸²à¸¢à¸à¸²à¸£`) } as AlertState);
+        setAlert({
+          ...createAlert.success('✅ กู้คืนสำเร็จ', `พบ ${ok.length} รายการ`),
+        } as AlertState);
         loadData();
       } else {
-        setAlert({ ...createAlert.info('â„¹ï¸ à¹„à¸¡à¹ˆà¸žà¸šà¸£à¸²à¸¢à¸à¸²à¸£', 'à¹„à¸¡à¹ˆà¸žà¸šà¸£à¸²à¸¢à¸à¸²à¸£à¸‹à¸·à¹‰à¸­à¸—à¸µà¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¸à¸¹à¹‰à¸„à¸·à¸™à¹„à¸”à¹‰') } as AlertState);
+        setAlert({
+          ...createAlert.info(
+            'ℹ️ ไม่พบรายการ',
+            'ไม่พบรายการซื้อที่สามารถกู้คืนได้',
+          ),
+        } as AlertState);
       }
     } catch (e: any) {
-      setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', e.message) } as AlertState);
+      setAlert({
+        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
+      } as AlertState);
     } finally {
       setIsPurchasing(false);
     }
@@ -161,31 +220,60 @@ export default function ShopScreen() {
   const copyReferralCode = () => {
     if (referralInfo?.referralCode) {
       Clipboard.setString(referralInfo.referralCode);
-      setAlert({ ...createAlert.success('ðŸ“‹ à¸„à¸±à¸”à¸¥à¸­à¸à¹à¸¥à¹‰à¸§!', `à¹‚à¸„à¹‰à¸” ${referralInfo.referralCode} à¸–à¸¹à¸à¸„à¸±à¸”à¸¥à¸­à¸à¹à¸¥à¹‰à¸§`) } as AlertState);
+      setAlert({
+        ...createAlert.success(
+          '📋 คัดลอกแล้ว!',
+          `โค้ด ${referralInfo.referralCode} ถูกคัดลอกแล้ว`,
+        ),
+      } as AlertState);
     }
   };
 
   // ----------------------------------------
-  // Price helper
+  // Price helpers
   // ----------------------------------------
   const priceFor = (plan: SubscriptionPlan): number => {
     const m: Record<SubscriptionPlan, { monthly: number; annual: number }> = {
-      free:                 { monthly: 0, annual: 0 },
-      nurse_pro:            { monthly: PRICING.nursePro, annual: PRICING.nurseProAnnual },
-      hospital_starter:     { monthly: PRICING.hospitalStarter, annual: PRICING.hospitalStarterAnnual },
-      hospital_pro:         { monthly: PRICING.hospitalPro, annual: PRICING.hospitalProAnnual },
-      hospital_enterprise:  { monthly: PRICING.hospitalEnterprise, annual: PRICING.hospitalEnterpriseAnnual },
+      free: { monthly: 0, annual: 0 },
+      nurse_pro: {
+        monthly: PRICING.nursePro,
+        annual: PRICING.nurseProAnnual,
+      },
+      hospital_starter: {
+        monthly: PRICING.hospitalStarter,
+        annual: PRICING.hospitalStarterAnnual,
+      },
+      hospital_pro: {
+        monthly: PRICING.hospitalPro,
+        annual: PRICING.hospitalProAnnual,
+      },
+      hospital_enterprise: {
+        monthly: PRICING.hospitalEnterprise,
+        annual: PRICING.hospitalEnterpriseAnnual,
+      },
     };
     return billingCycle === 'annual' ? m[plan].annual : m[plan].monthly;
   };
 
   const savingsPct = (plan: SubscriptionPlan): number => {
     const m: Record<SubscriptionPlan, { monthly: number; annual: number }> = {
-      free:                 { monthly: 0, annual: 0 },
-      nurse_pro:            { monthly: PRICING.nursePro, annual: PRICING.nurseProAnnual },
-      hospital_starter:     { monthly: PRICING.hospitalStarter, annual: PRICING.hospitalStarterAnnual },
-      hospital_pro:         { monthly: PRICING.hospitalPro, annual: PRICING.hospitalProAnnual },
-      hospital_enterprise:  { monthly: PRICING.hospitalEnterprise, annual: PRICING.hospitalEnterpriseAnnual },
+      free: { monthly: 0, annual: 0 },
+      nurse_pro: {
+        monthly: PRICING.nursePro,
+        annual: PRICING.nurseProAnnual,
+      },
+      hospital_starter: {
+        monthly: PRICING.hospitalStarter,
+        annual: PRICING.hospitalStarterAnnual,
+      },
+      hospital_pro: {
+        monthly: PRICING.hospitalPro,
+        annual: PRICING.hospitalProAnnual,
+      },
+      hospital_enterprise: {
+        monthly: PRICING.hospitalEnterprise,
+        annual: PRICING.hospitalEnterpriseAnnual,
+      },
     };
     const monthly12 = m[plan].monthly * 12;
     if (!monthly12) return 0;
@@ -193,7 +281,9 @@ export default function ShopScreen() {
   };
 
   const currentPlan = subscription?.plan || 'free';
-  const statusDisplay = subscription ? getSubscriptionStatusDisplay(subscription) : null;
+  const statusDisplay = subscription
+    ? getSubscriptionStatusDisplay(subscription)
+    : null;
 
   // ----------------------------------------
   // Render
@@ -212,27 +302,35 @@ export default function ShopScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ðŸ›’ à¸£à¹‰à¸²à¸™à¸„à¹‰à¸²</Text>
+        <Text style={styles.headerTitle}>🛒 ร้านค้า</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-
         {/* Current Plan Banner */}
-        <Card style={StyleSheet.flatten([styles.currentPlanCard, { borderColor: planColor[currentPlan] }])}>
+        <Card
+          style={StyleSheet.flatten([
+            styles.currentPlanCard,
+            { borderColor: planColor[currentPlan] },
+          ])}>
           <View style={styles.planBannerRow}>
             <View>
-              <Text style={styles.planLabel}>à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™</Text>
-              <Text style={[styles.planName, { color: planColor[currentPlan] }]}>
-                {statusDisplay?.planName || 'ðŸ†“ à¸Ÿà¸£à¸µ'}
+              <Text style={styles.planLabel}>แพ็กเกจปัจจุบัน</Text>
+              <Text
+                style={[styles.planName, { color: planColor[currentPlan] }]}>
+                {statusDisplay?.planName || '🆓 ฟรี'}
               </Text>
             </View>
             {statusDisplay?.expiresText && (
               <View style={styles.expiryBadge}>
-                <Text style={styles.expiryText}>{statusDisplay.expiresText}</Text>
+                <Text style={styles.expiryText}>
+                  {statusDisplay.expiresText}
+                </Text>
               </View>
             )}
           </View>
@@ -241,25 +339,42 @@ export default function ShopScreen() {
         {/* Billing Cycle Toggle */}
         <View style={styles.toggleRow}>
           <TouchableOpacity
-            style={[styles.toggleBtn, billingCycle === 'monthly' && styles.toggleActive]}
-            onPress={() => setBillingCycle('monthly')}
-          >
-            <Text style={[styles.toggleText, billingCycle === 'monthly' && styles.toggleActiveText]}>à¸£à¸²à¸¢à¹€à¸”à¸·à¸­à¸™</Text>
+            style={[
+              styles.toggleBtn,
+              billingCycle === 'monthly' && styles.toggleActive,
+            ]}
+            onPress={() => setBillingCycle('monthly')}>
+            <Text
+              style={[
+                styles.toggleText,
+                billingCycle === 'monthly' && styles.toggleActiveText,
+              ]}>
+              รายเดือน
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.toggleBtn, billingCycle === 'annual' && styles.toggleActive]}
-            onPress={() => setBillingCycle('annual')}
-          >
-            <Text style={[styles.toggleText, billingCycle === 'annual' && styles.toggleActiveText]}>à¸£à¸²à¸¢à¸›à¸µ</Text>
-            <View style={styles.savingsPill}><Text style={styles.savingsPillText}>à¸›à¸£à¸°à¸«à¸¢à¸±à¸” ~17%</Text></View>
+            style={[
+              styles.toggleBtn,
+              billingCycle === 'annual' && styles.toggleActive,
+            ]}
+            onPress={() => setBillingCycle('annual')}>
+            <Text
+              style={[
+                styles.toggleText,
+                billingCycle === 'annual' && styles.toggleActiveText,
+              ]}>
+              รายปี
+            </Text>
+            <View style={styles.savingsPill}>
+              <Text style={styles.savingsPillText}>ประหยัด ~17%</Text>
+            </View>
           </TouchableOpacity>
         </View>
 
         {/* ---- NURSE PLANS ---- */}
         {!isHospital && (
           <>
-            <Text style={styles.sectionTitle}>ðŸ’Š à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸ªà¸³à¸«à¸£à¸±à¸šà¸žà¸¢à¸²à¸šà¸²à¸¥</Text>
-
+            <Text style={styles.sectionTitle}>💊 แพ็กเกจสำหรับพยาบาล</Text>
             <NursePlanCard
               plan="free"
               isCurrent={currentPlan === 'free'}
@@ -280,13 +395,21 @@ export default function ShopScreen() {
         {/* ---- HOSPITAL PLANS ---- */}
         {isHospital && (
           <>
-            <Text style={styles.sectionTitle}>ðŸ¥ à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸ªà¸³à¸«à¸£à¸±à¸šà¹‚à¸£à¸‡à¸žà¸¢à¸²à¸šà¸²à¸¥</Text>
-            {(['hospital_starter', 'hospital_pro', 'hospital_enterprise'] as SubscriptionPlan[]).map(plan => (
+            <Text style={styles.sectionTitle}>🏥 แพ็กเกจสำหรับโรงพยาบาล</Text>
+            {(
+              [
+                'hospital_starter',
+                'hospital_pro',
+                'hospital_enterprise',
+              ] as SubscriptionPlan[]
+            ).map(plan => (
               <HospitalPlanCard
                 key={plan}
                 plan={plan}
                 price={priceFor(plan)}
-                savings={billingCycle === 'annual' ? savingsPct(plan) : 0}
+                savings={
+                  billingCycle === 'annual' ? savingsPct(plan) : 0
+                }
                 isCurrent={currentPlan === plan}
                 onBuy={() => handleBuyPlan(plan)}
                 billingCycle={billingCycle}
@@ -296,19 +419,21 @@ export default function ShopScreen() {
         )}
 
         {/* ---- ADD-ONS ---- */}
-        <Text style={styles.sectionTitle}>ðŸ’¡ à¸‹à¸·à¹‰à¸­à¹à¸¢à¸à¸£à¸²à¸¢à¸„à¸£à¸±à¹‰à¸‡</Text>
+        <Text style={styles.sectionTitle}>💡 ซื้อแยกรายครั้ง</Text>
 
         <Card style={styles.itemCard}>
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>ðŸ“</Text>
+              <Text style={styles.itemIcon}>📝</Text>
               <View>
-                <Text style={styles.itemTitle}>à¹‚à¸žà¸ªà¸•à¹Œà¹€à¸žà¸´à¹ˆà¸¡ 1 à¸„à¸£à¸±à¹‰à¸‡</Text>
-                <Text style={styles.itemDesc}>à¹€à¸žà¸´à¹ˆà¸¡à¹‚à¸žà¸ªà¸•à¹Œà¹€à¸¡à¸·à¹ˆà¸­à¸„à¸£à¸š limit</Text>
+                <Text style={styles.itemTitle}>โพสต์เพิ่ม 1 ครั้ง</Text>
+                <Text style={styles.itemDesc}>เพิ่มโพสต์เมื่อครบ limit</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.buyButton} onPress={() => handleBuyAddon('extraPost')}>
-              <Text style={styles.buyButtonText}>à¸¿{PRICING.extraPost}</Text>
+            <TouchableOpacity
+              style={styles.buyButton}
+              onPress={() => handleBuyAddon('extraPost')}>
+              <Text style={styles.buyButtonText}>฿{PRICING.extraPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -316,14 +441,18 @@ export default function ShopScreen() {
         <Card style={styles.itemCard}>
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>â°</Text>
+              <Text style={styles.itemIcon}>⏰</Text>
               <View>
-                <Text style={styles.itemTitle}>à¸•à¹ˆà¸­à¸­à¸²à¸¢à¸¸à¹‚à¸žà¸ªà¸•à¹Œ +1 à¸§à¸±à¸™</Text>
-                <Text style={styles.itemDesc}>à¸‚à¸¢à¸²à¸¢à¸­à¸²à¸¢à¸¸à¹‚à¸žà¸ªà¸•à¹Œà¸—à¸µà¹ˆà¹ƒà¸à¸¥à¹‰à¸«à¸¡à¸”à¸­à¸²à¸¢à¸¸</Text>
+                <Text style={styles.itemTitle}>ต่ออายุโพสต์ +1 วัน</Text>
+                <Text style={styles.itemDesc}>
+                  ขยายอายุโพสต์ที่ใกล้หมดอายุ
+                </Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.buyButton} onPress={() => handleBuyAddon('extendPost')}>
-              <Text style={styles.buyButtonText}>à¸¿{PRICING.extendPost}</Text>
+            <TouchableOpacity
+              style={styles.buyButton}
+              onPress={() => handleBuyAddon('extendPost')}>
+              <Text style={styles.buyButtonText}>฿{PRICING.extendPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -331,51 +460,76 @@ export default function ShopScreen() {
         <Card style={styles.itemCard}>
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>âš¡</Text>
+              <Text style={styles.itemIcon}>⚡</Text>
               <View>
-                <Text style={styles.itemTitle}>à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™ (Urgent)</Text>
-                <Text style={styles.itemDesc}>à¸—à¸³à¹ƒà¸«à¹‰à¸›à¸£à¸°à¸à¸²à¸¨à¹‚à¸”à¸”à¹€à¸”à¹ˆà¸™à¸‚à¸¶à¹‰à¸™</Text>
+                <Text style={styles.itemTitle}>ปุ่มด่วน (Urgent)</Text>
+                <Text style={styles.itemDesc}>ทำให้ประกาศโดดเด่นขึ้น</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.buyButton} onPress={() => handleBuyAddon('urgent')}>
-              <Text style={styles.buyButtonText}>à¸¿{PRICING.urgentPost}</Text>
+            <TouchableOpacity
+              style={styles.buyButton}
+              onPress={() => handleBuyAddon('urgent')}>
+              <Text style={styles.buyButtonText}>฿{PRICING.urgentPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
 
-        {/* ---- REFERRAL SECTION ---- */}
+        {/* ---- REFERRAL ---- */}
         {referralInfo && (
           <>
-            <Text style={styles.sectionTitle}>ðŸŽ à¹à¸™à¸°à¸™à¸³à¹€à¸žà¸·à¹ˆà¸­à¸™</Text>
+            <Text style={styles.sectionTitle}>🎁 แนะนำเพื่อน</Text>
             <Card style={styles.referralCard}>
-              <Text style={styles.referralTitle}>à¹à¸™à¸°à¸™à¸³à¹€à¸žà¸·à¹ˆà¸­à¸™ â†’ à¹„à¸”à¹‰ Pro à¸Ÿà¸£à¸µ 1 à¹€à¸”à¸·à¸­à¸™!</Text>
-              <Text style={styles.referralDesc}>
-                à¹€à¸žà¸·à¹ˆà¸­à¸™à¸‚à¸­à¸‡à¸„à¸¸à¸“à¸ªà¸¡à¸±à¸„à¸£à¹à¸¥à¸°à¸­à¸±à¸žà¹€à¸à¸£à¸” à¸„à¸¸à¸“à¹à¸¥à¸°à¹€à¸žà¸·à¹ˆà¸­à¸™à¸ˆà¸°à¹„à¸”à¹‰à¸£à¸±à¸š Nurse Pro à¸Ÿà¸£à¸µ 1 à¹€à¸”à¸·à¸­à¸™
+              <Text style={styles.referralTitle}>
+                แนะนำเพื่อน → ได้ Pro ฟรี 1 เดือน!
               </Text>
-
+              <Text style={styles.referralDesc}>
+                เพื่อนสมัครและอัพเกรด คุณและเพื่อนได้รับ Nurse Pro ฟรี 1 เดือน
+              </Text>
               <View style={styles.referralCodeBox}>
-                <Text style={styles.referralCodeLabel}>à¹‚à¸„à¹‰à¸”à¸‚à¸­à¸‡à¸„à¸¸à¸“</Text>
+                <Text style={styles.referralCodeLabel}>โค้ดของคุณ</Text>
                 <View style={styles.referralCodeRow}>
-                  <Text style={styles.referralCode}>{referralInfo.referralCode}</Text>
-                  <TouchableOpacity style={styles.copyBtn} onPress={copyReferralCode}>
-                    <Ionicons name="copy-outline" size={18} color={COLORS.primary} />
-                    <Text style={styles.copyText}>à¸„à¸±à¸”à¸¥à¸­à¸</Text>
+                  <Text style={styles.referralCode}>
+                    {referralInfo.referralCode}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.copyBtn}
+                    onPress={copyReferralCode}>
+                    <Ionicons
+                      name="copy-outline"
+                      size={18}
+                      color={COLORS.primary}
+                    />
+                    <Text style={styles.copyText}>คัดลอก</Text>
                   </TouchableOpacity>
                 </View>
               </View>
-
               <View style={styles.referralStats}>
                 <View style={styles.statBox}>
-                  <Text style={styles.statNum}>{referralInfo.referredCount}</Text>
-                  <Text style={styles.statLabel}>à¹€à¸žà¸·à¹ˆà¸­à¸™à¸—à¸µà¹ˆà¹à¸™à¸°à¸™à¸³</Text>
+                  <Text style={styles.statNum}>
+                    {referralInfo.referredCount}
+                  </Text>
+                  <Text style={styles.statLabel}>เพื่อนที่แนะนำ</Text>
                 </View>
-                <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: COLORS.border }]}>
-                  <Text style={styles.statNum}>{referralInfo.rewardMonthsEarned}</Text>
-                  <Text style={styles.statLabel}>à¹€à¸”à¸·à¸­à¸™à¸Ÿà¸£à¸µà¸—à¸µà¹ˆà¹„à¸”à¹‰</Text>
+                <View
+                  style={[
+                    styles.statBox,
+                    { borderLeftWidth: 1, borderLeftColor: COLORS.border },
+                  ]}>
+                  <Text style={styles.statNum}>
+                    {referralInfo.rewardMonthsEarned}
+                  </Text>
+                  <Text style={styles.statLabel}>เดือนฟรีที่ได้</Text>
                 </View>
-                <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: COLORS.border }]}>
-                  <Text style={styles.statNum}>{referralInfo.rewardMonthsEarned - referralInfo.rewardMonthsUsed}</Text>
-                  <Text style={styles.statLabel}>à¹€à¸”à¸·à¸­à¸™à¸„à¸‡à¹€à¸«à¸¥à¸·à¸­</Text>
+                <View
+                  style={[
+                    styles.statBox,
+                    { borderLeftWidth: 1, borderLeftColor: COLORS.border },
+                  ]}>
+                  <Text style={styles.statNum}>
+                    {referralInfo.rewardMonthsEarned -
+                      referralInfo.rewardMonthsUsed}
+                  </Text>
+                  <Text style={styles.statLabel}>เดือนคงเหลือ</Text>
                 </View>
               </View>
             </Card>
@@ -383,9 +537,14 @@ export default function ShopScreen() {
         )}
 
         {/* Restore */}
-        <TouchableOpacity style={styles.restoreButton} onPress={handleRestore} disabled={isPurchasing}>
+        <TouchableOpacity
+          style={styles.restoreButton}
+          onPress={handleRestore}
+          disabled={isPurchasing}>
           <Ionicons name="refresh-outline" size={16} color={colors.primary} />
-          <Text style={[styles.restoreText, { color: colors.primary }]}>à¸à¸¹à¹‰à¸„à¸·à¸™à¸£à¸²à¸¢à¸à¸²à¸£à¸‹à¸·à¹‰à¸­</Text>
+          <Text style={[styles.restoreText, { color: colors.primary }]}>
+            กู้คืนรายการซื้อ
+          </Text>
         </TouchableOpacity>
 
         <View style={{ height: SPACING.xxl }} />
@@ -395,7 +554,7 @@ export default function ShopScreen() {
         <View style={styles.purchasingOverlay}>
           <View style={styles.purchasingBox}>
             <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.purchasingText}>à¸à¸³à¸¥à¸±à¸‡à¸”à¸³à¹€à¸™à¸´à¸™à¸à¸²à¸£...</Text>
+            <Text style={styles.purchasingText}>กำลังดำเนินการ...</Text>
           </View>
         </View>
       )}
@@ -425,31 +584,60 @@ interface NursePlanCardProps {
   billingCycle: BillingCycle;
 }
 
-function NursePlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle }: NursePlanCardProps) {
+function NursePlanCard({
+  plan,
+  price,
+  savings,
+  isCurrent,
+  onBuy,
+  billingCycle,
+}: NursePlanCardProps) {
   const isFree = plan === 'free';
   const features = isFree
-    ? ['à¹‚à¸žà¸ªà¸•à¹Œ 2 à¸„à¸£à¸±à¹‰à¸‡/à¸§à¸±à¸™', 'à¹‚à¸žà¸ªà¸•à¹Œà¸­à¸¢à¸¹à¹ˆ 3 à¸§à¸±à¸™', 'à¸ªà¸¡à¸±à¸„à¸£à¸‡à¸²à¸™ 3 à¸„à¸£à¸±à¹‰à¸‡/à¸§à¸±à¸™']
-    : ['à¹‚à¸žà¸ªà¸•à¹Œà¹„à¸¡à¹ˆà¸ˆà¸³à¸à¸±à¸”', 'à¹‚à¸žà¸ªà¸•à¹Œà¸­à¸¢à¸¹à¹ˆ 30 à¸§à¸±à¸™', 'à¸ªà¸¡à¸±à¸„à¸£à¸‡à¸²à¸™à¹„à¸¡à¹ˆà¸ˆà¸³à¸à¸±à¸”', 'ðŸŽ à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™à¸Ÿà¸£à¸µ 1 à¸„à¸£à¸±à¹‰à¸‡/à¹€à¸”à¸·à¸­à¸™'];
-
+    ? ['โพสต์ 2 ครั้ง/วัน', 'โพสต์อยู่ 3 วัน', 'สมัครงาน 3 ครั้ง/วัน']
+    : [
+        'โพสต์ไม่จำกัด',
+        'โพสต์อยู่ 30 วัน',
+        'สมัครงานไม่จำกัด',
+        '🎁 ปุ่มด่วนฟรี 1 ครั้ง/เดือน',
+      ];
   const color = isFree ? '#888' : '#FF8F00';
 
   return (
-    <Card style={StyleSheet.flatten([styles.planCard, isCurrent && { borderColor: color, borderWidth: 2 }])}>      
+    <Card
+      style={StyleSheet.flatten([
+        styles.planCard,
+        isCurrent ? { borderColor: color, borderWidth: 2 } : undefined,
+      ])}>
       <View style={styles.planCardHeader}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[styles.planCardName, { color }]}>
-            {isFree ? 'ðŸ†“ à¸Ÿà¸£à¸µ' : 'ðŸ‘‘ Nurse Pro'}
+            {isFree ? '🆓 ฟรี' : '👑 Nurse Pro'}
           </Text>
           {!isFree && price !== undefined && (
             <Text style={styles.planCardPrice}>
-              à¸¿{price}
-              <Text style={styles.planCardPriceUnit}>/{billingCycle === 'annual' ? 'à¸›à¸µ' : 'à¹€à¸”à¸·à¸­à¸™'}</Text>
-              {billingCycle === 'monthly' && <Text style={styles.planCardPriceUnit}> (à¸¿{PRICING.nursePro}/à¹€à¸”à¸·à¸­à¸™)</Text>}
+              ฿{price}
+              <Text style={styles.planCardPriceUnit}>
+                /{billingCycle === 'annual' ? 'ปี' : 'เดือน'}
+              </Text>
+              {billingCycle === 'monthly' && (
+                <Text style={styles.planCardPriceUnit}>
+                  {' '}(฿{PRICING.nursePro}/เดือน)
+                </Text>
+              )}
             </Text>
           )}
         </View>
-        {savings && savings > 0 ? <View style={styles.savingsTag}><Text style={styles.savingsTagText}>à¸›à¸£à¸°à¸«à¸¢à¸±à¸” {savings}%</Text></View> : null}
-        {isCurrent && <View style={styles.currentTag}><Text style={styles.currentTagText}>à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆ</Text></View>}
+        {savings && savings > 0 ? (
+          <View style={styles.savingsTag}>
+            <Text style={styles.savingsTagText}>ประหยัด {savings}%</Text>
+          </View>
+        ) : null}
+        {isCurrent && (
+          <View style={styles.currentTag}>
+            <Text style={styles.currentTagText}>ใช้งานอยู่</Text>
+          </View>
+        )}
       </View>
       <View style={styles.featureList}>
         {features.map((f, i) => (
@@ -460,8 +648,10 @@ function NursePlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle }:
         ))}
       </View>
       {!isCurrent && !isFree && (
-        <TouchableOpacity style={[styles.planBuyBtn, { backgroundColor: color }]} onPress={onBuy}>
-          <Text style={styles.planBuyBtnText}>à¸­à¸±à¸žà¹€à¸à¸£à¸”</Text>
+        <TouchableOpacity
+          style={[styles.planBuyBtn, { backgroundColor: color }]}
+          onPress={onBuy}>
+          <Text style={styles.planBuyBtnText}>อัพเกรด</Text>
         </TouchableOpacity>
       )}
     </Card>
@@ -477,22 +667,42 @@ interface HospitalPlanCardProps {
   billingCycle: BillingCycle;
 }
 
-function HospitalPlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle }: HospitalPlanCardProps) {
-  const planMeta: Record<string, { label: string; features: string[]; color: string }> = {
+function HospitalPlanCard({
+  plan,
+  price,
+  savings,
+  isCurrent,
+  onBuy,
+  billingCycle,
+}: HospitalPlanCardProps) {
+  const planMeta: Record<
+    string,
+    { label: string; features: string[]; color: string }
+  > = {
     hospital_starter: {
-      label: 'ðŸ¥ Starter',
+      label: '🏥 Starter',
       color: '#0288D1',
-      features: ['5 à¹‚à¸žà¸ªà¸•à¹Œ/à¹€à¸”à¸·à¸­à¸™', 'à¹‚à¸žà¸ªà¸•à¹Œà¸­à¸¢à¸¹à¹ˆ 30 à¸§à¸±à¸™', 'à¸„à¹‰à¸™à¸«à¸²à¸žà¸¢à¸²à¸šà¸²à¸¥'],
+      features: ['5 โพสต์/เดือน', 'โพสต์อยู่ 30 วัน', 'ค้นหาพยาบาล'],
     },
     hospital_pro: {
-      label: 'ðŸ¥ Professional',
+      label: '🏥 Professional',
       color: '#6A1B9A',
-      features: ['à¹‚à¸žà¸ªà¸•à¹Œà¹„à¸¡à¹ˆà¸ˆà¸³à¸à¸±à¸”', 'à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™à¸Ÿà¸£à¸µ 3 à¸„à¸£à¸±à¹‰à¸‡/à¹€à¸”à¸·à¸­à¸™', 'à¹à¸ªà¸”à¸‡à¹‚à¸¥à¹‚à¸à¹‰à¹‚à¸£à¸‡à¸žà¸¢à¸²à¸šà¸²à¸¥', 'à¹à¸”à¸Šà¸šà¸­à¸£à¹Œà¸”à¸§à¸´à¹€à¸„à¸£à¸²à¸°à¸«à¹Œ'],
+      features: [
+        'โพสต์ไม่จำกัด',
+        'ปุ่มด่วนฟรี 3 ครั้ง/เดือน',
+        'แสดงโลโก้โรงพยาบาล',
+        'แดชบอร์ดวิเคราะห์',
+      ],
     },
     hospital_enterprise: {
-      label: 'ðŸ¢ Enterprise',
+      label: '🏢 Enterprise',
       color: '#1B5E20',
-      features: ['à¸—à¸¸à¸à¸­à¸¢à¹ˆà¸²à¸‡à¹ƒà¸™ Pro', 'à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™à¸Ÿà¸£à¸µ 10 à¸„à¸£à¸±à¹‰à¸‡/à¹€à¸”à¸·à¸­à¸™', 'Multi-account support', 'Priority Support'],
+      features: [
+        'ทุกอย่างใน Pro',
+        'ปุ่มด่วนฟรี 10 ครั้ง/เดือน',
+        'Multi-account support',
+        'Priority Support',
+      ],
     },
   };
 
@@ -500,17 +710,31 @@ function HospitalPlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle
   const color = meta?.color || '#444';
 
   return (
-    <Card style={StyleSheet.flatten([styles.planCard, isCurrent && { borderColor: color, borderWidth: 2 }])}>
+    <Card
+      style={StyleSheet.flatten([
+        styles.planCard,
+        isCurrent ? { borderColor: color, borderWidth: 2 } : undefined,
+      ])}>
       <View style={styles.planCardHeader}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[styles.planCardName, { color }]}>{meta?.label}</Text>
           <Text style={styles.planCardPrice}>
-            à¸¿{price}
-            <Text style={styles.planCardPriceUnit}>/{billingCycle === 'annual' ? 'à¸›à¸µ' : 'à¹€à¸”à¸·à¸­à¸™'}</Text>
+            ฿{price}
+            <Text style={styles.planCardPriceUnit}>
+              /{billingCycle === 'annual' ? 'ปี' : 'เดือน'}
+            </Text>
           </Text>
         </View>
-        {savings > 0 && <View style={styles.savingsTag}><Text style={styles.savingsTagText}>à¸›à¸£à¸°à¸«à¸¢à¸±à¸” {savings}%</Text></View>}
-        {isCurrent && <View style={styles.currentTag}><Text style={styles.currentTagText}>à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆ</Text></View>}
+        {savings > 0 && (
+          <View style={styles.savingsTag}>
+            <Text style={styles.savingsTagText}>ประหยัด {savings}%</Text>
+          </View>
+        )}
+        {isCurrent && (
+          <View style={styles.currentTag}>
+            <Text style={styles.currentTagText}>ใช้งานอยู่</Text>
+          </View>
+        )}
       </View>
       <View style={styles.featureList}>
         {(meta?.features || []).map((f, i) => (
@@ -521,8 +745,10 @@ function HospitalPlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle
         ))}
       </View>
       {!isCurrent && (
-        <TouchableOpacity style={[styles.planBuyBtn, { backgroundColor: color }]} onPress={onBuy}>
-          <Text style={styles.planBuyBtnText}>à¹€à¸¥à¸·à¸­à¸à¹à¸œà¸™à¸™à¸µà¹‰</Text>
+        <TouchableOpacity
+          style={[styles.planBuyBtn, { backgroundColor: color }]}
+          onPress={onBuy}>
+          <Text style={styles.planBuyBtnText}>เลือกแผนนี้</Text>
         </TouchableOpacity>
       )}
     </Card>
@@ -545,8 +771,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  backButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: FONT_SIZES.lg, fontWeight: '700', color: COLORS.text },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
   content: { flex: 1, padding: SPACING.md },
 
   // Current Plan
@@ -556,8 +791,16 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: BORDER_RADIUS.md,
   },
-  planBannerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  planLabel: { fontSize: FONT_SIZES.xs, color: COLORS.textSecondary, marginBottom: 2 },
+  planBannerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  planLabel: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
   planName: { fontSize: FONT_SIZES.lg, fontWeight: '700' },
   expiryBadge: {
     backgroundColor: '#FFF3E0',
@@ -565,7 +808,11 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: BORDER_RADIUS.full,
   },
-  expiryText: { fontSize: FONT_SIZES.xs, color: '#E65100', fontWeight: '600' },
+  expiryText: {
+    fontSize: FONT_SIZES.xs,
+    color: '#E65100',
+    fontWeight: '600',
+  },
 
   // Toggle
   toggleRow: {
@@ -585,7 +832,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   toggleActive: { backgroundColor: COLORS.white, ...SHADOWS.small },
-  toggleText: { fontSize: FONT_SIZES.sm, color: COLORS.textSecondary, fontWeight: '500' },
+  toggleText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
   toggleActiveText: { color: COLORS.text, fontWeight: '700' },
   savingsPill: {
     backgroundColor: '#E8F5E9',
@@ -593,7 +844,11 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     borderRadius: BORDER_RADIUS.full,
   },
-  savingsPillText: { fontSize: FONT_SIZES.xs, color: '#2E7D32', fontWeight: '600' },
+  savingsPillText: {
+    fontSize: FONT_SIZES.xs,
+    color: '#2E7D32',
+    fontWeight: '600',
+  },
 
   // Section Title
   sectionTitle: {
@@ -619,38 +874,74 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   planCardName: { fontSize: FONT_SIZES.lg, fontWeight: '700' },
-  planCardPrice: { fontSize: FONT_SIZES.md, fontWeight: '700', color: COLORS.text, marginTop: 2 },
-  planCardPriceUnit: { fontSize: FONT_SIZES.sm, fontWeight: '400', color: COLORS.textSecondary },
+  planCardPrice: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginTop: 2,
+  },
+  planCardPriceUnit: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '400',
+    color: COLORS.textSecondary,
+  },
   savingsTag: {
     backgroundColor: '#E8F5E9',
     paddingHorizontal: SPACING.sm,
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.full,
+    marginLeft: SPACING.xs,
   },
-  savingsTagText: { fontSize: FONT_SIZES.xs, color: '#2E7D32', fontWeight: '700' },
+  savingsTagText: {
+    fontSize: FONT_SIZES.xs,
+    color: '#2E7D32',
+    fontWeight: '700',
+  },
   currentTag: {
     backgroundColor: '#E3F2FD',
     paddingHorizontal: SPACING.sm,
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.full,
+    marginLeft: SPACING.xs,
   },
-  currentTagText: { fontSize: FONT_SIZES.xs, color: COLORS.primary, fontWeight: '700' },
+  currentTagText: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
   featureList: { marginBottom: SPACING.md },
-  featureRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: SPACING.xs },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: SPACING.xs,
+  },
   featureText: { fontSize: FONT_SIZES.sm, color: COLORS.text },
   planBuyBtn: {
     borderRadius: BORDER_RADIUS.md,
     paddingVertical: SPACING.sm,
     alignItems: 'center',
   },
-  planBuyBtnText: { fontSize: FONT_SIZES.md, fontWeight: '700', color: '#fff' },
+  planBuyBtnText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: '#fff',
+  },
 
-  // Add-on Item Card
+  // Add-on cards
   itemCard: { marginBottom: SPACING.sm, padding: SPACING.md },
-  itemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   itemInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   itemIcon: { fontSize: 26, marginRight: SPACING.md },
-  itemTitle: { fontSize: FONT_SIZES.md, fontWeight: '600', color: COLORS.text },
+  itemTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
   itemDesc: { fontSize: FONT_SIZES.sm, color: COLORS.textSecondary },
   buyButton: {
     backgroundColor: COLORS.primary,
@@ -658,9 +949,13 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.md,
   },
-  buyButtonText: { fontSize: FONT_SIZES.md, fontWeight: '700', color: '#fff' },
+  buyButtonText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: '#fff',
+  },
 
-  // Referral Card
+  // Referral
   referralCard: {
     marginBottom: SPACING.md,
     padding: SPACING.md,
@@ -669,8 +964,18 @@ const styles = StyleSheet.create({
     borderColor: '#FFD54F',
     borderRadius: BORDER_RADIUS.md,
   },
-  referralTitle: { fontSize: FONT_SIZES.md, fontWeight: '700', color: '#E65100', marginBottom: 4 },
-  referralDesc: { fontSize: FONT_SIZES.sm, color: COLORS.textSecondary, marginBottom: SPACING.md, lineHeight: 20 },
+  referralTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: '#E65100',
+    marginBottom: 4,
+  },
+  referralDesc: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.md,
+    lineHeight: 20,
+  },
   referralCodeBox: {
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
@@ -679,14 +984,44 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FFD54F',
   },
-  referralCodeLabel: { fontSize: FONT_SIZES.xs, color: COLORS.textMuted, marginBottom: 4 },
-  referralCodeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  referralCode: { fontSize: FONT_SIZES.lg, fontWeight: '800', color: COLORS.text, letterSpacing: 2 },
+  referralCodeLabel: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textMuted,
+    marginBottom: 4,
+  },
+  referralCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  referralCode: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '800',
+    color: COLORS.text,
+    letterSpacing: 2,
+  },
   copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  copyText: { fontSize: FONT_SIZES.sm, color: COLORS.primary, fontWeight: '600' },
-  referralStats: { flexDirection: 'row', backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.md, overflow: 'hidden' },
-  statBox: { flex: 1, alignItems: 'center', paddingVertical: SPACING.sm },
-  statNum: { fontSize: FONT_SIZES.xl, fontWeight: '800', color: COLORS.text },
+  copyText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  referralStats: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.md,
+    overflow: 'hidden',
+  },
+  statBox: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+  },
+  statNum: {
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
   statLabel: { fontSize: FONT_SIZES.xs, color: COLORS.textSecondary },
 
   // Restore
@@ -700,7 +1035,7 @@ const styles = StyleSheet.create({
   },
   restoreText: { fontSize: FONT_SIZES.sm, fontWeight: '500' },
 
-  // Purchasing Overlay
+  // Purchasing overlay
   purchasingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -716,5 +1051,9 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
     ...SHADOWS.medium,
   },
-  purchasingText: { fontSize: FONT_SIZES.md, color: COLORS.text, fontWeight: '500' },
+  purchasingText: {
+    fontSize: FONT_SIZES.md,
+    color: COLORS.text,
+    fontWeight: '500',
+  },
 });

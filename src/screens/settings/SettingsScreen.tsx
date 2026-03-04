@@ -264,7 +264,7 @@ export default function SettingsScreen() {
             return (
               <View style={[
                 styles.subscriptionCard,
-                subscription.plan === 'premium' && styles.subscriptionCardPremium
+                subscription.plan !== 'free' && styles.subscriptionCardPremium
               ]}>
                 <View style={styles.subscriptionInfo}>
                   <Text style={styles.subscriptionPlan}>{status.planName}</Text>
@@ -276,21 +276,7 @@ export default function SettingsScreen() {
                 {subscription.plan === 'free' ? (
                   <TouchableOpacity
                     style={styles.upgradeBtn}
-                    onPress={() => {
-                      Alert.alert(
-                        '👑 อัพเกรดเป็น Premium',
-                        '฿199/เดือน\n\n✓ โพสต์ได้ไม่จำกัด\n✓ โพสต์อยู่ 30 วัน\n✓ ไม่มีโฆษณา',
-                        [
-                          { text: 'ยกเลิก', style: 'cancel' },
-                          { 
-                            text: 'อัพเกรด', 
-                            onPress: () => {
-                              Alert.alert('💳 ชำระเงิน', 'ระบบชำระเงินกำลังพัฒนา\nติดต่อ admin เพื่ออัพเกรด');
-                            }
-                          },
-                        ]
-                      );
-                    }}
+                    onPress={() => (navigation as any).navigate('Shop')}
                   >
                     <Ionicons name="star" size={16} color="#FFD700" />
                     <Text style={styles.upgradeBtnText}>อัพเกรด</Text>
@@ -309,7 +295,7 @@ export default function SettingsScreen() {
             <View style={styles.planDetailRow}>
               <Text style={styles.planDetailLabel}>โพสต์ต่อวัน</Text>
               <Text style={styles.planDetailValue}>
-                {subscription.plan === 'premium' ? 'ไม่จำกัด' : '2 ครั้ง'}
+                {subscription.plan === 'free' ? '2 ครั้ง' : 'ไม่จำกัด'}
               </Text>
             </View>
             <View style={styles.planDetailRow}>
