@@ -153,6 +153,9 @@ export default function MapPickerModal({
           ref={mapRef}
           style={StyleSheet.absoluteFill}
           provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+          loadingEnabled
+          loadingIndicatorColor={colors.primary}
+          moveOnMarkerPress={false}
           initialRegion={initRegion}
           onRegionChange={() => setIsDragging(true)}
           onRegionChangeComplete={handleRegionChangeComplete}

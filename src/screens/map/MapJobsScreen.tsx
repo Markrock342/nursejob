@@ -241,6 +241,10 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
         showsMyLocationButton={false}
         showsScale={false}
         showsCompass={false}
+        moveOnMarkerPress={false}
+        loadingEnabled
+        loadingIndicatorColor={COLORS.primary}
+        loadingBackgroundColor={colors.background}
         onPress={() => setSelectedJob(null)}
       >
         {jobs.map(job => {
