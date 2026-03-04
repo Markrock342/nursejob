@@ -9,7 +9,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   RefreshControl,
   Modal,
   TextInput,
@@ -24,6 +23,7 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Loading, EmptyState, Avatar, KittenButton as Button } from '../../components/common';
+import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import {
   getHospitalReviews,
   createReview,
@@ -107,6 +107,8 @@ export default function ReviewsScreen() {
   const [newCons, setNewCons] = useState('');
   const [wouldRecommend, setWouldRecommend] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [alert, setAlert] = useState<AlertState>(initialAlertState);
+  const closeAlert = () => setAlert(initialAlertState);
 
   const loadData = useCallback(async () => {
     if (!hospitalId) return;
@@ -145,7 +147,7 @@ export default function ReviewsScreen() {
   const handleWriteReview = () => {
     requireAuth(() => {
       if (userReview) {
-        Alert.alert('แจ้งเตือน', 'คุณได้รีวิวโรงพยาบาลนี้แล้ว');
+        setAlert({ ...createAlert.info('แจ้งเตือน', 'คุณได้รีวิวโรงพยาบาลนี้แล้ว') } as AlertState);
         return;
       }
       setShowWriteModal(true);
@@ -156,11 +158,11 @@ export default function ReviewsScreen() {
     if (!user?.uid || !hospitalId) return;
     
     if (!newTitle.trim()) {
-      Alert.alert('กรุณากรอกข้อมูล', 'กรุณาใส่หัวข้อรีวิว');
+      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณาใส่หัวข้อรีวิว') } as AlertState);
       return;
     }
     if (!newContent.trim()) {
-      Alert.alert('กรุณากรอกข้อมูล', 'กรุณาใส่เนื้อหารีวิว');
+      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณาใส่เนื้อหารีวิว') } as AlertState);
       return;
     }
 
@@ -185,9 +187,9 @@ export default function ReviewsScreen() {
       setShowWriteModal(false);
       resetForm();
       loadData();
-      Alert.alert('สำเร็จ', 'ขอบคุณสำหรับรีวิวของคุณ');
+      setAlert({ ...createAlert.success('สำเร็จ', 'ขอบคุณสำหรับรีวิวของคุณ') } as AlertState);
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถส่งรีวิวได้');
+      setAlert({ ...createAlert.error('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถส่งรีวิวได้') } as AlertState);
     } finally {
       setIsSubmitting(false);
     }
@@ -297,7 +299,7 @@ export default function ReviewsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+      <CustomAlert {...alert} onClose={closeAlert} />}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />

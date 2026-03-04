@@ -45,8 +45,6 @@ const REDIRECT_URI = makeRedirectUri({
   // ใน standalone build → จะได้ nursego://oauth2redirect/google
 });
 
-console.log('[Google OAuth] redirectUri:', REDIRECT_URI);
-
 const GOOGLE_AUTH_CONFIG = {
   clientId: GOOGLE_WEB_CLIENT_ID,
   androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,

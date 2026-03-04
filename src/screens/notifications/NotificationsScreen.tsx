@@ -25,6 +25,7 @@ import {
   NotificationType,
 } from '../../services/notificationsService';
 import { formatRelativeTime } from '../../utils/helpers';
+import { getJobById } from '../../services/jobService';
 
 // ============================================
 // Helper Functions
@@ -157,7 +158,14 @@ export default function NotificationsScreen() {
         conversationId: data.conversationId,
       });
     } else if ((type === 'new_job' || type === 'application_accepted' || type === 'application_rejected') && data?.jobId) {
-      Alert.alert('งาน', `Job ID: ${data.jobId}`);
+      try {
+        const job = await getJobById(data.jobId);
+        if (job) {
+          (navigation as any).navigate('JobDetail', { job });
+        }
+      } catch (e) {
+        // job may have been deleted, skip navigation
+      }
     } else if (type === 'new_applicant' && data?.applicationId) {
       (navigation as any).navigate('Applicants');
     }

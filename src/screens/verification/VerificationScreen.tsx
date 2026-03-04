@@ -11,7 +11,6 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +35,7 @@ import {
   VerificationRequest,
 } from '../../services/verificationService';
 import { CalendarPicker } from '../../components/common';
+import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 
 interface Props {
   navigation: any;
@@ -63,6 +63,8 @@ export default function VerificationScreen({ navigation }: Props) {
   const [showLicenseTypeModal, setShowLicenseTypeModal] = useState(false);
   const [showImagePickerModal, setShowImagePickerModal] = useState(false);
   const [currentImageType, setCurrentImageType] = useState<'license' | 'idcard' | 'selfie'>('license');
+  const [alert, setAlert] = useState<AlertState>(initialAlertState);
+  const closeAlert = () => setAlert(initialAlertState);
 
   useEffect(() => {
     if (user?.uid && isInitialized) {
@@ -112,7 +114,7 @@ export default function VerificationScreen({ navigation }: Props) {
         }
       }
     } catch (error: any) {
-      Alert.alert('ข้อผิดพลาด', error.message);
+      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
     }
   };
 
@@ -134,7 +136,7 @@ export default function VerificationScreen({ navigation }: Props) {
         }
       }
     } catch (error: any) {
-      Alert.alert('ข้อผิดพลาด', error.message);
+      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
     }
   };
 
@@ -145,7 +147,7 @@ export default function VerificationScreen({ navigation }: Props) {
         setLicenseDocUri(doc.uri);
       }
     } catch (error: any) {
-      Alert.alert('ข้อผิดพลาด', error.message);
+      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
     }
   };
 
@@ -154,11 +156,11 @@ export default function VerificationScreen({ navigation }: Props) {
     
     // Validation
     if (!licenseNumber.trim()) {
-      Alert.alert('ข้อผิดพลาด', 'กรุณากรอกเลขที่ใบอนุญาต');
+      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณากรอกเลขที่ใบอนุญาต') } as AlertState);
       return;
     }
     if (!licenseDocUri) {
-      Alert.alert('ข้อผิดพลาด', 'กรุณาอัพโหลดรูปใบประกอบวิชาชีพ');
+      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณาอัพโหลดรูปใบประกอบวิชาชีพ') } as AlertState);
       return;
     }
     
@@ -194,13 +196,12 @@ export default function VerificationScreen({ navigation }: Props) {
 
       await submitVerificationRequest(verificationPayload);
       
-      Alert.alert(
-        '✅ ส่งคำขอสำเร็จ',
-        'คำขอยืนยันตัวตนของคุณถูกส่งแล้ว ทีมงานจะตรวจสอบภายใน 1-3 วันทำการ',
-        [{ text: 'ตกลง', onPress: () => navigation.goBack() }]
-      );
+      setAlert({
+        ...createAlert.success('ส่งคำขอสำเร็จ', 'คำขอยืนยันตัวตนของคุณถูกส่งแล้ว ทีมงานจะตรวจสอบภายใน 1-3 วันทำการ'),
+        onConfirm: () => { closeAlert(); navigation.goBack(); },
+      } as AlertState);
     } catch (error: any) {
-      Alert.alert('ข้อผิดพลาด', error.message);
+      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
     } finally {
       setIsSubmitting(false);
     }
@@ -320,6 +321,7 @@ export default function VerificationScreen({ navigation }: Props) {
   // Show form
   return (
     <SafeAreaView style={styles.container}>
+      <CustomAlert {...alert} onClose={closeAlert} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />

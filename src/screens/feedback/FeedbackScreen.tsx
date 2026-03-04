@@ -10,7 +10,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +20,7 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { KittenButton as Button, Card } from '../../components/common';
+import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import {
   createFeedback,
   getUserFeedback,
@@ -45,6 +45,8 @@ export default function FeedbackScreen() {
   const [canSubmit, setCanSubmit] = useState(true);
   const [myFeedback, setMyFeedback] = useState<AppFeedback[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [alert, setAlert] = useState<AlertState>(initialAlertState);
+  const closeAlert = () => setAlert(initialAlertState);
 
   useEffect(() => {
     if (user?.uid) {
@@ -67,17 +69,17 @@ export default function FeedbackScreen() {
 
   const handleSubmit = async () => {
     if (!user) {
-      Alert.alert('กรุณาเข้าสู่ระบบ', 'คุณต้องเข้าสู่ระบบก่อนส่ง feedback');
+      setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', 'คุณต้องเข้าสู่ระบบก่อนส่ง feedback') } as AlertState);
       return;
     }
 
     if (!title.trim()) {
-      Alert.alert('กรุณากรอกหัวข้อ');
+      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณากรอกหัวข้อ') } as AlertState);
       return;
     }
 
     if (!message.trim()) {
-      Alert.alert('กรุณากรอกข้อความ');
+      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณากรอกข้อความ') } as AlertState);
       return;
     }
 
@@ -95,13 +97,12 @@ export default function FeedbackScreen() {
         platform: Platform.OS as 'ios' | 'android' | 'web',
       });
 
-      Alert.alert(
-        '✅ ส่ง Feedback สำเร็จ',
-        'ขอบคุณสำหรับความคิดเห็นของคุณ เราจะนำไปปรับปรุงแอพให้ดียิ่งขึ้น',
-        [{ text: 'ตกลง', onPress: () => navigation.goBack() }]
-      );
+      setAlert({
+        ...createAlert.success('ส่ง Feedback สำเร็จ', 'ขอบคุณสำหรับความคิดเห็นของคุณ เราจะนำไปปรับปรุงแอพให้ดียิ่งขึ้น'),
+        onConfirm: () => { closeAlert(); navigation.goBack(); },
+      } as AlertState);
     } catch (error: any) {
-      Alert.alert('ข้อผิดพลาด', error.message);
+      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
     } finally {
       setIsSubmitting(false);
     }
@@ -150,6 +151,7 @@ export default function FeedbackScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <CustomAlert {...alert} onClose={closeAlert} />
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
