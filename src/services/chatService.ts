@@ -193,7 +193,13 @@ export const subscribeToConversations = (
     });
     
     callback(conversations);
-  }, (error) => {
+  }, (error: any) => {
+    if (error?.code === 'permission-denied') {
+      // Silently ignore — triggered when auth token not yet active (cached user race)
+      console.warn('[subscribeToConversations] permission-denied, will retry on next auth');
+      callback([]);
+      return;
+    }
     console.error('Error subscribing to conversations:', error);
     callback([]); // Return empty array on error
   });

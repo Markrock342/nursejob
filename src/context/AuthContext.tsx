@@ -189,7 +189,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Online Status via AppState
   // ============================================
   useEffect(() => {
-    if (!user?.uid) return;
+    // Wait for real Firebase auth (not cached user) before writing to Firestore
+    if (!user?.uid || !isInitialized) return;
 
     // Mark online when this effect runs (user just logged in or re-mounted)
     updateOnlineStatus(user.uid, true);
@@ -210,7 +211,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       updateOnlineStatus(user.uid, false);
       subscription.remove();
     };
-  }, [user?.uid]);
+  }, [user?.uid, isInitialized]);
 
   // Load cached user for faster startup
   const loadCachedUser = async () => {

@@ -122,7 +122,7 @@ interface Props {
 }
 
 export function ChatNotificationProvider({ children, navigation }: Props) {
-  const { user } = useAuth();
+  const { user, isInitialized } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [showToast, setShowToast] = useState(false);
@@ -182,7 +182,8 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
 
   // Subscribe to all conversations
   useEffect(() => {
-    if (!user?.uid) {
+    // Wait for real Firebase auth token before subscribing
+    if (!user?.uid || !isInitialized) {
       setUnreadCount(0);
       return;
     }
@@ -235,7 +236,7 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
     });
 
     return () => unsubscribe();
-  }, [user?.uid, activeConversationId, playSound]);
+  }, [user?.uid, isInitialized, activeConversationId, playSound]);
 
   // Handle toast press - navigate to chat
   const handleToastPress = useCallback(() => {

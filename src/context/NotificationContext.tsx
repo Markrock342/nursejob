@@ -36,20 +36,21 @@ interface NotificationProviderProps {
 }
 
 export function NotificationProvider({ children }: NotificationProviderProps) {
-  const { user } = useAuth();
+  const { user, isInitialized } = useAuth();
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<any | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
 
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const notificationListener = useRef<any>(null);
+  const responseListener = useRef<any>(null);
 
   // Register for push notifications when user logs in
+  // Wait for isInitialized (real Firebase auth) before saving push token to Firestore
   useEffect(() => {
-    if (user?.uid) {
+    if (user?.uid && isInitialized) {
       registerForNotifications();
     }
-  }, [user?.uid]);
+  }, [user?.uid, isInitialized]);
 
   // Set up notification listeners
   useEffect(() => {
@@ -76,7 +77,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   }, []);
 
   // Handle notification tap/response
-  const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+  const handleNotificationResponse = (response: any) => {
     const data = response.notification.request.content.data;
     
     // TODO: Navigate based on notification type

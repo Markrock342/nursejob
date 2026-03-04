@@ -138,7 +138,13 @@ export function subscribeToNotifications(
     notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     
     callback(notifications);
-  }, (error) => {
+  }, (error: any) => {
+    if (error?.code === 'permission-denied') {
+      // Silently ignore — triggered when auth token not yet active (cached user race)
+      console.warn('[subscribeToNotifications] permission-denied, will retry on next auth');
+      callback([]);
+      return;
+    }
     console.error('Notification subscription error:', error);
     callback([]);
   });
