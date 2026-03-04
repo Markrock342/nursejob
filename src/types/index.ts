@@ -23,52 +23,184 @@ export interface PostShift {
 // ============================================
 // SUBSCRIPTION TYPES
 // ============================================
-export type SubscriptionPlan = 'free' | 'premium';
+
+// B2C = nurse / B2B = hospital roles
+export type SubscriptionPlan =
+  | 'free'
+  | 'nurse_pro'
+  | 'hospital_starter'
+  | 'hospital_pro'
+  | 'hospital_enterprise';
+
+// backward compat alias
+export type LegacyPlan = 'premium';
+
+export type BillingCycle = 'monthly' | 'annual';
 
 export interface Subscription {
   plan: SubscriptionPlan;
-  expiresAt?: Date | Timestamp | null; // null = never expires (for premium)
+  billingCycle?: BillingCycle;
+  expiresAt?: Date | Timestamp | null;
   startedAt?: Date;
-  // Limits for free plan
+  // Post tracking (free / starter)
   postsToday?: number;
-  lastPostDate?: string; // YYYY-MM-DD format
-  // Free urgent usage (1 free per account)
+  lastPostDate?: string; // YYYY-MM-DD
+  // Urgent bonus — resets monthly for Pro+
   freeUrgentUsed?: boolean;
+  freeUrgentMonthReset?: string; // YYYY-MM
 }
 
-// Pricing Constants (in THB)
+// ============================================
+// PRICING CONSTANTS (THB)
+// ============================================
 export const PRICING = {
-  subscription: 89,       // Premium subscription per month
-  extendPost: 19,         // Extend post 1 day
-  extraPost: 19,          // Additional post beyond daily limit
-  urgentPost: 49,         // Make post urgent
+  // ── B2C: พยาบาล ───────────────────────────
+  nursePro: 59,
+  nurseProAnnual: 590,           // ประหยัด ฿118 (2 เดือนฟรี)
+
+  // ── B2B: โรงพยาบาล / เอเจนซี่ ────────────
+  hospitalStarter: 299,
+  hospitalStarterAnnual: 2990,   // ประหยัด ฿598
+  hospitalPro: 799,
+  hospitalProAnnual: 7990,       // ประหยัด ฿1,598
+  hospitalEnterprise: 1799,
+  hospitalEnterpriseAnnual: 17990, // ประหยัด ฿3,598
+
+  // ── Add-ons (ทุก role) ────────────────────
+  urgentPost: 49,
+  extendPost: 19,
+  extraPost: 29,
+
+  // ── Legacy (backward compat) ──────────────
+  subscription: 59,  // was 89 — mapped to nursePro now
 } as const;
 
+// ============================================
+// PLAN DEFINITIONS
+// ============================================
 export const SUBSCRIPTION_PLANS = {
+  // ─── FREE ────────────────────────────────
   free: {
     name: 'ฟรี',
+    audience: 'both' as const,
     price: 0,
-    postExpiryDays: 3,      // โพสต์หมดอายุใน 3 วัน
-    maxPostsPerDay: 2,      // โพสต์ได้ 2 ครั้งต่อวัน
+    annualPrice: 0,
+    postExpiryDays: 3,
+    maxPostsPerDay: 2,
+    maxApplyPerDay: 3,
+    urgentPerMonth: 0,
     features: [
+      'สมัครงาน 3 ครั้ง/วัน',
       'โพสต์ได้ 2 ครั้ง/วัน',
       'โพสต์อยู่ 3 วัน',
       'ปุ่มด่วน ฿49/ครั้ง',
     ],
   },
-  premium: {
-    name: 'Premium',
-    price: 89,              // ลดจาก 199 เป็น 89 บาท/เดือน
-    postExpiryDays: 30,     // โพสต์อยู่ 30 วัน
-    maxPostsPerDay: null,   // ไม่จำกัด
+
+  // ─── B2C: NURSE PRO ───────────────────────
+  nurse_pro: {
+    name: 'Nurse Pro',
+    audience: 'nurse' as const,
+    price: 59,
+    annualPrice: 590,
+    postExpiryDays: 30,
+    maxPostsPerDay: null,        // ไม่จำกัด
+    maxApplyPerDay: null,
+    urgentPerMonth: 1,           // ปุ่มด่วนฟรี 1 ครั้ง/เดือน
     features: [
-      'โพสต์ได้ไม่จำกัด',
+      'โพสต์ขาย/แลกเวรไม่จำกัด',
+      'สมัครงานไม่จำกัด',
       'โพสต์อยู่ 30 วัน',
-      '🎁 แถมปุ่มด่วนฟรี 1 ครั้ง',
-      'ไม่มีโฆษณา',
+      '⚡ ปุ่มด่วนฟรี 1 ครั้ง/เดือน',
+      '✓ Verified badge บนโปรไฟล์',
+      'แจ้งเตือนงานใกล้บ้าน real-time',
+    ],
+  },
+
+  // ─── B2B: HOSPITAL STARTER ────────────────
+  hospital_starter: {
+    name: 'Starter',
+    audience: 'hospital' as const,
+    price: 299,
+    annualPrice: 2990,
+    postExpiryDays: 30,
+    maxPostsPerDay: null,
+    maxPostsPerMonth: 5,
+    maxApplyPerDay: null,
+    urgentPerMonth: 0,
+    features: [
+      'ลงประกาศงาน 5 ครั้ง/เดือน',
+      'ดูผู้สมัครทั้งหมด',
+      'โพสต์อยู่ 30 วัน',
+      'โปรไฟล์องค์กร',
+      'รับสมัครผ่านแชท',
+    ],
+  },
+
+  // ─── B2B: HOSPITAL PRO ────────────────────
+  hospital_pro: {
+    name: 'Professional',
+    audience: 'hospital' as const,
+    price: 799,
+    annualPrice: 7990,
+    postExpiryDays: 30,
+    maxPostsPerDay: null,
+    maxPostsPerMonth: null,      // ไม่จำกัด
+    maxApplyPerDay: null,
+    urgentPerMonth: 3,           // ปุ่มด่วนฟรี 3 ครั้ง/เดือน
+    features: [
+      'ลงประกาศงานไม่จำกัด',
+      'ดูผู้สมัครทั้งหมด',
+      '⚡ ปุ่มด่วนฟรี 3 ครั้ง/เดือน',
+      'Analytics รายงานสถิติ',
+      '✓ Verified badge องค์กร',
+      'Priority support',
+    ],
+  },
+
+  // ─── B2B: HOSPITAL ENTERPRISE ─────────────
+  hospital_enterprise: {
+    name: 'Enterprise',
+    audience: 'hospital' as const,
+    price: 1799,
+    annualPrice: 17990,
+    postExpiryDays: 30,
+    maxPostsPerDay: null,
+    maxPostsPerMonth: null,
+    maxApplyPerDay: null,
+    urgentPerMonth: 10,
+    features: [
+      'ลงประกาศงานไม่จำกัด',
+      'หลาย account ในองค์กร',
+      '⚡ ปุ่มด่วนฟรี 10 ครั้ง/เดือน',
+      'Branded profile & banner',
+      'Dedicated account manager',
+      'รายงาน analytics แบบ custom',
+      'Priority support 24/7',
     ],
   },
 } as const;
+
+// ============================================
+// REFERRAL TYPES
+// ============================================
+export interface ReferralInfo {
+  referralCode: string;       // เช่น "NURSE-A1B2C3"
+  referredCount: number;      // จำนวนคนที่ใช้ code นี้
+  rewardMonthsEarned: number; // เดือนฟรีที่ได้รับ
+  rewardMonthsUsed: number;
+}
+
+export interface ReferralRecord {
+  id: string;
+  referrerUid: string;
+  refereeUid: string;
+  refereeEmail: string;
+  referralCode: string;
+  createdAt: Date | Timestamp;
+  rewardGranted: boolean;     // true เมื่อ referee upgrade แล้ว
+  rewardGrantedAt?: Date | Timestamp;
+}
 
 // User Types
 export interface UserProfile {

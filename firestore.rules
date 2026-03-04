@@ -239,5 +239,20 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ==========================================
+    // REFERRALS
+    // ==========================================
+    match /referrals/{referralId} {
+      allow read: if isSignedIn() && (
+        resource.data.referrerUid == request.auth.uid ||
+        resource.data.refereeUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() &&
+        request.resource.data.refereeUid == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
   }
 }
