@@ -176,18 +176,21 @@ export default function VerificationScreen({ navigation }: Props) {
       }
       
       // Submit request
-      await submitVerificationRequest({
+      const verificationPayload: Parameters<typeof submitVerificationRequest>[0] = {
         userId: user.uid,
         userName: user.displayName || 'ไม่ระบุชื่อ',
         userEmail: user.email || '',
-        userPhone: user.phone,
         licenseNumber: licenseNumber.trim(),
         licenseType: licenseType as any,
         licenseExpiry,
         licenseDocumentUrl: licenseUrl,
-        idCardUrl,
-        selfieUrl,
-      });
+      };
+      // only include optional fields when they have real values (Firestore rejects undefined)
+      if (user.phone) verificationPayload.userPhone = user.phone;
+      if (idCardUrl) verificationPayload.idCardUrl = idCardUrl;
+      if (selfieUrl) verificationPayload.selfieUrl = selfieUrl;
+
+      await submitVerificationRequest(verificationPayload);
       
       Alert.alert(
         '✅ ส่งคำขอสำเร็จ',

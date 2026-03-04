@@ -4,12 +4,16 @@
 
 import { 
   PhoneAuthProvider,
+  signInWithPhoneNumber,
   signInWithCredential,
   linkWithCredential,
+  ConfirmationResult,
 } from 'firebase/auth';
-import rnFirebaseAuth from '@react-native-firebase/auth';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+
+// Store confirmation result between sendOTP and verifyOTP calls
+let _confirmationResult: ConfirmationResult | null = null;
 
 // ==========================================
 // Phone OTP Functions (Real Firebase Phone Auth)
@@ -47,10 +51,9 @@ export async function sendOTP(
       return { success: false, error: 'เบอร์โทรศัพท์ไม่ถูกต้อง' };
     }
     const formattedPhone = formatPhoneNumber(phoneNumber);
-    // ใช้ @react-native-firebase/auth (native SDK) — ไม่ต้องการ reCAPTCHA verifier
-    // Android ใช้ Play Integrity API อัตโนมัติ
-    const confirmation = await rnFirebaseAuth().signInWithPhoneNumber(formattedPhone);
-    return { success: true, verificationId: confirmation.verificationId, message: 'OTP ถูกส่งแล้ว' };
+    // Web Firebase SDK — works on EAS native builds (Android uses Play Integrity, no reCAPTCHA needed)
+    _confirmationResult = await signInWithPhoneNumber(auth, formattedPhone);
+    return { success: true, verificationId: _confirmationResult.verificationId ?? undefined, message: 'OTP ถูกส่งแล้ว' };
   } catch (error: any) {
     console.error('Error sending OTP:', error);
     let errorMessage = 'ไม่สามารถส่ง OTP ได้';
@@ -72,18 +75,32 @@ export async function verifyOTP(
   otpCode: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const credential = PhoneAuthProvider.credential(verificationId, otpCode);
-
-    if (auth.currentUser) {
-      // User already signed in with email — link phone to account
-      await linkWithCredential(auth.currentUser, credential);
-      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-        phoneVerified: true,
-        updatedAt: serverTimestamp(),
-      });
+    if (_confirmationResult) {
+      // Fast path: use the ConfirmationResult from signInWithPhoneNumber
+      if (auth.currentUser) {
+        // Already signed in — link phone credential instead
+        const credential = PhoneAuthProvider.credential(verificationId, otpCode);
+        await linkWithCredential(auth.currentUser, credential);
+        await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+          phoneVerified: true,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await _confirmationResult.confirm(otpCode);
+      }
+      _confirmationResult = null;
     } else {
-      // New registration — sign in with phone first, email/password linked later
-      await signInWithCredential(auth, credential);
+      // Fallback: use verificationId directly (e.g. app restarted between send/verify)
+      const credential = PhoneAuthProvider.credential(verificationId, otpCode);
+      if (auth.currentUser) {
+        await linkWithCredential(auth.currentUser, credential);
+        await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+          phoneVerified: true,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await signInWithCredential(auth, credential);
+      }
     }
     return { success: true };
   } catch (error: any) {
