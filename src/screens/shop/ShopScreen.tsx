@@ -1,5 +1,5 @@
-// ============================================
-// SHOP SCREEN - ร้านค้า / ซื้อบริการ (Role-aware)
+﻿// ============================================
+// SHOP SCREEN - à¸£à¹‰à¸²à¸™à¸„à¹‰à¸² / à¸‹à¸·à¹‰à¸­à¸šà¸£à¸´à¸à¸²à¸£ (Role-aware)
 // ============================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -89,35 +89,25 @@ export default function ShopScreen() {
   // ----------------------------------------
   const handleBuyPlan = async (plan: SubscriptionPlan) => {
     if (!user?.uid) {
-      setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', '') } as AlertState);
+      setAlert({ ...createAlert.warning('à¸à¸£à¸¸à¸“à¸²à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸š', '') } as AlertState);
       return;
     }
-    const productIdMap: Record<string, string> = {
-      nurse_pro_monthly: IAP_PRODUCTS.NURSE_PRO_MONTHLY ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-      nurse_pro_annual: IAP_PRODUCTS.NURSE_PRO_ANNUAL ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-      hospital_starter_monthly: IAP_PRODUCTS.HOSPITAL_STARTER_MONTHLY ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-      hospital_starter_annual: IAP_PRODUCTS.HOSPITAL_STARTER_ANNUAL ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-      hospital_pro_monthly: IAP_PRODUCTS.HOSPITAL_PRO_MONTHLY ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-      hospital_pro_annual: IAP_PRODUCTS.HOSPITAL_PRO_ANNUAL ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-      hospital_enterprise_monthly: IAP_PRODUCTS.HOSPITAL_ENTERPRISE_MONTHLY ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-      hospital_enterprise_annual: IAP_PRODUCTS.HOSPITAL_ENTERPRISE_ANNUAL ?? IAP_PRODUCTS.PREMIUM_MONTHLY,
-    };
-
-    const key = `${plan}_${billingCycle}`;
-    const productId = productIdMap[key] || IAP_PRODUCTS.PREMIUM_MONTHLY;
+    // All plans map to PREMIUM_MONTHLY product ID while USE_MOCK_IAP=true;
+    // swap in real product IDs once IAP is wired up.
+    const productId = IAP_PRODUCTS.PREMIUM_MONTHLY;
 
     setIsPurchasing(true);
     try {
       const result = await requestIAPPurchase(productId, user.uid, user.displayName || 'User');
       if (result.success) {
         await upgradePlan(user.uid, plan, billingCycle);
-        setAlert({ ...createAlert.success('✅ อัพเกรดสำเร็จ!', 'แพ็กเกจของคุณถูกเปิดใช้งานแล้ว') } as AlertState);
+        setAlert({ ...createAlert.success('âœ… à¸­à¸±à¸žà¹€à¸à¸£à¸”à¸ªà¸³à¹€à¸£à¹‡à¸ˆ!', 'à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸‚à¸­à¸‡à¸„à¸¸à¸“à¸–à¸¹à¸à¹€à¸›à¸´à¸”à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹à¸¥à¹‰à¸§') } as AlertState);
         loadData();
-      } else if (result.error && result.error !== 'ผู้ใช้ยกเลิก') {
-        setAlert({ ...createAlert.error('❌ เกิดข้อผิดพลาด', result.error) } as AlertState);
+      } else if (result.error && result.error !== 'à¸œà¸¹à¹‰à¹ƒà¸Šà¹‰à¸¢à¸à¹€à¸¥à¸´à¸') {
+        setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', result.error) } as AlertState);
       }
     } catch (e: any) {
-      setAlert({ ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message) } as AlertState);
+      setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', e.message) } as AlertState);
     } finally {
       setIsPurchasing(false);
     }
@@ -133,18 +123,18 @@ export default function ShopScreen() {
       extendPost: IAP_PRODUCTS.EXTEND_POST,
       urgent: IAP_PRODUCTS.URGENT_POST,
     };
-    const labels = { extraPost: 'โพสต์เพิ่ม', extendPost: 'ต่ออายุโพสต์', urgent: 'ปุ่มด่วน' };
+    const labels = { extraPost: 'à¹‚à¸žà¸ªà¸•à¹Œà¹€à¸žà¸´à¹ˆà¸¡', extendPost: 'à¸•à¹ˆà¸­à¸­à¸²à¸¢à¸¸à¹‚à¸žà¸ªà¸•à¹Œ', urgent: 'à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™' };
 
     setIsPurchasing(true);
     try {
       const result = await requestIAPPurchase(productIdMap[item], user.uid, user.displayName || 'User');
       if (result.success) {
-        setAlert({ ...createAlert.success('✅ ซื้อสำเร็จ!', `${labels[item]} เปิดใช้งานแล้ว`) } as AlertState);
-      } else if (result.error && result.error !== 'ผู้ใช้ยกเลิก') {
-        setAlert({ ...createAlert.error('❌ เกิดข้อผิดพลาด', result.error) } as AlertState);
+        setAlert({ ...createAlert.success('âœ… à¸‹à¸·à¹‰à¸­à¸ªà¸³à¹€à¸£à¹‡à¸ˆ!', `${labels[item]} à¹€à¸›à¸´à¸”à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹à¸¥à¹‰à¸§`) } as AlertState);
+      } else if (result.error && result.error !== 'à¸œà¸¹à¹‰à¹ƒà¸Šà¹‰à¸¢à¸à¹€à¸¥à¸´à¸') {
+        setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', result.error) } as AlertState);
       }
     } catch (e: any) {
-      setAlert({ ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message) } as AlertState);
+      setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', e.message) } as AlertState);
     } finally {
       setIsPurchasing(false);
     }
@@ -156,13 +146,13 @@ export default function ShopScreen() {
       const results = await restoreIAPPurchases();
       const ok = results.filter(r => r.success);
       if (ok.length > 0) {
-        setAlert({ ...createAlert.success('✅ กู้คืนสำเร็จ', `พบ ${ok.length} รายการ`) } as AlertState);
+        setAlert({ ...createAlert.success('âœ… à¸à¸¹à¹‰à¸„à¸·à¸™à¸ªà¸³à¹€à¸£à¹‡à¸ˆ', `à¸žà¸š ${ok.length} à¸£à¸²à¸¢à¸à¸²à¸£`) } as AlertState);
         loadData();
       } else {
-        setAlert({ ...createAlert.info('ℹ️ ไม่พบรายการ', 'ไม่พบรายการซื้อที่สามารถกู้คืนได้') } as AlertState);
+        setAlert({ ...createAlert.info('â„¹ï¸ à¹„à¸¡à¹ˆà¸žà¸šà¸£à¸²à¸¢à¸à¸²à¸£', 'à¹„à¸¡à¹ˆà¸žà¸šà¸£à¸²à¸¢à¸à¸²à¸£à¸‹à¸·à¹‰à¸­à¸—à¸µà¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¸à¸¹à¹‰à¸„à¸·à¸™à¹„à¸”à¹‰') } as AlertState);
       }
     } catch (e: any) {
-      setAlert({ ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message) } as AlertState);
+      setAlert({ ...createAlert.error('âŒ à¹€à¸à¸´à¸”à¸‚à¹‰à¸­à¸œà¸´à¸”à¸žà¸¥à¸²à¸”', e.message) } as AlertState);
     } finally {
       setIsPurchasing(false);
     }
@@ -171,7 +161,7 @@ export default function ShopScreen() {
   const copyReferralCode = () => {
     if (referralInfo?.referralCode) {
       Clipboard.setString(referralInfo.referralCode);
-      setAlert({ ...createAlert.success('📋 คัดลอกแล้ว!', `โค้ด ${referralInfo.referralCode} ถูกคัดลอกแล้ว`) } as AlertState);
+      setAlert({ ...createAlert.success('ðŸ“‹ à¸„à¸±à¸”à¸¥à¸­à¸à¹à¸¥à¹‰à¸§!', `à¹‚à¸„à¹‰à¸” ${referralInfo.referralCode} à¸–à¸¹à¸à¸„à¸±à¸”à¸¥à¸­à¸à¹à¸¥à¹‰à¸§`) } as AlertState);
     }
   };
 
@@ -225,19 +215,19 @@ export default function ShopScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>🛒 ร้านค้า</Text>
+        <Text style={styles.headerTitle}>ðŸ›’ à¸£à¹‰à¸²à¸™à¸„à¹‰à¸²</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
 
         {/* Current Plan Banner */}
-        <Card style={[styles.currentPlanCard, { borderColor: planColor[currentPlan] }]}>
+        <Card style={StyleSheet.flatten([styles.currentPlanCard, { borderColor: planColor[currentPlan] }])}>
           <View style={styles.planBannerRow}>
             <View>
-              <Text style={styles.planLabel}>แพ็กเกจปัจจุบัน</Text>
+              <Text style={styles.planLabel}>à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™</Text>
               <Text style={[styles.planName, { color: planColor[currentPlan] }]}>
-                {statusDisplay?.planName || '🆓 ฟรี'}
+                {statusDisplay?.planName || 'ðŸ†“ à¸Ÿà¸£à¸µ'}
               </Text>
             </View>
             {statusDisplay?.expiresText && (
@@ -254,21 +244,21 @@ export default function ShopScreen() {
             style={[styles.toggleBtn, billingCycle === 'monthly' && styles.toggleActive]}
             onPress={() => setBillingCycle('monthly')}
           >
-            <Text style={[styles.toggleText, billingCycle === 'monthly' && styles.toggleActiveText]}>รายเดือน</Text>
+            <Text style={[styles.toggleText, billingCycle === 'monthly' && styles.toggleActiveText]}>à¸£à¸²à¸¢à¹€à¸”à¸·à¸­à¸™</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.toggleBtn, billingCycle === 'annual' && styles.toggleActive]}
             onPress={() => setBillingCycle('annual')}
           >
-            <Text style={[styles.toggleText, billingCycle === 'annual' && styles.toggleActiveText]}>รายปี</Text>
-            <View style={styles.savingsPill}><Text style={styles.savingsPillText}>ประหยัด ~17%</Text></View>
+            <Text style={[styles.toggleText, billingCycle === 'annual' && styles.toggleActiveText]}>à¸£à¸²à¸¢à¸›à¸µ</Text>
+            <View style={styles.savingsPill}><Text style={styles.savingsPillText}>à¸›à¸£à¸°à¸«à¸¢à¸±à¸” ~17%</Text></View>
           </TouchableOpacity>
         </View>
 
         {/* ---- NURSE PLANS ---- */}
         {!isHospital && (
           <>
-            <Text style={styles.sectionTitle}>💊 แพ็กเกจสำหรับพยาบาล</Text>
+            <Text style={styles.sectionTitle}>ðŸ’Š à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸ªà¸³à¸«à¸£à¸±à¸šà¸žà¸¢à¸²à¸šà¸²à¸¥</Text>
 
             <NursePlanCard
               plan="free"
@@ -290,7 +280,7 @@ export default function ShopScreen() {
         {/* ---- HOSPITAL PLANS ---- */}
         {isHospital && (
           <>
-            <Text style={styles.sectionTitle}>🏥 แพ็กเกจสำหรับโรงพยาบาล</Text>
+            <Text style={styles.sectionTitle}>ðŸ¥ à¹à¸žà¹‡à¸à¹€à¸à¸ˆà¸ªà¸³à¸«à¸£à¸±à¸šà¹‚à¸£à¸‡à¸žà¸¢à¸²à¸šà¸²à¸¥</Text>
             {(['hospital_starter', 'hospital_pro', 'hospital_enterprise'] as SubscriptionPlan[]).map(plan => (
               <HospitalPlanCard
                 key={plan}
@@ -306,19 +296,19 @@ export default function ShopScreen() {
         )}
 
         {/* ---- ADD-ONS ---- */}
-        <Text style={styles.sectionTitle}>💡 ซื้อแยกรายครั้ง</Text>
+        <Text style={styles.sectionTitle}>ðŸ’¡ à¸‹à¸·à¹‰à¸­à¹à¸¢à¸à¸£à¸²à¸¢à¸„à¸£à¸±à¹‰à¸‡</Text>
 
         <Card style={styles.itemCard}>
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>📝</Text>
+              <Text style={styles.itemIcon}>ðŸ“</Text>
               <View>
-                <Text style={styles.itemTitle}>โพสต์เพิ่ม 1 ครั้ง</Text>
-                <Text style={styles.itemDesc}>เพิ่มโพสต์เมื่อครบ limit</Text>
+                <Text style={styles.itemTitle}>à¹‚à¸žà¸ªà¸•à¹Œà¹€à¸žà¸´à¹ˆà¸¡ 1 à¸„à¸£à¸±à¹‰à¸‡</Text>
+                <Text style={styles.itemDesc}>à¹€à¸žà¸´à¹ˆà¸¡à¹‚à¸žà¸ªà¸•à¹Œà¹€à¸¡à¸·à¹ˆà¸­à¸„à¸£à¸š limit</Text>
               </View>
             </View>
             <TouchableOpacity style={styles.buyButton} onPress={() => handleBuyAddon('extraPost')}>
-              <Text style={styles.buyButtonText}>฿{PRICING.extraPost}</Text>
+              <Text style={styles.buyButtonText}>à¸¿{PRICING.extraPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -326,14 +316,14 @@ export default function ShopScreen() {
         <Card style={styles.itemCard}>
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>⏰</Text>
+              <Text style={styles.itemIcon}>â°</Text>
               <View>
-                <Text style={styles.itemTitle}>ต่ออายุโพสต์ +1 วัน</Text>
-                <Text style={styles.itemDesc}>ขยายอายุโพสต์ที่ใกล้หมดอายุ</Text>
+                <Text style={styles.itemTitle}>à¸•à¹ˆà¸­à¸­à¸²à¸¢à¸¸à¹‚à¸žà¸ªà¸•à¹Œ +1 à¸§à¸±à¸™</Text>
+                <Text style={styles.itemDesc}>à¸‚à¸¢à¸²à¸¢à¸­à¸²à¸¢à¸¸à¹‚à¸žà¸ªà¸•à¹Œà¸—à¸µà¹ˆà¹ƒà¸à¸¥à¹‰à¸«à¸¡à¸”à¸­à¸²à¸¢à¸¸</Text>
               </View>
             </View>
             <TouchableOpacity style={styles.buyButton} onPress={() => handleBuyAddon('extendPost')}>
-              <Text style={styles.buyButtonText}>฿{PRICING.extendPost}</Text>
+              <Text style={styles.buyButtonText}>à¸¿{PRICING.extendPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -341,14 +331,14 @@ export default function ShopScreen() {
         <Card style={styles.itemCard}>
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>⚡</Text>
+              <Text style={styles.itemIcon}>âš¡</Text>
               <View>
-                <Text style={styles.itemTitle}>ปุ่มด่วน (Urgent)</Text>
-                <Text style={styles.itemDesc}>ทำให้ประกาศโดดเด่นขึ้น</Text>
+                <Text style={styles.itemTitle}>à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™ (Urgent)</Text>
+                <Text style={styles.itemDesc}>à¸—à¸³à¹ƒà¸«à¹‰à¸›à¸£à¸°à¸à¸²à¸¨à¹‚à¸”à¸”à¹€à¸”à¹ˆà¸™à¸‚à¸¶à¹‰à¸™</Text>
               </View>
             </View>
             <TouchableOpacity style={styles.buyButton} onPress={() => handleBuyAddon('urgent')}>
-              <Text style={styles.buyButtonText}>฿{PRICING.urgentPost}</Text>
+              <Text style={styles.buyButtonText}>à¸¿{PRICING.urgentPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -356,20 +346,20 @@ export default function ShopScreen() {
         {/* ---- REFERRAL SECTION ---- */}
         {referralInfo && (
           <>
-            <Text style={styles.sectionTitle}>🎁 แนะนำเพื่อน</Text>
+            <Text style={styles.sectionTitle}>ðŸŽ à¹à¸™à¸°à¸™à¸³à¹€à¸žà¸·à¹ˆà¸­à¸™</Text>
             <Card style={styles.referralCard}>
-              <Text style={styles.referralTitle}>แนะนำเพื่อน → ได้ Pro ฟรี 1 เดือน!</Text>
+              <Text style={styles.referralTitle}>à¹à¸™à¸°à¸™à¸³à¹€à¸žà¸·à¹ˆà¸­à¸™ â†’ à¹„à¸”à¹‰ Pro à¸Ÿà¸£à¸µ 1 à¹€à¸”à¸·à¸­à¸™!</Text>
               <Text style={styles.referralDesc}>
-                เพื่อนของคุณสมัครและอัพเกรด คุณและเพื่อนจะได้รับ Nurse Pro ฟรี 1 เดือน
+                à¹€à¸žà¸·à¹ˆà¸­à¸™à¸‚à¸­à¸‡à¸„à¸¸à¸“à¸ªà¸¡à¸±à¸„à¸£à¹à¸¥à¸°à¸­à¸±à¸žà¹€à¸à¸£à¸” à¸„à¸¸à¸“à¹à¸¥à¸°à¹€à¸žà¸·à¹ˆà¸­à¸™à¸ˆà¸°à¹„à¸”à¹‰à¸£à¸±à¸š Nurse Pro à¸Ÿà¸£à¸µ 1 à¹€à¸”à¸·à¸­à¸™
               </Text>
 
               <View style={styles.referralCodeBox}>
-                <Text style={styles.referralCodeLabel}>โค้ดของคุณ</Text>
+                <Text style={styles.referralCodeLabel}>à¹‚à¸„à¹‰à¸”à¸‚à¸­à¸‡à¸„à¸¸à¸“</Text>
                 <View style={styles.referralCodeRow}>
                   <Text style={styles.referralCode}>{referralInfo.referralCode}</Text>
                   <TouchableOpacity style={styles.copyBtn} onPress={copyReferralCode}>
                     <Ionicons name="copy-outline" size={18} color={COLORS.primary} />
-                    <Text style={styles.copyText}>คัดลอก</Text>
+                    <Text style={styles.copyText}>à¸„à¸±à¸”à¸¥à¸­à¸</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -377,15 +367,15 @@ export default function ShopScreen() {
               <View style={styles.referralStats}>
                 <View style={styles.statBox}>
                   <Text style={styles.statNum}>{referralInfo.referredCount}</Text>
-                  <Text style={styles.statLabel}>เพื่อนที่แนะนำ</Text>
+                  <Text style={styles.statLabel}>à¹€à¸žà¸·à¹ˆà¸­à¸™à¸—à¸µà¹ˆà¹à¸™à¸°à¸™à¸³</Text>
                 </View>
                 <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: COLORS.border }]}>
                   <Text style={styles.statNum}>{referralInfo.rewardMonthsEarned}</Text>
-                  <Text style={styles.statLabel}>เดือนฟรีที่ได้</Text>
+                  <Text style={styles.statLabel}>à¹€à¸”à¸·à¸­à¸™à¸Ÿà¸£à¸µà¸—à¸µà¹ˆà¹„à¸”à¹‰</Text>
                 </View>
                 <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: COLORS.border }]}>
                   <Text style={styles.statNum}>{referralInfo.rewardMonthsEarned - referralInfo.rewardMonthsUsed}</Text>
-                  <Text style={styles.statLabel}>เดือนคงเหลือ</Text>
+                  <Text style={styles.statLabel}>à¹€à¸”à¸·à¸­à¸™à¸„à¸‡à¹€à¸«à¸¥à¸·à¸­</Text>
                 </View>
               </View>
             </Card>
@@ -395,7 +385,7 @@ export default function ShopScreen() {
         {/* Restore */}
         <TouchableOpacity style={styles.restoreButton} onPress={handleRestore} disabled={isPurchasing}>
           <Ionicons name="refresh-outline" size={16} color={colors.primary} />
-          <Text style={[styles.restoreText, { color: colors.primary }]}>กู้คืนรายการซื้อ</Text>
+          <Text style={[styles.restoreText, { color: colors.primary }]}>à¸à¸¹à¹‰à¸„à¸·à¸™à¸£à¸²à¸¢à¸à¸²à¸£à¸‹à¸·à¹‰à¸­</Text>
         </TouchableOpacity>
 
         <View style={{ height: SPACING.xxl }} />
@@ -405,7 +395,7 @@ export default function ShopScreen() {
         <View style={styles.purchasingOverlay}>
           <View style={styles.purchasingBox}>
             <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.purchasingText}>กำลังดำเนินการ...</Text>
+            <Text style={styles.purchasingText}>à¸à¸³à¸¥à¸±à¸‡à¸”à¸³à¹€à¸™à¸´à¸™à¸à¸²à¸£...</Text>
           </View>
         </View>
       )}
@@ -438,28 +428,28 @@ interface NursePlanCardProps {
 function NursePlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle }: NursePlanCardProps) {
   const isFree = plan === 'free';
   const features = isFree
-    ? ['โพสต์ 2 ครั้ง/วัน', 'โพสต์อยู่ 3 วัน', 'สมัครงาน 3 ครั้ง/วัน']
-    : ['โพสต์ไม่จำกัด', 'โพสต์อยู่ 30 วัน', 'สมัครงานไม่จำกัด', '🎁 ปุ่มด่วนฟรี 1 ครั้ง/เดือน'];
+    ? ['à¹‚à¸žà¸ªà¸•à¹Œ 2 à¸„à¸£à¸±à¹‰à¸‡/à¸§à¸±à¸™', 'à¹‚à¸žà¸ªà¸•à¹Œà¸­à¸¢à¸¹à¹ˆ 3 à¸§à¸±à¸™', 'à¸ªà¸¡à¸±à¸„à¸£à¸‡à¸²à¸™ 3 à¸„à¸£à¸±à¹‰à¸‡/à¸§à¸±à¸™']
+    : ['à¹‚à¸žà¸ªà¸•à¹Œà¹„à¸¡à¹ˆà¸ˆà¸³à¸à¸±à¸”', 'à¹‚à¸žà¸ªà¸•à¹Œà¸­à¸¢à¸¹à¹ˆ 30 à¸§à¸±à¸™', 'à¸ªà¸¡à¸±à¸„à¸£à¸‡à¸²à¸™à¹„à¸¡à¹ˆà¸ˆà¸³à¸à¸±à¸”', 'ðŸŽ à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™à¸Ÿà¸£à¸µ 1 à¸„à¸£à¸±à¹‰à¸‡/à¹€à¸”à¸·à¸­à¸™'];
 
   const color = isFree ? '#888' : '#FF8F00';
 
   return (
-    <Card style={[styles.planCard, isCurrent && { borderColor: color, borderWidth: 2 }]}>
+    <Card style={StyleSheet.flatten([styles.planCard, isCurrent && { borderColor: color, borderWidth: 2 }])}>      
       <View style={styles.planCardHeader}>
         <View>
           <Text style={[styles.planCardName, { color }]}>
-            {isFree ? '🆓 ฟรี' : '👑 Nurse Pro'}
+            {isFree ? 'ðŸ†“ à¸Ÿà¸£à¸µ' : 'ðŸ‘‘ Nurse Pro'}
           </Text>
           {!isFree && price !== undefined && (
             <Text style={styles.planCardPrice}>
-              ฿{price}
-              <Text style={styles.planCardPriceUnit}>/{billingCycle === 'annual' ? 'ปี' : 'เดือน'}</Text>
-              {billingCycle === 'monthly' && <Text style={styles.planCardPriceUnit}> (฿{PRICING.nursePro}/เดือน)</Text>}
+              à¸¿{price}
+              <Text style={styles.planCardPriceUnit}>/{billingCycle === 'annual' ? 'à¸›à¸µ' : 'à¹€à¸”à¸·à¸­à¸™'}</Text>
+              {billingCycle === 'monthly' && <Text style={styles.planCardPriceUnit}> (à¸¿{PRICING.nursePro}/à¹€à¸”à¸·à¸­à¸™)</Text>}
             </Text>
           )}
         </View>
-        {savings && savings > 0 ? <View style={styles.savingsTag}><Text style={styles.savingsTagText}>ประหยัด {savings}%</Text></View> : null}
-        {isCurrent && <View style={styles.currentTag}><Text style={styles.currentTagText}>ใช้งานอยู่</Text></View>}
+        {savings && savings > 0 ? <View style={styles.savingsTag}><Text style={styles.savingsTagText}>à¸›à¸£à¸°à¸«à¸¢à¸±à¸” {savings}%</Text></View> : null}
+        {isCurrent && <View style={styles.currentTag}><Text style={styles.currentTagText}>à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆ</Text></View>}
       </View>
       <View style={styles.featureList}>
         {features.map((f, i) => (
@@ -471,7 +461,7 @@ function NursePlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle }:
       </View>
       {!isCurrent && !isFree && (
         <TouchableOpacity style={[styles.planBuyBtn, { backgroundColor: color }]} onPress={onBuy}>
-          <Text style={styles.planBuyBtnText}>อัพเกรด</Text>
+          <Text style={styles.planBuyBtnText}>à¸­à¸±à¸žà¹€à¸à¸£à¸”</Text>
         </TouchableOpacity>
       )}
     </Card>
@@ -490,19 +480,19 @@ interface HospitalPlanCardProps {
 function HospitalPlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle }: HospitalPlanCardProps) {
   const planMeta: Record<string, { label: string; features: string[]; color: string }> = {
     hospital_starter: {
-      label: '🏥 Starter',
+      label: 'ðŸ¥ Starter',
       color: '#0288D1',
-      features: ['5 โพสต์/เดือน', 'โพสต์อยู่ 30 วัน', 'ค้นหาพยาบาล'],
+      features: ['5 à¹‚à¸žà¸ªà¸•à¹Œ/à¹€à¸”à¸·à¸­à¸™', 'à¹‚à¸žà¸ªà¸•à¹Œà¸­à¸¢à¸¹à¹ˆ 30 à¸§à¸±à¸™', 'à¸„à¹‰à¸™à¸«à¸²à¸žà¸¢à¸²à¸šà¸²à¸¥'],
     },
     hospital_pro: {
-      label: '🏥 Professional',
+      label: 'ðŸ¥ Professional',
       color: '#6A1B9A',
-      features: ['โพสต์ไม่จำกัด', 'ปุ่มด่วนฟรี 3 ครั้ง/เดือน', 'แสดงโลโก้โรงพยาบาล', 'แดชบอร์ดวิเคราะห์'],
+      features: ['à¹‚à¸žà¸ªà¸•à¹Œà¹„à¸¡à¹ˆà¸ˆà¸³à¸à¸±à¸”', 'à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™à¸Ÿà¸£à¸µ 3 à¸„à¸£à¸±à¹‰à¸‡/à¹€à¸”à¸·à¸­à¸™', 'à¹à¸ªà¸”à¸‡à¹‚à¸¥à¹‚à¸à¹‰à¹‚à¸£à¸‡à¸žà¸¢à¸²à¸šà¸²à¸¥', 'à¹à¸”à¸Šà¸šà¸­à¸£à¹Œà¸”à¸§à¸´à¹€à¸„à¸£à¸²à¸°à¸«à¹Œ'],
     },
     hospital_enterprise: {
-      label: '🏢 Enterprise',
+      label: 'ðŸ¢ Enterprise',
       color: '#1B5E20',
-      features: ['ทุกอย่างใน Pro', 'ปุ่มด่วนฟรี 10 ครั้ง/เดือน', 'Multi-account support', 'Priority Support'],
+      features: ['à¸—à¸¸à¸à¸­à¸¢à¹ˆà¸²à¸‡à¹ƒà¸™ Pro', 'à¸›à¸¸à¹ˆà¸¡à¸”à¹ˆà¸§à¸™à¸Ÿà¸£à¸µ 10 à¸„à¸£à¸±à¹‰à¸‡/à¹€à¸”à¸·à¸­à¸™', 'Multi-account support', 'Priority Support'],
     },
   };
 
@@ -510,17 +500,17 @@ function HospitalPlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle
   const color = meta?.color || '#444';
 
   return (
-    <Card style={[styles.planCard, isCurrent && { borderColor: color, borderWidth: 2 }]}>
+    <Card style={StyleSheet.flatten([styles.planCard, isCurrent && { borderColor: color, borderWidth: 2 }])}>
       <View style={styles.planCardHeader}>
         <View>
           <Text style={[styles.planCardName, { color }]}>{meta?.label}</Text>
           <Text style={styles.planCardPrice}>
-            ฿{price}
-            <Text style={styles.planCardPriceUnit}>/{billingCycle === 'annual' ? 'ปี' : 'เดือน'}</Text>
+            à¸¿{price}
+            <Text style={styles.planCardPriceUnit}>/{billingCycle === 'annual' ? 'à¸›à¸µ' : 'à¹€à¸”à¸·à¸­à¸™'}</Text>
           </Text>
         </View>
-        {savings > 0 && <View style={styles.savingsTag}><Text style={styles.savingsTagText}>ประหยัด {savings}%</Text></View>}
-        {isCurrent && <View style={styles.currentTag}><Text style={styles.currentTagText}>ใช้งานอยู่</Text></View>}
+        {savings > 0 && <View style={styles.savingsTag}><Text style={styles.savingsTagText}>à¸›à¸£à¸°à¸«à¸¢à¸±à¸” {savings}%</Text></View>}
+        {isCurrent && <View style={styles.currentTag}><Text style={styles.currentTagText}>à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆ</Text></View>}
       </View>
       <View style={styles.featureList}>
         {(meta?.features || []).map((f, i) => (
@@ -532,7 +522,7 @@ function HospitalPlanCard({ plan, price, savings, isCurrent, onBuy, billingCycle
       </View>
       {!isCurrent && (
         <TouchableOpacity style={[styles.planBuyBtn, { backgroundColor: color }]} onPress={onBuy}>
-          <Text style={styles.planBuyBtnText}>เลือกแผนนี้</Text>
+          <Text style={styles.planBuyBtnText}>à¹€à¸¥à¸·à¸­à¸à¹à¸œà¸™à¸™à¸µà¹‰</Text>
         </TouchableOpacity>
       )}
     </Card>
@@ -728,665 +718,3 @@ const styles = StyleSheet.create({
   },
   purchasingText: { fontSize: FONT_SIZES.md, color: COLORS.text, fontWeight: '500' },
 });
-  const navigation = useNavigation();
-  const { user } = useAuth();
-  const { colors } = useTheme();
-  
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isPurchasing, setIsPurchasing] = useState(false);
-  const [alert, setAlert] = useState<AlertState>(initialAlertState);
-  const [hasFreeUrgent, setHasFreeUrgent] = useState(false);
-  const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const [iapProducts, setIapProducts] = useState<IAPProduct[]>([]);
-
-  const closeAlert = () => setAlert(initialAlertState);
-
-  // Initialize IAP + Load subscription
-  useEffect(() => {
-    initializeIAP();
-    loadSubscription();
-    loadProducts();
-    
-    return () => {
-      cleanupIAP();
-    };
-  }, [user?.uid]);
-
-  const loadProducts = async () => {
-    try {
-      const products = await getIAPProducts();
-      setIapProducts(products);
-    } catch (error) {
-      console.error('Error loading IAP products:', error);
-    }
-  };
-
-  const loadSubscription = async () => {
-    if (!user?.uid) {
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      const sub = await getUserSubscription(user.uid);
-      setSubscription(sub);
-      
-      // Check if user has free urgent available (Premium bonus)
-      const freeUrgent = await canUseFreeUrgent(user.uid);
-      setHasFreeUrgent(freeUrgent);
-    } catch (error) {
-      console.error('Error loading subscription:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handlePurchase = async (item: 'premium' | 'extraPost' | 'extendPost' | 'urgent') => {
-    if (!user?.uid) {
-      setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', 'คุณต้องเข้าสู่ระบบก่อนซื้อบริการ') } as AlertState);
-      return;
-    }
-
-    const productIdMap = {
-      premium: IAP_PRODUCTS.PREMIUM_MONTHLY,
-      extraPost: IAP_PRODUCTS.EXTRA_POST,
-      extendPost: IAP_PRODUCTS.EXTEND_POST,
-      urgent: IAP_PRODUCTS.URGENT_POST,
-    };
-
-    const titles = {
-      premium: '👑 Premium รายเดือน',
-      extraPost: '📝 โพสต์เพิ่ม 1 ครั้ง',
-      extendPost: '⏰ ต่ออายุโพสต์ 1 วัน',
-      urgent: '⚡ ปุ่มด่วน',
-    };
-
-    const productId = productIdMap[item];
-    
-    setIsPurchasing(true);
-    try {
-      const result = await requestIAPPurchase(
-        productId, 
-        user.uid, 
-        user.displayName || 'User'
-      );
-
-      if (result.success) {
-        setAlert({ 
-          ...createAlert.success(
-            '✅ ซื้อสำเร็จ!', 
-            `${titles[item]} เปิดใช้งานแล้ว${item === 'premium' ? '\n\nคุณสามารถโพสต์ได้ไม่จำกัดแล้ว!' : ''}`
-          ) 
-        } as AlertState);
-        // Reload subscription to reflect changes
-        await loadSubscription();
-      } else if (result.error && result.error !== 'ผู้ใช้ยกเลิก') {
-        setAlert({ 
-          ...createAlert.error('❌ เกิดข้อผิดพลาด', result.error) 
-        } as AlertState);
-      }
-    } catch (error: any) {
-      setAlert({ 
-        ...createAlert.error('❌ เกิดข้อผิดพลาด', error.message || 'ไม่สามารถดำเนินการซื้อได้') 
-      } as AlertState);
-    } finally {
-      setIsPurchasing(false);
-    }
-  };
-
-  // Restore purchases (Apple ต้องมีปุ่มนี้)
-  const handleRestorePurchases = async () => {
-    setIsPurchasing(true);
-    try {
-      const results = await restoreIAPPurchases();
-      const successful = results.filter(r => r.success);
-      
-      if (successful.length > 0) {
-        setAlert({ 
-          ...createAlert.success('✅ กู้คืนสำเร็จ', `พบ ${successful.length} รายการที่กู้คืนได้`) 
-        } as AlertState);
-        await loadSubscription();
-      } else {
-        setAlert({ 
-          ...createAlert.info('ℹ️ ไม่พบรายการ', 'ไม่พบรายการซื้อที่สามารถกู้คืนได้') 
-        } as AlertState);
-      }
-    } catch (error: any) {
-      setAlert({ 
-        ...createAlert.error('❌ เกิดข้อผิดพลาด', error.message || 'ไม่สามารถกู้คืนรายการซื้อได้') 
-      } as AlertState);
-    } finally {
-      setIsPurchasing(false);
-    }
-  };
-
-  const subscriptionStatus = subscription 
-    ? getSubscriptionStatusDisplay(subscription) 
-    : null;
-
-  const isPremium = subscription?.plan === 'premium';
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>🛒 ร้านค้า</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Current Plan */}
-        <Card style={styles.currentPlanCard}>
-          <View style={styles.planHeader}>
-            <Text style={styles.planLabel}>แพ็กเกจปัจจุบัน</Text>
-            {subscriptionStatus && (
-              <View style={[styles.planBadge, { backgroundColor: isPremium ? '#FFD700' : '#E0E0E0' }]}>
-                <Text style={[styles.planBadgeText, { color: isPremium ? '#000' : '#666' }]}>
-                  {subscriptionStatus.planName}
-                </Text>
-              </View>
-            )}
-          </View>
-          
-          {isPremium && subscriptionStatus?.expiresText && (
-            <Text style={styles.planExpiry}>{subscriptionStatus.expiresText}</Text>
-          )}
-
-          {!isPremium && (
-            <View style={styles.freeLimit}>
-              <Text style={styles.freeLimitText}>
-                📝 โพสต์ได้: {SUBSCRIPTION_PLANS.free.maxPostsPerDay} ครั้ง/วัน
-              </Text>
-              <Text style={styles.freeLimitText}>
-                📅 โพสต์อยู่: {SUBSCRIPTION_PLANS.free.postExpiryDays} วัน
-              </Text>
-            </View>
-          )}
-        </Card>
-
-        {/* Premium Subscription */}
-        <Card style={styles.premiumCard}>
-          <View style={styles.premiumHeader}>
-            <Text style={styles.premiumEmoji}>👑</Text>
-            <View style={styles.premiumTitleRow}>
-              <Text style={styles.premiumTitle}>Premium</Text>
-              <Text style={styles.premiumPrice}>฿{PRICING.subscription}<Text style={styles.premiumPriceUnit}>/เดือน</Text></Text>
-            </View>
-          </View>
-
-          <View style={styles.premiumBenefits}>
-            {SUBSCRIPTION_PLANS.premium.features.map((feature, index) => (
-              <View key={index} style={styles.benefitRow}>
-                <Ionicons name="checkmark-circle" size={18} color="#4ADE80" />
-                <Text style={styles.benefitText}>{feature}</Text>
-              </View>
-            ))}
-          </View>
-
-          {isPremium ? (
-            <View style={styles.activeBadge}>
-              <Ionicons name="checkmark" size={16} color="#fff" />
-              <Text style={styles.activeBadgeText}>ใช้งานอยู่</Text>
-            </View>
-          ) : (
-            <Button
-              title="อัพเกรดเป็น Premium"
-              onPress={() => handlePurchase('premium')}
-              style={styles.premiumButton}
-            />
-          )}
-        </Card>
-
-        {/* Individual Items */}
-        <Text style={styles.sectionTitle}>💡 ซื้อแยกรายครั้ง</Text>
-
-        {/* Extra Post */}
-        <Card style={styles.itemCard}>
-          <View style={styles.itemRow}>
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>📝</Text>
-              <View>
-                <Text style={styles.itemTitle}>โพสต์เพิ่ม</Text>
-                <Text style={styles.itemDesc}>เพิ่มโพสต์อีก 1 ครั้งเมื่อครบ limit</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.buyButton}
-              onPress={() => handlePurchase('extraPost')}
-            >
-              <Text style={styles.buyButtonText}>฿{PRICING.extraPost}</Text>
-            </TouchableOpacity>
-          </View>
-        </Card>
-
-        {/* Extend Post */}
-        <Card style={styles.itemCard}>
-          <View style={styles.itemRow}>
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>⏰</Text>
-              <View>
-                <Text style={styles.itemTitle}>ต่ออายุโพสต์</Text>
-                <Text style={styles.itemDesc}>ต่ออายุโพสต์เพิ่มอีก 1 วัน</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.buyButton}
-              onPress={() => handlePurchase('extendPost')}
-            >
-              <Text style={styles.buyButtonText}>฿{PRICING.extendPost}</Text>
-            </TouchableOpacity>
-          </View>
-        </Card>
-
-        {/* Urgent Button */}
-        <Card style={styles.itemCard}>
-          <View style={styles.itemRow}>
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemIcon}>⚡</Text>
-              <View>
-                <Text style={styles.itemTitle}>ปุ่มด่วน</Text>
-                <Text style={styles.itemDesc}>ทำให้ประกาศโดดเด่นขึ้น</Text>
-                {hasFreeUrgent && (
-                  <View style={styles.freeTag}>
-                    <Text style={styles.freeTagText}>🎁 มีสิทธิ์ฟรี 1 ครั้ง!</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={[styles.buyButton, hasFreeUrgent && styles.freeButton]}
-              onPress={() => {
-                if (hasFreeUrgent) {
-                  setAlert({ ...createAlert.info('🎁 สิทธิ์ฟรี Premium', 'คุณมีสิทธิ์ใช้ปุ่มด่วนฟรี 1 ครั้ง!\n\nไปที่ "ประกาศของฉัน" แล้วเลือกโพสต์ที่ต้องการทำให้ด่วน') } as AlertState);
-                } else {
-                  handlePurchase('urgent');
-                }
-              }}
-            >
-              <Text style={[styles.buyButtonText, hasFreeUrgent && styles.freeButtonText]}>
-                {hasFreeUrgent ? 'ฟรี!' : `฿${PRICING.urgentPost}`}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </Card>
-
-        {/* Pricing Summary */}
-        <Card style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>📋 สรุปราคา</Text>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Premium รายเดือน</Text>
-            <Text style={styles.summaryValue}>฿{PRICING.subscription}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>โพสต์เพิ่ม</Text>
-            <Text style={styles.summaryValue}>฿{PRICING.extraPost}/ครั้ง</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>ต่ออายุโพสต์</Text>
-            <Text style={styles.summaryValue}>฿{PRICING.extendPost}/วัน</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>ปุ่มด่วน</Text>
-            <Text style={styles.summaryValue}>฿{PRICING.urgentPost}/ครั้ง</Text>
-          </View>
-        </Card>
-
-        {/* Contact */}
-        <Card style={styles.contactCard}>
-          <Text style={styles.contactTitle}>📞 ติดต่อเรา</Text>
-          <Text style={styles.contactText}>
-            หากต้องการซื้อบริการหรือมีคำถาม{'\n'}
-            ติดต่อได้ที่:
-          </Text>
-          <View style={styles.contactInfo}>
-            <Text style={styles.contactItem}>LINE: @nursego</Text>
-            <Text style={styles.contactItem}>Facebook: NurseGo Thailand</Text>
-          </View>
-        </Card>
-
-        {/* Restore Purchases (Apple requires this) */}
-        <TouchableOpacity 
-          style={styles.restoreButton}
-          onPress={handleRestorePurchases}
-          disabled={isPurchasing}
-        >
-          <Ionicons name="refresh-outline" size={16} color={colors.primary} />
-          <Text style={[styles.restoreText, { color: colors.primary }]}>
-            กู้คืนรายการซื้อ
-          </Text>
-        </TouchableOpacity>
-
-        <View style={{ height: SPACING.xxl }} />
-      </ScrollView>
-
-      {/* Purchasing Overlay */}
-      {isPurchasing && (
-        <View style={styles.purchasingOverlay}>
-          <View style={styles.purchasingBox}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.purchasingText}>กำลังดำเนินการ...</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Custom Alert */}
-      <CustomAlert
-        visible={alert.visible}
-        type={alert.type}
-        title={alert.title}
-        message={alert.message}
-        buttons={alert.buttons}
-        onClose={closeAlert}
-      />
-    </SafeAreaView>
-  );
-}
-
-// ============================================
-// Styles
-// ============================================
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  content: {
-    flex: 1,
-    padding: SPACING.md,
-  },
-
-  // Current Plan
-  currentPlanCard: {
-    marginBottom: SPACING.md,
-    padding: SPACING.md,
-  },
-  planHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  planLabel: {
-    fontSize: FONT_SIZES.md,
-    color: COLORS.textSecondary,
-  },
-  planBadge: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  planBadgeText: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '600',
-  },
-  planExpiry: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textMuted,
-    marginTop: SPACING.xs,
-    textAlign: 'right',
-  },
-  freeLimit: {
-    marginTop: SPACING.sm,
-    padding: SPACING.sm,
-    backgroundColor: COLORS.backgroundSecondary,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  freeLimitText: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-    marginBottom: 2,
-  },
-
-  // Premium Card
-  premiumCard: {
-    marginBottom: SPACING.lg,
-    padding: SPACING.lg,
-    backgroundColor: '#FFFBEB',
-    borderWidth: 2,
-    borderColor: '#FFD700',
-  },
-  premiumHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  premiumEmoji: {
-    fontSize: 40,
-    marginRight: SPACING.md,
-  },
-  premiumTitleRow: {
-    flex: 1,
-  },
-  premiumTitle: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  premiumPrice: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '700',
-    color: '#FF8F00',
-  },
-  premiumPriceUnit: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '400',
-    color: COLORS.textSecondary,
-  },
-  premiumBenefits: {
-    marginBottom: SPACING.md,
-  },
-  benefitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.xs,
-  },
-  benefitText: {
-    fontSize: FONT_SIZES.md,
-    color: COLORS.text,
-    marginLeft: SPACING.sm,
-  },
-  premiumButton: {
-    backgroundColor: '#FFD700',
-  },
-  activeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.success,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    gap: SPACING.xs,
-  },
-  activeBadgeText: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '600',
-    color: '#fff',
-  },
-
-  // Section Title
-  sectionTitle: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: SPACING.md,
-    marginTop: SPACING.sm,
-  },
-
-  // Item Card
-  itemCard: {
-    marginBottom: SPACING.sm,
-    padding: SPACING.md,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  itemInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  itemIcon: {
-    fontSize: 28,
-    marginRight: SPACING.md,
-  },
-  itemTitle: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  itemDesc: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  buyButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  buyButtonText: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  freeButton: {
-    backgroundColor: '#4ADE80',
-  },
-  freeButtonText: {
-    color: '#fff',
-  },
-  freeTag: {
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.sm,
-    marginTop: 4,
-    alignSelf: 'flex-start',
-  },
-  freeTagText: {
-    fontSize: FONT_SIZES.xs,
-    color: '#4CAF50',
-    fontWeight: '600',
-  },
-
-  // Summary Card
-  summaryCard: {
-    marginTop: SPACING.md,
-    padding: SPACING.md,
-    backgroundColor: '#F5F5F5',
-  },
-  summaryTitle: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.xs,
-  },
-  summaryLabel: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  summaryValue: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-
-  // Contact Card
-  contactCard: {
-    marginTop: SPACING.md,
-    padding: SPACING.md,
-    backgroundColor: '#E3F2FD',
-  },
-  contactTitle: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginBottom: SPACING.xs,
-  },
-  contactText: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-  },
-  contactInfo: {
-    backgroundColor: COLORS.white,
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  contactItem: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.text,
-    marginBottom: 2,
-  },
-
-  // Restore Button
-  restoreButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: SPACING.lg,
-    paddingVertical: SPACING.sm,
-    gap: SPACING.xs,
-  },
-  restoreText: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '500',
-  },
-
-  // Purchasing Overlay
-  purchasingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 999,
-  },
-  purchasingBox: {
-    backgroundColor: COLORS.white,
-    padding: SPACING.xl,
-    borderRadius: BORDER_RADIUS.lg,
-    alignItems: 'center',
-    gap: SPACING.md,
-    ...SHADOWS.medium,
-  },
-  purchasingText: {
-    fontSize: FONT_SIZES.md,
-    color: COLORS.text,
-    fontWeight: '500',
-  },
-});
-
