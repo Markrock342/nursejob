@@ -77,9 +77,11 @@ export async function verifyOTP(
   try {
     if (_confirmationResult) {
       // Fast path: use the ConfirmationResult from signInWithPhoneNumber
+      // Always use verificationId from the stored confirmationResult, not the param
+      const vid = _confirmationResult.verificationId || verificationId;
       if (auth.currentUser) {
         // Already signed in — link phone credential instead
-        const credential = PhoneAuthProvider.credential(verificationId, otpCode);
+        const credential = PhoneAuthProvider.credential(vid, otpCode);
         await linkWithCredential(auth.currentUser, credential);
         await updateDoc(doc(db, 'users', auth.currentUser.uid), {
           phoneVerified: true,

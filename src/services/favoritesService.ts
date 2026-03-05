@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   onSnapshot,
 } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '../config/firebase';
 import { JobPost } from '../types';
 import { getJobById } from './jobService';
@@ -110,6 +111,7 @@ export async function toggleFavorite(userId: string, jobId: string): Promise<boo
 
 // Get all user favorites with job details
 export async function getUserFavorites(userId: string): Promise<Favorite[]> {
+  if (!getAuth().currentUser) return [];
   try {
     const q = query(
       collection(db, FAVORITES_COLLECTION),
@@ -173,6 +175,7 @@ export function subscribeToFavorites(
 
 // Get favorites count
 export async function getFavoritesCount(userId: string): Promise<number> {
+  if (!getAuth().currentUser) return 0;
   try {
     const q = query(
       collection(db, FAVORITES_COLLECTION),

@@ -75,11 +75,12 @@ export default function ProfileScreen({ navigation }: Props) {
   const [otpValue, setOtpValue] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState('');
+  const [pendingVerificationId, setPendingVerificationId] = useState('');
   // Phone OTP inline step: 'idle' | 'sending' | 'verify' | 'verified'
   const [phoneStep, setPhoneStep] = useState<'idle' | 'sending' | 'verify' | 'verified'>('idle');
   const [otpResendCountdown, setOtpResendCountdown] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<UserVerificationStatus | null>(null);
-  const [userPlan, setUserPlan] = useState<'free' | 'premium'>('free');
+  const [userPlan, setUserPlan] = useState<import('../../types').SubscriptionPlan>('free');
   const [editForm, setEditForm] = useState({
     displayName: '',
     phone: '',
@@ -270,7 +271,13 @@ export default function ProfileScreen({ navigation }: Props) {
     setPhoneStep('sending');
     setOtpError('');
     try {
-      await sendOTP(phone);
+      const result = await sendOTP(phone);
+      if (!result.success) {
+        setPhoneStep('idle');
+        setOtpError(result.error || 'ส่งรหัส OTP ไม่สำเร็จ');
+        return;
+      }
+      setPendingVerificationId(result.verificationId || '');
       setPhoneStep('verify');
       setOtpValue('');
       startOtpCountdown(60);
@@ -289,7 +296,7 @@ export default function ProfileScreen({ navigation }: Props) {
     setOtpLoading(true);
     setOtpError('');
     try {
-      await verifyOTP(editForm.phone, otpValue);
+      await verifyOTP(pendingVerificationId, otpValue);
       setPhoneStep('verified');
       setOtpError('');
     } catch (error: any) {
@@ -430,7 +437,7 @@ export default function ProfileScreen({ navigation }: Props) {
             </TouchableOpacity>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text style={{ fontWeight: 'bold', fontSize: 20, color: colors.text, marginBottom: 2 }}>{user?.displayName}</Text>
-              {userPlan === 'premium' && (
+              {userPlan !== 'free' && (
                 <View style={{ marginLeft: 8, backgroundColor: COLORS.premium, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
                   <Text style={{ color: COLORS.black, fontWeight: '700', fontSize: 12 }}>Premium</Text>
                 </View>
