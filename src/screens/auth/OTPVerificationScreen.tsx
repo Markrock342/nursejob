@@ -19,6 +19,8 @@ import { RouteProp } from '@react-navigation/native';
 import { KittenButton as Button } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { sendOTP, verifyOTP } from '../../services/otpService';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { firebaseConfig } from '../../config/firebase';
 import { AuthStackParamList } from '../../types';
 
 type OTPVerificationScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'OTPVerification'>;
@@ -38,6 +40,7 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const [verificationId, setVerificationId] = useState(initialVerificationId);
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
+  const recaptchaVerifierRef = useRef<any>(null);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -67,7 +70,7 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const handleResendOTP = async () => {
     setIsResending(true);
     try {
-      const result = await sendOTP(phone);
+      const result = await sendOTP(phone, recaptchaVerifierRef.current);
       if (result.success && result.verificationId) {
         setVerificationId(result.verificationId);
         setCountdown(60);
@@ -121,6 +124,13 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaVerifierRef}
+        firebaseConfig={firebaseConfig}
+        attemptInvisibleVerification={true}
+        title="ยืนยันตัวตน"
+        cancelLabel="ยกเลิก"
+      />
       <View style={styles.content}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />

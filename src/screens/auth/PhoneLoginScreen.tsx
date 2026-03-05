@@ -21,6 +21,8 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { sendOTP, verifyOTP, isValidThaiPhone } from '../../services/otpService';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { firebaseConfig } from '../../config/firebase';
 import { AuthStackParamList } from '../../types';
 
 
@@ -53,6 +55,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
+  const recaptchaVerifierRef = useRef<any>(null);
 
   const { loginWithPhone } = useAuth();
 
@@ -84,7 +87,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 
     setIsLoading(true);
     try {
-      const result = await sendOTP(phone);
+      const result = await sendOTP(phone, recaptchaVerifierRef.current);
       if (result.success && result.verificationId) {
         setVerificationId(result.verificationId);
         setStep('otp');
@@ -105,7 +108,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   const handleResendOTP = async () => {
     setIsResending(true);
     try {
-      const result = await sendOTP(phone);
+      const result = await sendOTP(phone, recaptchaVerifierRef.current);
       if (result.success && result.verificationId) {
         setVerificationId(result.verificationId);
         setCountdown(60);
@@ -200,6 +203,13 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 
   return (
     <>
+    <FirebaseRecaptchaVerifierModal
+      ref={recaptchaVerifierRef}
+      firebaseConfig={firebaseConfig}
+      attemptInvisibleVerification={true}
+      title="ยืนยันตัวตน"
+      cancelLabel="ยกเลิก"
+    />
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardView}

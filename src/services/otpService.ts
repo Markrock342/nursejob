@@ -57,10 +57,10 @@ export async function sendOTP(
     }
     const formattedPhone = formatPhoneNumber(phoneNumber);
     // Web Firebase SDK requires an ApplicationVerifier (reCAPTCHA) on all platforms.
-    // The verifier is mounted at root level in App.tsx via FirebaseRecaptchaVerifierModal.
-    const verifier = _appVerifier;
+    // Prefer verifier passed directly from the screen; fall back to module-level slot.
+    const verifier = _recaptchaVerifier ?? _appVerifier;
     if (!verifier) {
-      console.warn('[OTP] No reCAPTCHA verifier available — FirebaseRecaptchaVerifierModal not yet mounted');
+      console.warn('[OTP] No reCAPTCHA verifier available — pass FirebaseRecaptchaVerifierModal ref to sendOTP');
     }
     _confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
     return { success: true, verificationId: _confirmationResult.verificationId ?? undefined, message: 'OTP ถูกส่งแล้ว' };
