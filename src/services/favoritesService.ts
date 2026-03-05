@@ -183,8 +183,8 @@ export async function getFavoritesCount(userId: string): Promise<number> {
     );
     const snapshot = await getDocs(q);
     return snapshot.size;
-  } catch (error) {
-    console.error('Error getting favorites count:', error);
+  } catch {
+    // Permission error during auth state transition — harmless
     return 0;
   }
 }

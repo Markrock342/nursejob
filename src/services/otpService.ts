@@ -1,34 +1,21 @@
 // ============================================
-// OTP SERVICE - Firebase Phone Authentication (Real)
+// OTP SERVICE - Cloud Function based (no reCAPTCHA)
+// Uses Firebase Admin custom tokens via Cloud Functions.
+// signInWithCustomToken() requires NO ApplicationVerifier.
 // ============================================
 
-import { 
-  PhoneAuthProvider,
-  signInWithPhoneNumber,
-  signInWithCredential,
-  linkWithCredential,
-  ConfirmationResult,
-} from 'firebase/auth';
+import { signInWithCustomToken } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getApp } from 'firebase/app';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
-// Module-level slot for the Recaptcha verifier mounted in App.tsx
-let _appVerifier: any = null;
-export function setRecaptchaVerifier(v: any) { _appVerifier = v; }
-export function getRecaptchaVerifier() { return _appVerifier; }
-
-// Store confirmation result between sendOTP and verifyOTP calls
-let _confirmationResult: ConfirmationResult | null = null;
+const _functions = getFunctions(getApp());
 
 // ==========================================
-// Phone OTP Functions (Real Firebase Phone Auth)
+// Phone Validation & Formatting
 // ==========================================
 
-/**
- * Format phone number to E.164 format for Thailand
- * Input: 0812345678 or 081-234-5678
- * Output: +66812345678
- */
 export function formatPhoneNumber(phone: string): string {
   let cleaned = phone.replace(/\D/g, '');
   if (cleaned.startsWith('0')) cleaned = cleaned.substring(1);
@@ -36,98 +23,84 @@ export function formatPhoneNumber(phone: string): string {
   return '+' + cleaned;
 }
 
-/**
- * Validate Thai phone number
- */
 export function isValidThaiPhone(phone: string): boolean {
   const cleaned = phone.replace(/\D/g, '');
   return /^0[689]\d{8}$/.test(cleaned);
 }
 
-/**
- * Send OTP via Firebase Phone Auth (Real SMS)\n * Returns verificationId to pass to OTPVerificationScreen
- */
+// ==========================================
+// sendOTP — calls Cloud Function sendCustomOTP
+// Returns verificationId = formatted phone (+66...)
+// devCode is returned by the CF while SMS is not wired yet
+// ==========================================
+
 export async function sendOTP(
   phoneNumber: string,
-  _recaptchaVerifier?: any
-): Promise<{ success: boolean; verificationId?: string; message?: string; error?: string }> {
+  _unused?: any
+): Promise<{ success: boolean; verificationId?: string; devCode?: string; message?: string; error?: string }> {
   try {
     if (!isValidThaiPhone(phoneNumber)) {
       return { success: false, error: 'เบอร์โทรศัพท์ไม่ถูกต้อง' };
     }
     const formattedPhone = formatPhoneNumber(phoneNumber);
-    // Web Firebase SDK requires an ApplicationVerifier (reCAPTCHA) on all platforms.
-    // Prefer verifier passed directly from the screen; fall back to module-level slot.
-    const verifier = _recaptchaVerifier ?? _appVerifier;
-    if (!verifier) {
-      console.warn('[OTP] No reCAPTCHA verifier available — pass FirebaseRecaptchaVerifierModal ref to sendOTP');
-    }
-    _confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-    return { success: true, verificationId: _confirmationResult.verificationId ?? undefined, message: 'OTP ถูกส่งแล้ว' };
+    const sendFn = httpsCallable(_functions, 'sendCustomOTP');
+    const result = await sendFn({ phone: formattedPhone });
+    const data = result.data as any;
+    return {
+      success: true,
+      verificationId: formattedPhone, // phone acts as the session key
+      devCode: data.devCode,
+      message: 'OTP ถูกส่งแล้ว',
+    };
   } catch (error: any) {
-    console.error('Error sending OTP:', error);
+    console.error('[OTP] sendOTP error:', error);
+    const code = error.code || '';
     let errorMessage = 'ไม่สามารถส่ง OTP ได้';
-    if (error.code === 'auth/invalid-phone-number') errorMessage = 'เบอร์โทรศัพท์ไม่ถูกต้อง';
-    else if (error.code === 'auth/too-many-requests') errorMessage = 'ส่ง OTP มากเกินไป กรุณารอสักครู่';
-    else if (error.code === 'auth/quota-exceeded') errorMessage = 'เกินโควต้าการส่ง SMS กรุณาลองใหม่ภายหลัง';
-    else if (error.code === 'auth/captcha-check-failed') errorMessage = 'reCAPTCHA ล้มเหลว กรุณาลองใหม่';
-    else if (error.code === 'auth/operation-not-allowed') errorMessage = 'Phone Auth ยังไม่รองรับบน Expo Go — กรุณา build ด้วย EAS (eas build) หรือใช้ Firebase Test Phone Number';
+    if (code === 'functions/invalid-argument') errorMessage = 'เบอร์โทรศัพท์ไม่ถูกต้อง';
+    else if (code === 'functions/resource-exhausted') errorMessage = 'ส่ง OTP มากเกินไป กรุณารอสักครู่';
+    else if (code === 'functions/unavailable') errorMessage = 'เซิร์ฟเวอร์ไม่พร้อมใช้งาน กรุณาลองใหม่';
     return { success: false, error: errorMessage };
   }
 }
 
-/**
- * Verify OTP code with Firebase Phone Auth
- * Signs in (or links) the Firebase user with the phone credential
- */
+// ==========================================
+// verifyOTP — calls Cloud Function verifyCustomOTP
+// On success: calls signInWithCustomToken (unless skipSignIn = true)
+// skipSignIn = true  →  verification only (profile phone update)
+// skipSignIn = false →  full sign-in (default, for register/login)
+// ==========================================
+
 export async function verifyOTP(
   verificationId: string,
-  otpCode: string
+  otpCode: string,
+  opts?: { skipSignIn?: boolean }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    if (_confirmationResult) {
-      // Fast path: use the ConfirmationResult from signInWithPhoneNumber
-      // Always use verificationId from the stored confirmationResult, not the param
-      const vid = _confirmationResult.verificationId || verificationId;
-      if (auth.currentUser) {
-        // Already signed in — link phone credential instead
-        const credential = PhoneAuthProvider.credential(vid, otpCode);
-        await linkWithCredential(auth.currentUser, credential);
-        await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-          phoneVerified: true,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        await _confirmationResult.confirm(otpCode);
-      }
-      _confirmationResult = null;
-    } else {
-      // Fallback: use verificationId directly (e.g. app restarted between send/verify)
-      const credential = PhoneAuthProvider.credential(verificationId, otpCode);
-      if (auth.currentUser) {
-        await linkWithCredential(auth.currentUser, credential);
-        await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-          phoneVerified: true,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        await signInWithCredential(auth, credential);
-      }
+    const verifyFn = httpsCallable(_functions, 'verifyCustomOTP');
+    const result = await verifyFn({ phone: verificationId, code: otpCode });
+    const data = result.data as any;
+
+    if (!opts?.skipSignIn) {
+      // Signs in as the phone user — triggers onAuthStateChanged in AuthContext
+      await signInWithCustomToken(auth, data.customToken);
     }
     return { success: true };
   } catch (error: any) {
-    console.error('Error verifying OTP:', error);
+    console.error('[OTP] verifyOTP error:', error);
+    const code = error.code || '';
     let errorMessage = 'รหัส OTP ไม่ถูกต้อง';
-    if (error.code === 'auth/invalid-verification-code') errorMessage = 'รหัส OTP ไม่ถูกต้อง';
-    else if (error.code === 'auth/code-expired') errorMessage = 'รหัส OTP หมดอายุ กรุณาขอใหม่';
-    else if (error.code === 'auth/credential-already-in-use') errorMessage = 'เบอร์นี้ถูกใช้งานแล้ว';
+    if (code === 'functions/not-found') errorMessage = 'OTP ไม่พบหรือหมดอายุ กรุณาขอรหัสใหม่';
+    else if (code === 'functions/deadline-exceeded') errorMessage = 'รหัส OTP หมดอายุ กรุณาขอรหัสใหม่';
+    else if (code === 'functions/resource-exhausted') errorMessage = 'ลองรหัสผิดมากเกินไป กรุณาขอ OTP ใหม่';
+    else if (code === 'functions/invalid-argument') errorMessage = error.message || 'รหัส OTP ไม่ถูกต้อง';
     return { success: false, error: errorMessage };
   }
 }
 
-/**
- * Update phone verified status in Firestore
- */
+// ==========================================
+// updatePhoneVerifiedStatus — kept for compatibility
+// ==========================================
+
 export async function updatePhoneVerifiedStatus(userId: string): Promise<void> {
   try {
     await updateDoc(doc(db, 'users', userId), {

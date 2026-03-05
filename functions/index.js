@@ -998,3 +998,127 @@ exports.notifyJobExpiringSoon = functions.pubsub
       return null;
     }
   });
+
+// ============================================
+// CUSTOM OTP AUTH — no reCAPTCHA, no Firebase Phone Auth
+// Uses Firebase Admin SDK to create/get phone users and issue custom tokens.
+// Client calls signInWithCustomToken() → no ApplicationVerifier required.
+// ============================================
+
+/**
+ * Step 1: Generate OTP and store it in Firestore.
+ * ⚠️  devCode is returned for testing — wire Twilio/SNS and remove it for production.
+ */
+exports.sendCustomOTP = functions.https.onCall(async (data, _context) => {
+  const { phone } = data;
+
+  if (!phone || typeof phone !== 'string' || !/^\+66[0-9]{9}$/.test(phone)) {
+    throw new functions.https.HttpsError('invalid-argument', 'เบอร์โทรศัพท์ไม่ถูกต้อง (+66XXXXXXXXX)');
+  }
+
+  // ── Rate limit: max 5 requests per hour per number ──────────────────
+  const now = Date.now();
+  const rlRef = db.collection('otpRateLimit').doc(phone);
+  const rlSnap = await rlRef.get();
+  if (rlSnap.exists) {
+    const rl = rlSnap.data();
+    if (rl.count >= 5 && rl.lastReset > now - 3600000) {
+      throw new functions.https.HttpsError('resource-exhausted', 'ส่ง OTP มากเกินไป กรุณารอ 1 ชั่วโมง');
+    }
+    if (rl.lastReset <= now - 3600000) {
+      await rlRef.set({ count: 1, lastReset: now });
+    } else {
+      await rlRef.update({ count: admin.firestore.FieldValue.increment(1) });
+    }
+  } else {
+    await rlRef.set({ count: 1, lastReset: now });
+  }
+
+  // ── Generate & store OTP ─────────────────────────────────────────────
+  const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+  await db.collection('otpCodes').doc(phone).set({
+    code: otpCode,
+    expiresAt: now + 5 * 60 * 1000, // 5 minutes
+    attempts: 0,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  // ── SMS integration (uncomment ONE provider) ─────────────────────────
+  // Option A — Twilio
+  // const twilio = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
+  // await twilio.messages.create({
+  //   body: `รหัส OTP NurseGo: ${otpCode} (หมดอายุใน 5 นาที)`,
+  //   from: process.env.TWILIO_PHONE,
+  //   to: phone,
+  // });
+  //
+  // Option B — AWS SNS
+  // const SNS = new (require('aws-sdk').SNS)({ region: 'ap-southeast-1' });
+  // await SNS.publish({ Message: `รหัส OTP NurseGo: ${otpCode}`, PhoneNumber: phone }).promise();
+  // ─────────────────────────────────────────────────────────────────────
+
+  functions.logger.log(`[OTP] ${phone} → ${otpCode}`);
+
+  // TODO: Remove devCode once SMS provider is wired
+  return { success: true, devCode: otpCode };
+});
+
+/**
+ * Step 2: Verify OTP and return a Firebase custom token.
+ * Client calls signInWithCustomToken() with the returned token.
+ */
+exports.verifyCustomOTP = functions.https.onCall(async (data, _context) => {
+  const { phone, code } = data;
+
+  if (!phone || !code) {
+    throw new functions.https.HttpsError('invalid-argument', 'ข้อมูลไม่ครบ');
+  }
+
+  const otpDoc = await db.collection('otpCodes').doc(phone).get();
+  if (!otpDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'OTP ไม่พบหรือหมดอายุแล้ว กรุณาขอรหัสใหม่');
+  }
+
+  const otpData = otpDoc.data();
+
+  if (Date.now() > otpData.expiresAt) {
+    await otpDoc.ref.delete();
+    throw new functions.https.HttpsError('deadline-exceeded', 'รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่');
+  }
+
+  if (otpData.attempts >= 5) {
+    await otpDoc.ref.delete();
+    throw new functions.https.HttpsError('resource-exhausted', 'ลองรหัสผิดมากเกินไป กรุณาขอ OTP ใหม่');
+  }
+
+  if (otpData.code !== String(code)) {
+    await otpDoc.ref.update({ attempts: admin.firestore.FieldValue.increment(1) });
+    const remaining = 4 - otpData.attempts;
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      remaining > 0
+        ? `รหัส OTP ไม่ถูกต้อง (เหลือ ${remaining} ครั้ง)`
+        : 'รหัส OTP ไม่ถูกต้อง'
+    );
+  }
+
+  // Correct — delete used OTP
+  await otpDoc.ref.delete();
+
+  // Get or create Firebase Auth user for this phone number
+  let uid;
+  try {
+    const existing = await admin.auth().getUserByPhoneNumber(phone);
+    uid = existing.uid;
+  } catch (err) {
+    if (err.code === 'auth/user-not-found') {
+      const created = await admin.auth().createUser({ phoneNumber: phone });
+      uid = created.uid;
+    } else {
+      throw err;
+    }
+  }
+
+  const customToken = await admin.auth().createCustomToken(uid);
+  return { success: true, customToken, uid };
+});

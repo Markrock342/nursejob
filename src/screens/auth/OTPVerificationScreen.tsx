@@ -19,8 +19,6 @@ import { RouteProp } from '@react-navigation/native';
 import { KittenButton as Button } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { sendOTP, verifyOTP } from '../../services/otpService';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import { firebaseConfig } from '../../config/firebase';
 import { AuthStackParamList } from '../../types';
 
 type OTPVerificationScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'OTPVerification'>;
@@ -40,7 +38,6 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const [verificationId, setVerificationId] = useState(initialVerificationId);
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
-  const recaptchaVerifierRef = useRef<any>(null);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -70,18 +67,18 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const handleResendOTP = async () => {
     setIsResending(true);
     try {
-      const result = await sendOTP(phone, recaptchaVerifierRef.current);
+      const result = await sendOTP(phone);
       if (result.success && result.verificationId) {
         setVerificationId(result.verificationId);
         setCountdown(60);
         setOtp(['', '', '', '', '', '']);
         inputRefs.current[0]?.focus();
-        Alert.alert('??? OTP ????????', '???????????? SMS ??????');
+        Alert.alert('ส่งอีก OTP สำเร็จ', 'SMS ส่งไปแล้ว');
       } else {
-        Alert.alert('??? OTP ?????????', result.error || '????????????');
+        Alert.alert('ส่ง OTP ล้มเหลว', result.error || 'ไม่สามารถส่ง OTP ได้');
       }
     } catch {
-      Alert.alert('??????????????', '???????????? OTP ???');
+      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถส่ง OTP ได้');
     } finally {
       setIsResending(false);
     }
@@ -90,7 +87,7 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const handleVerifyOTP = async (otpCode?: string) => {
     const code = otpCode || otp.join('');
     if (code.length !== 6) {
-      Alert.alert('????????? OTP', '????????????? OTP 6 ????');
+      Alert.alert('กรุณากรอก OTP', 'กรุณากรอก OTP 6 หลัก');
       return;
     }
     setIsLoading(true);
@@ -98,20 +95,20 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
       const result = await verifyOTP(verificationId, code);
       if (result.success) {
         Alert.alert(
-          '????????????! ?',
-          '??????????????????????????????????????',
+          'ยืนยันสำเร็จ!',
+          'เบอร์โทรศัพท์ของคุณได้รับการยืนยันแล้ว',
           [{
-            text: '????????????',
+            text: 'ถัดไป',
             onPress: () => navigation.replace('ChooseRole', { phone, phoneVerified: true, registrationData }),
           }]
         );
       } else {
-        Alert.alert('???? OTP ??????????', result.error || '??????????????????????');
+        Alert.alert('OTP ไม่ถูกต้อง', result.error || 'กรุณาลองใหม่อีกครั้ง');
         setOtp(['', '', '', '', '', '']);
         inputRefs.current[0]?.focus();
       }
     } catch {
-      Alert.alert('??????????????', '??????????????? OTP ???');
+      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถยืนยัน OTP ได้');
     } finally {
       setIsLoading(false);
     }
@@ -124,13 +121,6 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaVerifierRef}
-        firebaseConfig={firebaseConfig}
-        attemptInvisibleVerification={true}
-        title="ยืนยันตัวตน"
-        cancelLabel="ยกเลิก"
-      />
       <View style={styles.content}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
@@ -142,8 +132,8 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        <Text style={styles.title}>???????????????????</Text>
-        <Text style={styles.subtitle}>?????????? OTP ?????</Text>
+        <Text style={styles.title}>ยืนยันตัวตน</Text>
+        <Text style={styles.subtitle}>กรุณากรอก OTP</Text>
         <Text style={styles.phone}>{formatPhoneDisplay(phone)}</Text>
 
         <View style={styles.otpContainer}>
@@ -164,7 +154,7 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
         </View>
 
         <Button
-          title={isLoading ? '????????????...' : '?????? OTP'}
+          title={isLoading ? 'กำลังตรวจสอบ...' : 'ยืนยัน OTP'}
           onPress={() => handleVerifyOTP()}
           loading={isLoading}
           disabled={otp.join('').length !== 6}
@@ -172,19 +162,19 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
         />
 
         <View style={styles.resendContainer}>
-          <Text style={styles.resendText}>?????????????? </Text>
+          <Text style={styles.resendText}>ไม่ได้รับ OTP? </Text>
           {countdown > 0 ? (
-            <Text style={styles.countdownText}>???????????? {countdown}s</Text>
+            <Text style={styles.countdownText}>ลองใหม่ใน {countdown}s</Text>
           ) : (
             <TouchableOpacity onPress={handleResendOTP} disabled={isResending}>
-              <Text style={styles.resendLink}>{isResending ? '????????...' : '???????????'}</Text>
+              <Text style={styles.resendLink}>{isResending ? 'กำลังส่ง...' : 'ส่งอีกครั้ง'}</Text>
             </TouchableOpacity>
           )}
         </View>
 
         <TouchableOpacity style={styles.changePhoneButton} onPress={() => navigation.goBack()}>
           <Ionicons name="create-outline" size={16} color={COLORS.textMuted} />
-          <Text style={styles.changePhoneText}>????????????????????</Text>
+          <Text style={styles.changePhoneText}>เปลี่ยนเบอร์โทร</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

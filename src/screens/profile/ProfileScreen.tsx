@@ -2,7 +2,7 @@
 // PROFILE SCREEN - Production Ready
 // ============================================
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,8 +20,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { KittenButton as Button, Avatar, Card, Loading, ModalContainer, Input, Badge, Divider, ConfirmModal, SuccessModal, ErrorModal, ProfileProgressBar } from '../../components/common';
 import { sendOTP, verifyOTP } from '../../services/otpService';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import { firebaseConfig } from '../../config/firebase';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, POSITIONS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -47,8 +45,6 @@ interface Props {
 // Component
 // ============================================
 export default function ProfileScreen({ navigation }: Props) {
-  const recaptchaVerifierRef = useRef<any>(null);
-
   // Auth context
   const { user, isAuthenticated, logout, updateUser, isLoading: isAuthLoading, isAdmin, isInitialized } = useAuth();
   const { colors, isDark } = useTheme();
@@ -275,7 +271,8 @@ export default function ProfileScreen({ navigation }: Props) {
     setPhoneStep('sending');
     setOtpError('');
     try {
-      const result = await sendOTP(phone, recaptchaVerifierRef.current);
+      const result = await sendOTP(phone);
+      if (result.devCode && __DEV__) console.log('[OTP] devCode:', result.devCode);
       if (!result.success) {
         setPhoneStep('idle');
         setOtpError(result.error || 'ส่งรหัส OTP ไม่สำเร็จ');
@@ -300,7 +297,11 @@ export default function ProfileScreen({ navigation }: Props) {
     setOtpLoading(true);
     setOtpError('');
     try {
-      await verifyOTP(pendingVerificationId, otpValue);
+      const otpResult = await verifyOTP(pendingVerificationId, otpValue, { skipSignIn: true });
+      if (!otpResult.success) {
+        setOtpError(otpResult.error || 'รหัส OTP ไม่ถูกต้อง กรุณาลองใหม่');
+        return;
+      }
       setPhoneStep('verified');
       setOtpError('');
     } catch (error: any) {
@@ -1059,15 +1060,6 @@ export default function ProfileScreen({ navigation }: Props) {
         title={modalTitle}
         message={modalMessage}
         onClose={() => setShowErrorModal(false)}
-      />
-
-      {/* reCAPTCHA verifier (invisible) */}
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaVerifierRef}
-        firebaseConfig={firebaseConfig}
-        attemptInvisibleVerification={true}
-        title="ยืนยันตัวตน"
-        cancelLabel="ยกเลิก"
       />
     </SafeAreaView>
   );

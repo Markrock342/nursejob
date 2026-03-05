@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,8 +15,6 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { AuthStackParamList } from '../../types';
 import { sendOTP, isValidThaiPhone } from '../../services/otpService';
 import { Ionicons } from '@expo/vector-icons';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import { firebaseConfig } from '../../config/firebase';
 
 // ============================================
 // Types
@@ -31,8 +29,6 @@ interface Props {
 // Component
 // ============================================
 export default function RegisterScreen({ navigation }: Props) {
-  const recaptchaVerifierRef = useRef<any>(null);
-
   // Form State
   const [phone, setPhone] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -88,9 +84,10 @@ export default function RegisterScreen({ navigation }: Props) {
     try {
       const cleanedPhone = phone.replace(/\D/g, '');
 
-      const result = await sendOTP(cleanedPhone, recaptchaVerifierRef.current);
+      const result = await sendOTP(cleanedPhone);
 
       if (result.success && result.verificationId) {
+        if (result.devCode && __DEV__) console.log('[OTP] devCode:', result.devCode);
         navigation.navigate('OTPVerification', {
           phone: cleanedPhone,
           verificationId: result.verificationId,
@@ -217,14 +214,6 @@ export default function RegisterScreen({ navigation }: Props) {
         }}
       />
 
-      {/* reCAPTCHA verifier (invisible) */}
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaVerifierRef}
-        firebaseConfig={firebaseConfig}
-        attemptInvisibleVerification={true}
-        title="ยืนยันตัวตน"
-        cancelLabel="ยกเลิก"
-      />
     </SafeAreaView>
   );
 }
