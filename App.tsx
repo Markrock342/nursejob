@@ -14,7 +14,7 @@ if (!(global as any).process.stdout) {
   (global as any).process.stdout = { isTTY: false };
 }
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, TextInput } from 'react-native';
 import * as ExpoFont from 'expo-font';
@@ -51,6 +51,9 @@ import { getEvaTheme } from './src/theme/uiKitten';
 // Navigation
 import AppNavigator from './src/navigation/AppNavigator';
 import SplashScreen from './src/components/common/SplashScreen';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { firebaseConfig } from './src/config/firebase';
+import { setRecaptchaVerifier } from './src/services/otpService';
 
 // ============================================
 // Sentry Crash Tracking
@@ -70,16 +73,30 @@ Sentry.init({
 function AppContent() {
   const { colors, isDark } = useTheme();
   const [showSplash, setShowSplash] = useState(true);
+  const recaptchaRef = useRef<FirebaseRecaptchaVerifierModal>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setShowSplash(false), 3000);
     return () => clearTimeout(t);
   }, []);
 
+  // Register the verifier once the component mounts
+  useEffect(() => {
+    if (recaptchaRef.current) setRecaptchaVerifier(recaptchaRef.current);
+  });
+
   if (showSplash) return <SplashScreen />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.primary }}>
+      {/* reCAPTCHA verifier — invisible, required by Firebase JS SDK phone auth */}
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaRef}
+        firebaseConfig={firebaseConfig}
+        attemptInvisibleVerification={true}
+        title="ยืนยันตัวตน"
+        cancelLabel="ยกเลิก"
+      />
       <AuthProvider>
         <NotificationProvider>
           <ToastProvider>

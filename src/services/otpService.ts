@@ -12,6 +12,11 @@ import {
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
+// Module-level slot for the Recaptcha verifier mounted in App.tsx
+let _appVerifier: any = null;
+export function setRecaptchaVerifier(v: any) { _appVerifier = v; }
+export function getRecaptchaVerifier() { return _appVerifier; }
+
 // Store confirmation result between sendOTP and verifyOTP calls
 let _confirmationResult: ConfirmationResult | null = null;
 
@@ -51,8 +56,13 @@ export async function sendOTP(
       return { success: false, error: 'เบอร์โทรศัพท์ไม่ถูกต้อง' };
     }
     const formattedPhone = formatPhoneNumber(phoneNumber);
-    // Web Firebase SDK — works on EAS native builds (Android uses Play Integrity, no reCAPTCHA needed)
-    _confirmationResult = await signInWithPhoneNumber(auth, formattedPhone);
+    // Web Firebase SDK requires an ApplicationVerifier (reCAPTCHA) on all platforms.
+    // The verifier is mounted at root level in App.tsx via FirebaseRecaptchaVerifierModal.
+    const verifier = _appVerifier;
+    if (!verifier) {
+      console.warn('[OTP] No reCAPTCHA verifier available — FirebaseRecaptchaVerifierModal not yet mounted');
+    }
+    _confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
     return { success: true, verificationId: _confirmationResult.verificationId ?? undefined, message: 'OTP ถูกส่งแล้ว' };
   } catch (error: any) {
     console.error('Error sending OTP:', error);
