@@ -166,6 +166,8 @@ export function subscribeToFavorites(
     }
     
     callback(favorites.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+  }, (error) => {
+    console.warn('Favorites listener error (auth not ready?):', error.code);
   });
 }
 

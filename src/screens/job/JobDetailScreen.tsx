@@ -26,6 +26,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { contactForShift, deleteJob, updateJob, incrementViewCount, getShiftContacts, updateJobStatus } from '../../services/jobService';
 import { getUserSubscription } from '../../services/subscriptionService';
 import { getOrCreateConversation } from '../../services/chatService';
+import { toggleFavorite, isFavorited } from '../../services/favoritesService';
+import { useToast } from '../../context/ToastContext';
 import { JobPost, RootStackParamList } from '../../types';
 import { formatDate, formatRelativeTime, callPhone, openLine, openMapsDirections } from '../../utils/helpers';
 
@@ -79,10 +81,12 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const { user, requireAuth, isAuthenticated } = useAuth();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
 
   const [isContacting, setIsContacting] = useState(false);
   const [hasContacted, setHasContacted] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isSavingFav, setIsSavingFav] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -114,6 +118,12 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       incrementViewCount(job.id);
     }
   }, [job?.id, isOwner]);
+
+  // Load initial favorite state
+  useEffect(() => {
+    if (!user?.uid || !job?.id) return;
+    isFavorited(user.uid, job.id).then(setIsSaved).catch(() => {});
+  }, [user?.uid, job?.id]);
 
   // Load poster's subscription plan to show badge
   useEffect(() => {
@@ -270,8 +280,25 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
   // Handle save
   const handleSave = () => {
-    requireAuth(() => {
-      setIsSaved(!isSaved);
+    requireAuth(async () => {
+      if (!user?.uid || !job?.id || isSavingFav) return;
+      setIsSavingFav(true);
+      const prev = isSaved;
+      setIsSaved(!prev); // optimistic
+      try {
+        const isNow = await toggleFavorite(user.uid, job.id);
+        setIsSaved(isNow);
+        if (isNow) {
+          toast.success(`บันทึก "${job.title}" ไว้ในรายการโปรดแล้ว`, '❤️ บันทึกแล้ว');
+        } else {
+          toast.info('ลบออกจากรายการโปรดแล้ว', '💔 ลบออกแล้ว');
+        }
+      } catch {
+        setIsSaved(prev); // rollback
+        toast.error('ไม่สามารถบันทึกงานได้ กรุณาลองใหม่');
+      } finally {
+        setIsSavingFav(false);
+      }
     });
   };
 
@@ -379,7 +406,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="arrow-back" size={22} color="#fff" />
             </TouchableOpacity>
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.actionButton} onPress={handleSave}>
+              <TouchableOpacity style={styles.actionButton} onPress={handleSave} disabled={isSavingFav}>
                 <Ionicons name={isSaved ? 'heart' : 'heart-outline'} size={22} color={isSaved ? '#FF6B6B' : '#fff'} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionButton} onPress={handleShare}>

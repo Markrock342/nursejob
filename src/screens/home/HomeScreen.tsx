@@ -484,7 +484,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   // Real-time favorites subscription
   useEffect(() => {
-    if (!user?.uid) {
+    if (!user?.uid || !isInitialized) {
       setFavoriteIds([]);
       return;
     }
@@ -494,7 +494,7 @@ export default function HomeScreen({ navigation }: Props) {
     });
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, isInitialized]);
 
   // Check for expiring posts on app load
   useEffect(() => {
