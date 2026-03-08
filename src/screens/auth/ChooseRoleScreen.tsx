@@ -11,6 +11,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -19,6 +21,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { KittenButton as Button } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { AuthStackParamList } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import { completeUserOnboarding } from '../../services/authService';
 
 // ============================================
 // Role definitions
@@ -105,14 +109,39 @@ type Nav = NativeStackNavigationProp<AuthStackParamList, 'ChooseRole'>;
 type Route = RouteProp<AuthStackParamList, 'ChooseRole'>;
 
 export default function ChooseRoleScreen({ navigation, route }: { navigation: Nav; route: Route }) {
-  const { phone, registrationData } = route.params;
+  const { phone, registrationData, fromGoogle } = route.params;
+  const { user, refreshUser } = useAuth();
   const [selectedRole, setSelectedRole] = useState<RoleKey | null>(null);
   const [selectedStaffType, setSelectedStaffType] = useState<string | null>(null);
   const [selectedOrgType, setSelectedOrgType] = useState<OrgType | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    if (fromGoogle) {
+      // Google users: save role directly to Firestore and close the Auth modal
+      setIsSaving(true);
+      try {
+        if (!user?.uid) {
+          throw new Error('ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
+        }
+        await completeUserOnboarding(user.uid, {
+          role: selectedRole || 'user',
+          staffType: selectedRole === 'nurse' ? (selectedStaffType || undefined) : undefined,
+          orgType: selectedRole === 'hospital' ? (selectedOrgType || undefined) : undefined,
+        });
+        await refreshUser();
+        // Close the Auth modal (navigate up two levels: ChooseRole → AuthNavigator → RootStack)
+        navigation.getParent()?.goBack();
+      } catch {
+        Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกได้ กรุณาลองใหม่');
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+    // OTP/phone flow: proceed to CompleteRegistration as normal
     navigation.navigate('CompleteRegistration', {
-      phone,
+      phone: phone || '',
       phoneVerified: true,
       role: selectedRole || 'user',
       staffType: selectedRole === 'nurse' ? (selectedStaffType || undefined) : undefined,
@@ -122,8 +151,27 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
   };
 
   const handleSkip = () => {
+    if (fromGoogle) {
+      if (!user?.uid) {
+        Alert.alert('เกิดข้อผิดพลาด', 'ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
+        return;
+      }
+      setIsSaving(true);
+      completeUserOnboarding(user.uid, { role: 'user' })
+        .then(() => refreshUser())
+        .then(() => {
+          navigation.getParent()?.goBack();
+        })
+        .catch(() => {
+          Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกได้ กรุณาลองใหม่');
+        })
+        .finally(() => {
+          setIsSaving(false);
+        });
+      return;
+    }
     navigation.navigate('CompleteRegistration', {
-      phone,
+      phone: phone || '',
       phoneVerified: true,
       role: 'user',
     });
@@ -247,9 +295,10 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
 
         {/* Continue */}
         <Button
-          title="ดำเนินการต่อ"
+          title={isSaving ? 'กำลังบันทึก...' : 'ดำเนินการต่อ'}
           onPress={handleContinue}
-          disabled={selectedRole === null}
+          disabled={selectedRole === null || isSaving}
+          loading={isSaving}
           style={styles.continueBtn}
         />
         <TouchableOpacity onPress={handleSkip} style={styles.skipBtn}>

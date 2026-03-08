@@ -30,6 +30,7 @@ import { getJobById } from '../../services/jobService';
 // ============================================
 // Helper Functions
 // ============================================
+
 const getNotificationIcon = (type: NotificationType): string => {
   const icons: Record<NotificationType, string> = {
     new_job: 'briefcase',
@@ -41,6 +42,8 @@ const getNotificationIcon = (type: NotificationType): string => {
     new_applicant: 'person-add',
     job_expired: 'time',
     profile_reminder: 'person',
+    license_approved: 'shield-checkmark',
+    license_rejected: 'shield-outline',
     system: 'information-circle',
   };
   return icons[type] || 'notifications';
@@ -57,6 +60,8 @@ const getNotificationColor = (type: NotificationType): string => {
     new_applicant: COLORS.secondary,
     job_expired: COLORS.warning,
     profile_reminder: COLORS.info,
+    license_approved: COLORS.success,
+    license_rejected: COLORS.error,
     system: COLORS.textSecondary,
   };
   return colorMap[type] || COLORS.primary;

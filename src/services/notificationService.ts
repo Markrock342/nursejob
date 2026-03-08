@@ -25,6 +25,7 @@ function getNotificationsSync() {
 }
 import { doc, updateDoc } from 'firebase/firestore';
 import app, { db } from '../config/firebase';
+import { isAuthUser } from './security/authGuards';
 
 // Ensure Firebase is initialized (for push notification context)
 if (!app) {
@@ -57,6 +58,12 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   if (!N) return null; // Not available in this environment
 
   let token: string | null = null;
+
+  // Expo Go (SDK 53+) no longer supports remote push notifications.
+  if ((Constants as any)?.appOwnership === 'expo') {
+    console.warn('Push token registration skipped in Expo Go. Use a development build for remote push.');
+    return null;
+  }
 
   // Skip on web - push notifications not fully supported
   if (Platform.OS === 'web') {
@@ -103,6 +110,11 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     // If the server complains about projectId being invalid, log a helpful hint
     if (error?.message?.includes?.('projectId')) {
       console.warn('Failed to get Expo push token: invalid or missing projectId. Remove hard-coded projectId or set EXPO_PUBLIC_PROJECT_ID.');
+    }
+    const msg = String(error?.message || '');
+    if (msg.includes('Expo Go') || msg.includes('remote notifications')) {
+      console.warn('Remote push token is unavailable in Expo Go.');
+      return null;
     }
     console.error('Error getting push token:', error);
     return null;
@@ -151,6 +163,11 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 // ==========================================
 export async function savePushTokenToUser(userId: string, token: string): Promise<void> {
   try {
+    if (!isAuthUser(userId)) {
+      console.warn('[savePushTokenToUser] skipped: uid mismatch or not authenticated');
+      return;
+    }
+
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
       pushToken: token,

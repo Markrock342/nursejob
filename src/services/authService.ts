@@ -5,6 +5,7 @@ import {
   onAuthStateChanged,
   updateProfile,
   signInWithCredential,
+  signInWithCustomToken,
   linkWithCredential,
   GoogleAuthProvider,
   EmailAuthProvider,
@@ -14,6 +15,7 @@ import {
   User as FirebaseUser
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { auth, db } from '../config/firebase';
 import { ADMIN_CONFIG, validateAdminConfig } from '../config/adminConfig';
 import * as ExpoCrypto from 'expo-crypto';
@@ -124,6 +126,115 @@ export function isAdminEmail(email: string): boolean {
 
 const USERS_COLLECTION = 'users';
 
+function normalizePhoneForStorage(phone?: string | null): string | undefined {
+  if (!phone) return undefined;
+  let cleaned = phone.replace(/\D/g, '');
+  if (!cleaned) return undefined;
+  if (cleaned.startsWith('66')) {
+    cleaned = `0${cleaned.substring(2)}`;
+  }
+  if (!cleaned.startsWith('0') && cleaned.length === 9) {
+    cleaned = `0${cleaned}`;
+  }
+  return cleaned;
+}
+
+function mapUserProfile(docId: string, data: any): UserProfile {
+  return {
+    id: docId,
+    uid: docId,
+    ...data,
+    phone: normalizePhoneForStorage(data.phone),
+    isAdmin: data.isAdmin === true || data.role === 'admin',
+    createdAt: data.createdAt?.toDate?.() || data.createdAt || new Date(),
+    updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
+  } as UserProfile;
+}
+
+function buildProfileSeed(
+  user: FirebaseUser,
+  seed: Partial<Omit<UserProfile, 'id' | 'uid' | 'createdAt'>> = {}
+): Omit<UserProfile, 'id'> {
+  return {
+    uid: user.uid,
+    email: seed.email || user.email || '',
+    displayName: seed.displayName || user.displayName || user.email?.split('@')[0] || 'ผู้ใช้',
+    username: seed.username,
+    photoURL: seed.photoURL ?? user.photoURL,
+    phone: normalizePhoneForStorage(seed.phone || user.phoneNumber),
+    role: seed.role || 'user',
+    isAdmin: seed.isAdmin === true,
+    isVerified: seed.isVerified ?? false,
+    onboardingCompleted: seed.onboardingCompleted,
+    staffType: seed.staffType,
+    orgType: seed.orgType,
+    emailVerified: seed.emailVerified ?? user.emailVerified,
+    createdAt: new Date(),
+  };
+}
+
+async function resolveUserProfileFromAuth(
+  user: FirebaseUser,
+  options: {
+    createIfMissing?: boolean;
+    fallbackPhone?: string;
+    seed?: Partial<Omit<UserProfile, 'id' | 'uid' | 'createdAt'>>;
+  } = {}
+): Promise<UserProfile | null> {
+  const directProfile = await getUserProfile(user.uid);
+  if (directProfile) {
+    return directProfile;
+  }
+
+  const fallbackPhone = normalizePhoneForStorage(options.fallbackPhone || user.phoneNumber);
+  if (fallbackPhone) {
+    const phoneProfile = await findUserByPhone(fallbackPhone);
+    if (phoneProfile) {
+      if (phoneProfile.uid !== user.uid) {
+        const migratedProfile = {
+          ...phoneProfile,
+          uid: user.uid,
+          email: user.email || phoneProfile.email || '',
+          displayName: user.displayName || phoneProfile.displayName || 'ผู้ใช้',
+          photoURL: user.photoURL || phoneProfile.photoURL || null,
+          phone: fallbackPhone,
+          updatedAt: new Date(),
+        };
+        await setDoc(doc(db, USERS_COLLECTION, user.uid), {
+          ...migratedProfile,
+          createdAt: phoneProfile.createdAt,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+        return { ...migratedProfile, id: user.uid } as UserProfile;
+      }
+      return phoneProfile;
+    }
+  }
+
+  if (!options.createIfMissing) {
+    return null;
+  }
+
+  const seededProfile = buildProfileSeed(user, options.seed);
+  await setDoc(doc(db, USERS_COLLECTION, user.uid), {
+    ...seededProfile,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  return { id: user.uid, ...seededProfile };
+}
+
+export async function resolveAuthenticatedUserProfile(
+  user: FirebaseUser,
+  options: {
+    createIfMissing?: boolean;
+    fallbackPhone?: string;
+    seed?: Partial<Omit<UserProfile, 'id' | 'uid' | 'createdAt'>>;
+  } = {}
+): Promise<UserProfile | null> {
+  return resolveUserProfileFromAuth(user, options);
+}
+
 // ==========================================
 // Authentication Functions
 // ==========================================
@@ -154,15 +265,26 @@ export async function registerUser(
       }
     }
 
-    const isAdmin = isAdminEmail(email);
-    const finalRole = isAdmin ? 'admin' : role;
+    const isAdmin = false;
+    const finalRole = role;
     let user: FirebaseUser;
+    const currentUser = auth.currentUser;
+    const hasEmailProvider = currentUser?.providerData.some(
+      (provider) => provider.providerId === EmailAuthProvider.PROVIDER_ID
+    ) || false;
+    const normalizedPhone = normalizePhoneForStorage(phone);
+    const currentUserPhone = normalizePhoneForStorage(currentUser?.phoneNumber);
+    const shouldLinkCurrentSession = Boolean(
+      currentUser &&
+      !hasEmailProvider &&
+      (!normalizedPhone || !currentUserPhone || normalizedPhone === currentUserPhone)
+    );
 
-    if (auth.currentUser && auth.currentUser.providerData.some(p => p.providerId === 'phone')) {
+    if (shouldLinkCurrentSession && currentUser) {
       // ===== PHONE-FIRST FLOW =====
       // User signed in via Phone OTP → link email+password credential
       const emailCredential = EmailAuthProvider.credential(email, password);
-      const linked = await linkWithCredential(auth.currentUser, emailCredential);
+      const linked = await linkWithCredential(currentUser, emailCredential);
       user = linked.user;
     } else {
       // ===== STANDARD FLOW =====
@@ -182,11 +304,12 @@ export async function registerUser(
       email,
       displayName,
       username: username || undefined,
-      phone: phone || user.phoneNumber || undefined,
+      phone: normalizePhoneForStorage(phone || user.phoneNumber),
       role: finalRole,
       isAdmin,
       isVerified: false,
-      emailVerified: false,
+      onboardingCompleted: true,
+      emailVerified: user.emailVerified,
       createdAt: new Date(),
       ...(staffType ? { staffType } : {}),
       ...(orgType ? { orgType } : {}),
@@ -216,37 +339,21 @@ export async function loginUser(email: string, password: string): Promise<UserPr
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
-    // Get user profile from Firestore
-    let userProfile = await getUserProfile(user.uid);
-    
-    // If profile doesn't exist, create one (for existing Firebase Auth users)
-    if (!userProfile) {
-      const isAdmin = isAdminEmail(email);
-      userProfile = {
-        id: user.uid,
-        uid: user.uid,
+    const userProfile = await resolveUserProfileFromAuth(user, {
+      createIfMissing: true,
+      seed: {
         email: user.email || email,
         displayName: user.displayName || email.split('@')[0],
-        role: isAdmin ? 'admin' : 'user', // Default เป็น user
-        isAdmin,
+        role: 'user',
+        isAdmin: false,
         isVerified: false,
-        createdAt: new Date(),
-      };
-      
-      await setDoc(doc(db, USERS_COLLECTION, user.uid), {
-        ...userProfile,
-        createdAt: serverTimestamp(),
-      });
-    }
+        onboardingCompleted: true,
+        emailVerified: user.emailVerified,
+      },
+    });
 
-    // Update isAdmin flag if needed
-    if (isAdminEmail(email) && !userProfile.isAdmin) {
-      await updateDoc(doc(db, USERS_COLLECTION, user.uid), {
-        isAdmin: true,
-        role: 'admin',
-      });
-      userProfile.isAdmin = true;
-      userProfile.role = 'admin';
+    if (!userProfile) {
+      throw new Error('ไม่สามารถโหลดข้อมูลผู้ใช้ได้');
     }
 
     return userProfile;
@@ -274,45 +381,45 @@ export async function loginUser(email: string, password: string): Promise<UserPr
 }
 
 // Login with Google ID Token
-export async function loginWithGoogle(idToken: string): Promise<UserProfile> {
+// Returns { profile, isNewUser } — isNewUser = true when onboarding not yet done
+export async function loginWithGoogle(idToken: string): Promise<{ profile: UserProfile; isNewUser: boolean }> {
   try {
     const credential = GoogleAuthProvider.credential(idToken);
     const userCredential = await signInWithCredential(auth, credential);
     const user = userCredential.user;
 
-    // Get or create user profile
-    let userProfile = await getUserProfile(user.uid);
-    
-    if (!userProfile) {
-      const isAdmin = isAdminEmail(user.email || '');
-      userProfile = {
-        id: user.uid,
-        uid: user.uid,
+    const userProfile = await resolveUserProfileFromAuth(user, {
+      createIfMissing: true,
+      seed: {
         email: user.email || '',
         displayName: user.displayName || 'ผู้ใช้',
         photoURL: user.photoURL,
-        role: isAdmin ? 'admin' : 'nurse',
-        isAdmin,
-        createdAt: new Date(),
-      };
-      
-      await setDoc(doc(db, USERS_COLLECTION, user.uid), {
-        ...userProfile,
-        createdAt: serverTimestamp(),
-      });
-    } else {
-      // Update photo URL from Google if changed
-      if (user.photoURL && user.photoURL !== userProfile.photoURL) {
-        await updateDoc(doc(db, USERS_COLLECTION, user.uid), {
-          photoURL: user.photoURL,
-        });
-        userProfile.photoURL = user.photoURL;
-      }
+        role: 'user',
+        isAdmin: false,
+        onboardingCompleted: false,
+        emailVerified: user.emailVerified,
+      },
+    });
+
+    if (!userProfile) {
+      throw new Error('ไม่สามารถโหลดข้อมูลผู้ใช้จาก Google ได้');
     }
 
-    return userProfile;
+    const isNewUser = !userProfile.onboardingCompleted;
+    if (user.photoURL && user.photoURL !== userProfile.photoURL) {
+      await updateDoc(doc(db, USERS_COLLECTION, user.uid), {
+        photoURL: user.photoURL,
+        updatedAt: serverTimestamp(),
+      });
+      userProfile.photoURL = user.photoURL;
+    }
+
+    return { profile: userProfile, isNewUser };
   } catch (error: any) {
     console.error('Error logging in with Google:', error);
+    if (error.code === 'auth/account-exists-with-different-credential') {
+      throw new Error('อีเมลนี้ลงทะเบียนด้วย Email/Password ไว้แล้ว\nกรุณาเข้าสู่ระบบด้วย Email และรหัสผ่านแทน');
+    }
     throw new Error('เข้าสู่ระบบด้วย Google ไม่สำเร็จ');
   }
 }
@@ -335,29 +442,37 @@ export async function findEmailByUsername(username: string): Promise<string | nu
   }
 }
 
-// Login as Admin with username/password (ไม่ต้องผ่าน Firebase Auth)
+// Login as Admin with username/password
 export async function loginAsAdmin(username: string, password: string): Promise<UserProfile> {
-  // Validate admin credentials (from environment variables)
-  const isValid = await validateAdminCredentials(username, password);
-  
-  if (!isValid) {
-    // Delay เพื่อป้องกัน brute force
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
-    throw new Error('Username หรือ Password ไม่ถูกต้อง');
+  try {
+    const verifyFn = httpsCallable(getFunctions(), 'verifyAdminLogin');
+    const result = await verifyFn({ username, password });
+    const data = result.data as any;
+
+    if (data?.customToken) {
+      await signInWithCustomToken(auth, data.customToken);
+    }
+
+    const profile = data.profile || {};
+    const currentUid = auth.currentUser?.uid;
+    return {
+      id: profile.id || currentUid,
+      uid: profile.uid || currentUid,
+      email: profile.email || ADMIN_CONFIG.email,
+      displayName: profile.displayName || ADMIN_CONFIG.displayName,
+      role: 'admin',
+      isAdmin: true,
+      createdAt: new Date(),
+    };
+  } catch (e: any) {
+    if (e?.code === 'functions/failed-precondition') {
+      throw new Error('ยังไม่ได้ตั้งค่า ADMIN_USERNAME / ADMIN_PASSWORD_HASH บน Cloud Functions');
+    }
+    if (e?.code === 'functions/unauthenticated') {
+      throw new Error('Username หรือ Password ไม่ถูกต้อง');
+    }
+    throw e;
   }
-
-  // สร้าง admin profile (ไม่บันทึกใน Firestore เพื่อความปลอดภัย)
-  const adminProfile: UserProfile = {
-    id: `admin_${ADMIN_CONFIG.username}`,
-    uid: `admin_${ADMIN_CONFIG.username}`,
-    email: ADMIN_CONFIG.email,
-    displayName: ADMIN_CONFIG.displayName,
-    role: 'admin',
-    isAdmin: true,
-    createdAt: new Date(),
-  };
-
-  return adminProfile;
 }
 
 // Logout user
@@ -378,14 +493,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 
     if (docSnap.exists()) {
       const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        uid: docSnap.id,
-        ...data,
-        isAdmin: data.isAdmin || isAdminEmail(data.email || ''),
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate(),
-      } as UserProfile;
+      return mapUserProfile(docSnap.id, data);
     }
     return null;
   } catch (error) {
@@ -400,6 +508,13 @@ export async function updateUserProfile(
   updates: Partial<Omit<UserProfile, 'id' | 'email' | 'createdAt'>>
 ): Promise<void> {
   try {
+    const sanitizedUpdates = { ...(updates as Record<string, any>) };
+    delete sanitizedUpdates.role;
+    delete sanitizedUpdates.isAdmin;
+    delete sanitizedUpdates.uid;
+    delete sanitizedUpdates.id;
+    delete sanitizedUpdates.email;
+
     const docRef = doc(db, USERS_COLLECTION, userId);
     const docSnap = await getDoc(docRef);
     if (!docSnap.exists()) {
@@ -407,28 +522,97 @@ export async function updateUserProfile(
       await setDoc(docRef, {
         uid: userId,
         createdAt: serverTimestamp(),
-        ...updates,
+        ...sanitizedUpdates,
         updatedAt: serverTimestamp(),
       }, { merge: true });
     } else {
       await updateDoc(docRef, {
-        ...updates,
+        ...sanitizedUpdates,
         updatedAt: serverTimestamp(),
       });
     }
 
     // Update Firebase Auth profile if displayName or photoURL changed
     const currentUser = auth.currentUser;
-    if (currentUser && (updates.displayName || updates.photoURL)) {
+    if (currentUser && (sanitizedUpdates.displayName || sanitizedUpdates.photoURL)) {
       await updateProfile(currentUser, {
-        displayName: updates.displayName,
-        photoURL: updates.photoURL,
+        displayName: sanitizedUpdates.displayName,
+        photoURL: sanitizedUpdates.photoURL,
       });
+    }
+
+    // Keep poster snapshot fields on old posts in sync with latest profile.
+    if (sanitizedUpdates.displayName !== undefined || sanitizedUpdates.photoURL !== undefined) {
+      const shiftsQuery = query(collection(db, 'shifts'), where('posterId', '==', userId));
+      const shiftsSnap = await getDocs(shiftsQuery);
+
+      if (!shiftsSnap.empty) {
+        const posterSnapshotUpdates: Record<string, any> = {
+          updatedAt: serverTimestamp(),
+        };
+
+        if (sanitizedUpdates.displayName !== undefined) {
+          posterSnapshotUpdates.posterName = sanitizedUpdates.displayName || 'ไม่ระบุชื่อ';
+        }
+        if (sanitizedUpdates.photoURL !== undefined) {
+          posterSnapshotUpdates.posterPhoto = sanitizedUpdates.photoURL || '';
+        }
+
+        await Promise.all(
+          shiftsSnap.docs.map((shiftDoc) => updateDoc(shiftDoc.ref, posterSnapshotUpdates))
+        );
+      }
     }
   } catch (error) {
     console.error('Error updating profile:', error);
     throw error;
   }
+}
+
+export async function completeUserOnboarding(
+  userId: string,
+  updates: {
+    role: 'user' | 'nurse' | 'hospital';
+    staffType?: string;
+    orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency';
+    phone?: string;
+  }
+): Promise<UserProfile> {
+  const payload: Record<string, any> = {
+    uid: userId,
+    role: updates.role,
+    isAdmin: false,
+    onboardingCompleted: true,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (updates.role === 'nurse') {
+    payload.staffType = updates.staffType || null;
+    payload.orgType = null;
+  } else if (updates.role === 'hospital') {
+    payload.orgType = updates.orgType || null;
+    payload.staffType = null;
+  } else {
+    payload.staffType = null;
+    payload.orgType = null;
+  }
+
+  const normalizedPhone = normalizePhoneForStorage(updates.phone);
+  if (normalizedPhone) {
+    payload.phone = normalizedPhone;
+    payload.phoneVerified = true;
+  }
+
+  await setDoc(doc(db, USERS_COLLECTION, userId), {
+    ...payload,
+    createdAt: serverTimestamp(),
+  }, { merge: true });
+
+  const profile = await getUserProfile(userId);
+  if (!profile) {
+    throw new Error('ไม่สามารถบันทึกข้อมูล onboarding ได้');
+  }
+  return profile;
 }
 
 // Subscribe to auth state changes
@@ -540,10 +724,9 @@ export async function refreshEmailVerificationStatus(): Promise<boolean> {
 // Find user profile by phone number
 export async function findUserByPhone(phone: string): Promise<UserProfile | null> {
   try {
-    // Clean phone number - remove all non-digits and normalize
-    let cleanPhone = phone.replace(/\D/g, '');
-    if (cleanPhone.startsWith('66')) {
-      cleanPhone = '0' + cleanPhone.substring(2);
+    const cleanPhone = normalizePhoneForStorage(phone);
+    if (!cleanPhone) {
+      return null;
     }
     
     const usersRef = collection(db, USERS_COLLECTION);
@@ -554,15 +737,7 @@ export async function findUserByPhone(phone: string): Promise<UserProfile | null
     
     if (!querySnapshot.empty) {
       const docData = querySnapshot.docs[0];
-      const data = docData.data();
-      return {
-        id: docData.id,
-        uid: docData.id,
-        ...data,
-        isAdmin: data.isAdmin || isAdminEmail(data.email || ''),
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate(),
-      } as UserProfile;
+      return mapUserProfile(docData.id, docData.data());
     }
     
     // Also try with leading zero variations
@@ -576,15 +751,7 @@ export async function findUserByPhone(phone: string): Promise<UserProfile | null
       const snapVar = await getDocs(qVar);
       if (!snapVar.empty) {
         const docData = snapVar.docs[0];
-        const data = docData.data();
-        return {
-          id: docData.id,
-          uid: docData.id,
-          ...data,
-          isAdmin: data.isAdmin || isAdminEmail(data.email || ''),
-          createdAt: data.createdAt?.toDate() || new Date(),
-          updatedAt: data.updatedAt?.toDate(),
-        } as UserProfile;
+        return mapUserProfile(docData.id, docData.data());
       }
     }
     
@@ -598,19 +765,34 @@ export async function findUserByPhone(phone: string): Promise<UserProfile | null
 // Login with phone (after OTP verification) - returns user profile without Firebase Auth
 export async function loginWithPhoneOTP(phone: string): Promise<UserProfile> {
   try {
-    const userProfile = await findUserByPhone(phone);
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('เซสชัน OTP ไม่สมบูรณ์ กรุณาขอรหัสใหม่');
+    }
+
+    const userProfile = await resolveUserProfileFromAuth(currentUser, {
+      fallbackPhone: phone,
+    });
     
     if (!userProfile) {
       throw new Error('ไม่พบบัญชีที่ลงทะเบียนด้วยเบอร์นี้\nกรุณาสมัครสมาชิกก่อน');
     }
     
     // Update last login
-    await updateDoc(doc(db, USERS_COLLECTION, userProfile.uid), {
+    await updateDoc(doc(db, USERS_COLLECTION, currentUser.uid), {
       lastLoginAt: serverTimestamp(),
       phoneVerified: true,
+      phone: normalizePhoneForStorage(phone),
+      updatedAt: serverTimestamp(),
     });
     
-    return userProfile;
+    const refreshedProfile = await getUserProfile(currentUser.uid);
+    return refreshedProfile || {
+      ...userProfile,
+      id: currentUser.uid,
+      uid: currentUser.uid,
+      phone: normalizePhoneForStorage(phone),
+    };
   } catch (error: any) {
     console.error('Error logging in with phone:', error);
     throw error;

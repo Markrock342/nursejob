@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
+import { assertAuthUser, isAuthUser } from './security/authGuards';
 
 const DOCUMENTS_COLLECTION = 'documents';
 
@@ -56,6 +57,8 @@ export async function uploadDocument(
   mimeType: string
 ): Promise<Document> {
   try {
+    assertAuthUser(userId, 'ไม่สามารถอัปโหลดเอกสารแทนผู้ใช้อื่นได้');
+
     // Generate unique file path
     const timestamp = Date.now();
     const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -95,6 +98,8 @@ export async function uploadDocument(
 // Get user documents
 export async function getUserDocuments(userId: string): Promise<Document[]> {
   try {
+    if (!isAuthUser(userId)) return [];
+
     const q = query(
       collection(db, DOCUMENTS_COLLECTION),
       where('userId', '==', userId)
@@ -118,6 +123,8 @@ export async function getUserDocuments(userId: string): Promise<Document[]> {
 // Get documents by type
 export async function getDocumentsByType(userId: string, type: DocumentType): Promise<Document[]> {
   try {
+    if (!isAuthUser(userId)) return [];
+
     const q = query(
       collection(db, DOCUMENTS_COLLECTION),
       where('userId', '==', userId),

@@ -27,7 +27,7 @@ import { MultiDateCalendar } from '../../components/common/MultiDateCalendar';
 import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import { createJob, updateJob } from '../../services/jobService';
 import { canUserPostToday, incrementPostCount, getUserSubscription, getPostExpiryDate } from '../../services/subscriptionService';
-import { JobPost, SUBSCRIPTION_PLANS } from '../../types';
+import { JobPost, SUBSCRIPTION_PLANS, SubscriptionPlan } from '../../types';
 import {
   ALL_PROVINCES,
   POPULAR_PROVINCES,
@@ -73,21 +73,21 @@ const POST_TYPES = [
     value: 'shift' as PostType,
     title: 'หาคนแทนเวร',
     subtitle: 'แลกเวร / ขายเวร',
-    icon: '🔄',
+    icon: 'swap-horizontal-outline' as const,
     color: '#3B82F6',
   },
   {
     value: 'job' as PostType,
     title: 'รับสมัครบุคลากร',
     subtitle: 'ประกาศรับสมัครงาน',
-    icon: '👩‍⚕️',
+    icon: 'briefcase-outline' as const,
     color: '#10B981',
   },
   {
     value: 'homecare' as PostType,
     title: 'หาคนดูแลผู้ป่วย',
     subtitle: 'เฝ้าไข้ / ดูแลที่บ้าน',
-    icon: '🏠',
+    icon: 'home-outline' as const,
     color: '#F59E0B',
   },
 ];
@@ -149,7 +149,7 @@ interface FormData {
 // Main Component
 // ============================================
 export default function PostJobScreen({ navigation, route }: Props) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isInitialized } = useAuth();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -239,7 +239,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
   
   // Subscription
   const [postsRemaining, setPostsRemaining] = useState<number | null>(null);
-  const [userPlan, setUserPlan] = useState<'free' | 'premium'>('free');
+  const [userPlan, setUserPlan] = useState<SubscriptionPlan>('free');
   
   // Get total steps based on post type
   const getTotalSteps = () => {
@@ -327,20 +327,17 @@ export default function PostJobScreen({ navigation, route }: Props) {
         }
         break;
       case 2: // วันเวลา
-        if (form.postType === 'shift' && form.shiftDates.length === 0) {
+        if (form.shiftDates.length === 0) {
           newErrors.shiftDates = 'กรุณาเลือกอย่างน้อย 1 วัน';
         }
         // Check each selected date has both start and end time
-        if (form.postType === 'shift') {
+        {
           const toKey = (d: Date) => d.toISOString().slice(0, 10);
           const missingTime = form.shiftDates.some(d => {
             const s = form.shiftTimeSlots[toKey(d)];
             return !s?.start || !s?.end;
           });
           if (missingTime) newErrors.shiftTimes = 'กรุณาระบุเวลาให้ครบทุกวัน';
-        }
-        if (form.postType === 'homecare' && !form.duration) {
-          newErrors.duration = 'กรุณาเลือกระยะเวลา';
         }
         break;
       case 3: // สถานที่
@@ -373,16 +370,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
   // Navigation
   const goNext = () => {
     if (currentStep === 0) {
-      // Slide animation from step 0 to 1
-      Animated.timing(slideAnim, {
-        toValue: 1,
-        duration: 350,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start(() => {
-        setCurrentStep(1);
-        slideAnim.setValue(0);
-      });
+      setCurrentStep(1);
       return;
     }
     if (validateStep(currentStep)) {
@@ -418,7 +406,10 @@ export default function PostJobScreen({ navigation, route }: Props) {
   
   // Submit
   const handleSubmit = async () => {
-    if (!user?.uid) return;
+    if (!user?.uid || !isInitialized) {
+      setAlert(createAlert.warning('กำลังยืนยันเซสชัน', 'กรุณารอสักครู่แล้วลองโพสต์อีกครั้ง') as AlertState);
+      return;
+    }
     
     // Check posting limit
     if (!isEditMode) {
@@ -450,7 +441,10 @@ export default function PostJobScreen({ navigation, route }: Props) {
   
   // Create job post function
   const createJobPost = async (isPaidUrgent: boolean, formArg?: FormData) => {
-    if (!user?.uid) return;
+    if (!user?.uid || !isInitialized) {
+      setAlert(createAlert.warning('กำลังยืนยันเซสชัน', 'กรุณารอสักครู่แล้วลองโพสต์อีกครั้ง') as AlertState);
+      return;
+    }
     
     const usedForm = formArg || form;
 
@@ -612,7 +606,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
           ]}
           onPress={() => setForm({ ...form, postType: type.value as PostType })}
         >
-          <Text style={styles.typeIcon}>{type.icon}</Text>
+          <View style={[styles.typeIconWrap, { backgroundColor: type.color + '18' }]}>
+            <Ionicons name={type.icon} size={30} color={type.color} />
+          </View>
           <View style={styles.typeInfo}>
             <Text style={[styles.typeTitle, { color: colors.text }]}>{type.title}</Text>
             <Text style={[styles.typeSubtitle, { color: colors.textSecondary }]}>{type.subtitle}</Text>
@@ -692,7 +688,11 @@ export default function PostJobScreen({ navigation, route }: Props) {
                 ]}
                 onPress={() => setForm({ ...form, locationType: type.code })}
               >
-                <Text style={styles.optionIcon}>{type.icon}</Text>
+                <Ionicons
+                  name={type.icon as any}
+                  size={24}
+                  color={form.locationType === type.code ? colors.primary : colors.textMuted}
+                />
                 <Text style={[styles.optionTitle, { color: colors.text }]}>{type.nameTH}</Text>
               </TouchableOpacity>
             ))}
@@ -720,178 +720,99 @@ export default function PostJobScreen({ navigation, route }: Props) {
   );
   
   // ============================================
-  // STEP 2: วันเวลา / ระยะเวลา
+  // STEP 2: วันเวลา (ใช้เหมือนกันทุกประเภทโพสต์)
   // ============================================
   const renderStep2 = () => {
-    if (form.postType === 'shift') {
-      const toKey = (d: Date) => d.toISOString().slice(0, 10);
-      const formatDateTH = (d: Date) =>
-        d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
+    const toKey = (d: Date) => d.toISOString().slice(0, 10);
+    const formatDateTH = (d: Date) =>
+      d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
 
-      const openSlotTime = (key: string, type: 'start' | 'end') => {
-        setEditingSlotKey(key);
-        setEditingSlotType(type);
-        if (type === 'start') setShowStartTimeModal(true);
-        else setShowEndTimeModal(true);
-      };
+    const openSlotTime = (key: string, type: 'start' | 'end') => {
+      setEditingSlotKey(key);
+      setEditingSlotType(type);
+      if (type === 'start') setShowStartTimeModal(true);
+      else setShowEndTimeModal(true);
+    };
 
-      return (
-        <View style={styles.stepContent}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>วันที่ต้องการ (เลือกได้หลายวัน)</Text>
-          <MultiDateCalendar
-            selectedDates={form.shiftDates}
-            onChange={(dates) => {
-              // Sync shiftTimeSlots: keep existing, prune removed dates
-              const newSlots: Record<string, { start: string; end: string }> = {};
-              dates.forEach(d => {
-                const k = toKey(d);
-                newSlots[k] = form.shiftTimeSlots[k] || { start: '', end: '' };
-              });
-              setForm({ ...form, shiftDates: dates, shiftDate: dates[0] || new Date(), shiftTimeSlots: newSlots });
-            }}
-          />
-          {errors.shiftDates && <Text style={styles.errorText}>{errors.shiftDates}</Text>}
-
-          {form.shiftDates.length > 0 && (
-            <>
-              <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-                เวลาแต่ละวัน
-              </Text>
-              {errors.shiftTimes && (
-                <Text style={[styles.errorText, { marginBottom: SPACING.sm }]}>{errors.shiftTimes}</Text>
-              )}
-              {form.shiftDates
-                .slice()
-                .sort((a, b) => a.getTime() - b.getTime())
-                .map(date => {
-                  const key = toKey(date);
-                  const slot = form.shiftTimeSlots[key] || { start: '', end: '' };
-                  const missing = !slot.start || !slot.end;
-                  return (
-                    <View
-                      key={key}
-                      style={[styles.slotRow, {
-                        borderColor: missing ? COLORS.error : colors.border,
-                        backgroundColor: colors.surface,
-                      }]}
-                    >
-                      <View style={styles.slotDateWrap}>
-                        <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
-                        <Text style={[styles.slotDateText, { color: colors.text }]}>
-                          {formatDateTH(date)}
-                        </Text>
-                      </View>
-                      <View style={styles.slotTimeWrap}>
-                        <TouchableOpacity
-                          style={[styles.slotTimeBtn, {
-                            borderColor: slot.start ? colors.primary : (missing ? COLORS.error : colors.border),
-                            backgroundColor: slot.start ? colors.primaryBackground : colors.card,
-                          }]}
-                          onPress={() => openSlotTime(key, 'start')}
-                        >
-                          <Text style={[styles.slotTimeTxt, { color: slot.start ? colors.primary : colors.textMuted }]}>
-                            {slot.start || 'เริ่ม'}
-                          </Text>
-                        </TouchableOpacity>
-                        <Ionicons name="arrow-forward" size={14} color={colors.textMuted} />
-                        <TouchableOpacity
-                          style={[styles.slotTimeBtn, {
-                            borderColor: slot.end ? colors.primary : (missing ? COLORS.error : colors.border),
-                            backgroundColor: slot.end ? colors.primaryBackground : colors.card,
-                          }]}
-                          onPress={() => openSlotTime(key, 'end')}
-                        >
-                          <Text style={[styles.slotTimeTxt, { color: slot.end ? colors.primary : colors.textMuted }]}>
-                            {slot.end || 'สิ้นสุด'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })}
-            </>
-          )}
-        </View>
-      );
-    }
-    
-    if (form.postType === 'homecare') {
-      // Home care: เลือกระยะเวลา
-      return (
-        <View style={styles.stepContent}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>ระยะเวลาที่ต้องการ</Text>
-          <View style={styles.durationGrid}>
-            {DURATION_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt.value}
-                style={[
-                  styles.durationCard,
-                  { borderColor: form.duration === opt.value ? colors.primary : colors.border },
-                  form.duration === opt.value && { backgroundColor: colors.primaryLight },
-                ]}
-                onPress={() => setForm({ ...form, duration: opt.value })}
-              >
-                <Text style={[styles.durationLabel, { color: colors.text }]}>{opt.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {errors.duration && <Text style={styles.errorText}>{errors.duration}</Text>}
-          
-          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-            วันที่เริ่ม (ถ้าทราบ)
-          </Text>
-          <TouchableOpacity
-            style={[styles.inputButton, { borderColor: colors.border }]}
-            onPress={() => setShowDateModal(true)}
-          >
-            <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-            <Text style={[styles.inputButtonText, { color: colors.text }]}>
-              {form.shiftDate.toLocaleDateString('th-TH', { 
-                weekday: 'long', day: 'numeric', month: 'long' 
-              })}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-    
-    // Job posting: รายละเอียดงาน
     return (
       <View style={styles.stepContent}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>รายละเอียดงาน</Text>
-        <TextInput
-          style={[styles.textInput, styles.textArea, { borderColor: colors.border, color: colors.text }]}
-          value={form.description}
-          onChangeText={(v) => setForm({ ...form, description: v })}
-          placeholder="อธิบายลักษณะงาน คุณสมบัติที่ต้องการ ประสบการณ์ ฯลฯ"
-          placeholderTextColor={colors.textMuted}
-          multiline
-          numberOfLines={5}
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>วันที่ต้องการ (เลือกได้หลายวัน)</Text>
+        <MultiDateCalendar
+          selectedDates={form.shiftDates}
+          onChange={(dates) => {
+            const newSlots: Record<string, { start: string; end: string }> = {};
+            dates.forEach(d => {
+              const k = toKey(d);
+              newSlots[k] = form.shiftTimeSlots[k] || { start: '', end: '' };
+            });
+            setForm({ ...form, shiftDates: dates, shiftDate: dates[0] || new Date(), shiftTimeSlots: newSlots });
+          }}
         />
-        
-        <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-          สวัสดิการ (เลือกได้หลายอัน)
-        </Text>
-        <View style={styles.chipRow}>
-          {['ประกันสังคม', 'ประกันกลุ่ม', 'โบนัส', 'OT', 'ที่พัก', 'อาหาร', 'รถรับส่ง', 'วันหยุดตามปฏิทิน'].map((benefit) => (
-            <Chip
-              key={benefit}
-              label={benefit}
-              selected={form.benefits.includes(benefit)}
-              onPress={() => {
-                if (form.benefits.includes(benefit)) {
-                  setForm({ ...form, benefits: form.benefits.filter(b => b !== benefit) });
-                } else {
-                  setForm({ ...form, benefits: [...form.benefits, benefit] });
-                }
-              }}
-            />
-          ))}
-        </View>
+        {errors.shiftDates && <Text style={styles.errorText}>{errors.shiftDates}</Text>}
+
+        {form.shiftDates.length > 0 && (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
+              เวลาแต่ละวัน
+            </Text>
+            {errors.shiftTimes && (
+              <Text style={[styles.errorText, { marginBottom: SPACING.sm }]}>{errors.shiftTimes}</Text>
+            )}
+            {form.shiftDates
+              .slice()
+              .sort((a, b) => a.getTime() - b.getTime())
+              .map(date => {
+                const key = toKey(date);
+                const slot = form.shiftTimeSlots[key] || { start: '', end: '' };
+                const missing = !slot.start || !slot.end;
+                return (
+                  <View
+                    key={key}
+                    style={[styles.slotRow, {
+                      borderColor: missing ? COLORS.error : colors.border,
+                      backgroundColor: colors.surface,
+                    }]}
+                  >
+                    <View style={styles.slotDateWrap}>
+                      <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
+                      <Text style={[styles.slotDateText, { color: colors.text }]}>
+                        {formatDateTH(date)}
+                      </Text>
+                    </View>
+                    <View style={styles.slotTimeWrap}>
+                      <TouchableOpacity
+                        style={[styles.slotTimeBtn, {
+                          borderColor: slot.start ? colors.primary : (missing ? COLORS.error : colors.border),
+                          backgroundColor: slot.start ? colors.primaryBackground : colors.card,
+                        }]}
+                        onPress={() => openSlotTime(key, 'start')}
+                      >
+                        <Text style={[styles.slotTimeTxt, { color: slot.start ? colors.primary : colors.textMuted }]}>
+                          {slot.start || 'เริ่ม'}
+                        </Text>
+                      </TouchableOpacity>
+                      <Ionicons name="arrow-forward" size={14} color={colors.textMuted} />
+                      <TouchableOpacity
+                        style={[styles.slotTimeBtn, {
+                          borderColor: slot.end ? colors.primary : (missing ? COLORS.error : colors.border),
+                          backgroundColor: slot.end ? colors.primaryBackground : colors.card,
+                        }]}
+                        onPress={() => openSlotTime(key, 'end')}
+                      >
+                        <Text style={[styles.slotTimeTxt, { color: slot.end ? colors.primary : colors.textMuted }]}>
+                          {slot.end || 'สิ้นสุด'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+          </>
+        )}
       </View>
     );
   };
-  
+
   // ============================================
   // STEP 3: สถานที่
   // ============================================
@@ -1031,6 +952,41 @@ export default function PostJobScreen({ navigation, route }: Props) {
         placeholderTextColor={colors.textMuted}
       />
       
+      {/* Description + Benefits - for job posting only */}
+      {form.postType === 'job' && (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>รายละเอียดงาน</Text>
+          <TextInput
+            style={[styles.textInput, styles.textArea, { borderColor: colors.border, color: colors.text }]}
+            value={form.description}
+            onChangeText={(v) => setForm({ ...form, description: v })}
+            placeholder="อธิบายลักษณะงาน คุณสมบัติที่ต้องการ ประสบการณ์ ฯลฯ"
+            placeholderTextColor={colors.textMuted}
+            multiline
+            numberOfLines={5}
+          />
+          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
+            สวัสดิการ (เลือกได้หลายอัน)
+          </Text>
+          <View style={styles.chipRow}>
+            {['ประกันสังคม', 'ประกันกลุ่ม', 'โบนัส', 'OT', 'ที่พัก', 'อาหาร', 'รถรับส่ง', 'วันหยุดตามปฏิทิน'].map((benefit) => (
+              <Chip
+                key={benefit}
+                label={benefit}
+                selected={form.benefits.includes(benefit)}
+                onPress={() => {
+                  if (form.benefits.includes(benefit)) {
+                    setForm({ ...form, benefits: form.benefits.filter(b => b !== benefit) });
+                  } else {
+                    setForm({ ...form, benefits: [...form.benefits, benefit] });
+                  }
+                }}
+              />
+            ))}
+          </View>
+        </>
+      )}
+
       {/* Rate/Salary */}
       <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
         {form.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}
@@ -1298,28 +1254,14 @@ export default function PostJobScreen({ navigation, route }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {currentStep === 0 ? (
-          <Animated.View
-            style={{
-              flex: 1,
-              transform: [
-                {
-                  translateX: slideAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, -400], // slide left
-                  }),
-                },
-              ],
-            }}
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
           >
-            <ScrollView
-              ref={scrollViewRef}
-              style={styles.scrollView}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {renderStepContent()}
-            </ScrollView>
-          </Animated.View>
+            {renderStepContent()}
+          </ScrollView>
         ) : (
           <ScrollView
             ref={scrollViewRef}
@@ -1760,8 +1702,12 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     marginBottom: SPACING.md,
   },
-  typeIcon: {
-    fontSize: 36,
+  typeIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: SPACING.md,
   },
   typeInfo: {

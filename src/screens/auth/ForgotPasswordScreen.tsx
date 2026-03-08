@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { KittenButton as Button, Input } from '../../components/common';
+import { Button, Input } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { resetPassword } from '../../services/authService';
 import { AuthStackParamList } from '../../types';

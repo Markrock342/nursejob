@@ -294,6 +294,7 @@ export interface JobPost {
   shiftDates?: string[]; // ISO strings สำหรับโพสต์หลายเวร
   shiftDateEnd?: Date; // สำหรับงานหลายวัน
   shiftTime: string; // เช่น "08:00-16:00", "16:00-00:00"
+  shiftTimeSlots?: Record<string, { start: string; end: string }>; // per-date time: key = "YYYY-MM-DD"
   startTime?: string;
   endTime?: string;
   duration?: string; // ระยะเวลา เช่น "1week", "1month"
@@ -521,7 +522,7 @@ export type AuthStackParamList = {
       displayName?: string;
     };
   };
-  ChooseRole: { phone: string; phoneVerified?: boolean; registrationData?: any };
+  ChooseRole: { phone?: string; phoneVerified?: boolean; fromGoogle?: boolean; registrationData?: any };
   CompleteRegistration: { 
     phone: string; 
     phoneVerified: boolean;

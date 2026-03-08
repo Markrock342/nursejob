@@ -12,11 +12,13 @@
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
 // Initialize Firebase Admin
 admin.initializeApp();
 
 const db = admin.firestore();
+const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
 
 // ============================================
 // CONFIG
@@ -26,6 +28,28 @@ const CONFIG = {
   FREE_DAILY_POST_LIMIT: 2,
   CHECK_INTERVAL_HOURS: 6,
 };
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+function safeEqualHex(a, b) {
+  if (!a || !b) return false;
+  const ba = Buffer.from(String(a), 'hex');
+  const bb = Buffer.from(String(b), 'hex');
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function getAdminEnvConfig() {
+  const runtimeAdmin = (typeof functions.config === 'function' ? functions.config().admin : null) || {};
+  return {
+    username: runtimeAdmin.username || process.env.ADMIN_USERNAME || '',
+    passwordHash: (runtimeAdmin.password_hash || process.env.ADMIN_PASSWORD_HASH || '').toLowerCase(),
+    email: runtimeAdmin.email || process.env.ADMIN_EMAIL || 'admin@nursego.admin',
+    displayName: runtimeAdmin.display_name || process.env.ADMIN_DISPLAY_NAME || 'Administrator',
+  };
+}
 
 // ============================================
 // IAP RECEIPT VERIFICATION - ตรวจสอบการซื้อจาก App Store / Google Play
@@ -79,7 +103,7 @@ exports.verifyIAPReceipt = functions.https.onRequest(async (req, res) => {
       // isValid = appleResult.status === 0;
       
       console.log('📱 iOS receipt received (verification pending Apple setup)');
-      isValid = true; // ⚠️ เปลี่ยนเมื่อ setup จริง
+      isValid = false;
       
     } else if (platform === 'android') {
       // ============================================
@@ -98,7 +122,8 @@ exports.verifyIAPReceipt = functions.https.onRequest(async (req, res) => {
       //   androidPublisher.purchases.subscriptions.get({ ... })
       
       console.log('🤖 Android receipt received (verification pending Google setup)');
-      isValid = true; // ⚠️ เปลี่ยนเมื่อ setup จริง
+      isValid = false;
+
     }
 
     if (isValid) {
@@ -127,6 +152,102 @@ exports.verifyIAPReceipt = functions.https.onRequest(async (req, res) => {
     console.error('❌ IAP verification error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
+});
+
+// ============================================
+// PRODUCTION ADMIN LOGIN
+// - If caller already has Firebase auth (anonymous/session), elevate that UID to admin
+// - Fallback to custom token flow for backward compatibility
+// ============================================
+exports.verifyAdminLogin = functions.https.onCall(async (data, context) => {
+  const { username, password } = data || {};
+  if (!username || !password) {
+    throw new functions.https.HttpsError('invalid-argument', 'username and password are required');
+  }
+
+  const cfg = getAdminEnvConfig();
+  if (!cfg.username || !cfg.passwordHash) {
+    throw new functions.https.HttpsError('failed-precondition', 'Admin env is not configured');
+  }
+
+  const validUser = String(username).trim().toLowerCase() === cfg.username.toLowerCase();
+  const inputHash = sha256(password);
+  const validPass = safeEqualHex(inputHash, cfg.passwordHash);
+
+  if (!validUser || !validPass) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    throw new functions.https.HttpsError('unauthenticated', 'Invalid admin credentials');
+  }
+
+  const adminUid = `admin_${sha256(cfg.username).slice(0, 20)}`;
+
+  await db.collection('users').doc(adminUid).set({
+    uid: adminUid,
+    email: cfg.email,
+    displayName: cfg.displayName,
+    role: 'admin',
+    isAdmin: true,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const customToken = await admin.auth().createCustomToken(adminUid);
+
+  return {
+    customToken,
+    profile: {
+      id: adminUid,
+      uid: adminUid,
+      email: cfg.email,
+      displayName: cfg.displayName,
+      role: 'admin',
+      isAdmin: true,
+    },
+  };
+});
+
+exports.adminVerifyUser = functions.https.onCall(async (data, context) => {
+  const uid = requireCallableAuth(context);
+  const adminDoc = await db.collection('users').doc(uid).get();
+  const isAdminUser = adminDoc.exists && (adminDoc.data()?.role === 'admin' || adminDoc.data()?.isAdmin === true);
+  if (!isAdminUser) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin only');
+  }
+
+  const { userId, isVerified } = data || {};
+  if (!userId || typeof userId !== 'string' || typeof isVerified !== 'boolean') {
+    throw new functions.https.HttpsError('invalid-argument', 'userId and isVerified are required');
+  }
+
+  await db.collection('users').doc(userId).set({
+    isVerified,
+    role: isVerified ? 'nurse' : 'user',
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return { ok: true };
+});
+
+exports.adminUpdateUserRole = functions.https.onCall(async (data, context) => {
+  const uid = requireCallableAuth(context);
+  const adminDoc = await db.collection('users').doc(uid).get();
+  const isAdminUser = adminDoc.exists && (adminDoc.data()?.role === 'admin' || adminDoc.data()?.isAdmin === true);
+  if (!isAdminUser) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin only');
+  }
+
+  const { userId, role } = data || {};
+  if (!userId || typeof userId !== 'string' || !['user', 'nurse', 'hospital', 'admin'].includes(role)) {
+    throw new functions.https.HttpsError('invalid-argument', 'userId and valid role are required');
+  }
+
+  await db.collection('users').doc(userId).set({
+    role,
+    isAdmin: role === 'admin',
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return { ok: true };
 });
 
 // Helper: Activate IAP product for user
@@ -209,8 +330,8 @@ exports.expireOldJobs = functions.pubsub
     const cutoffDate = new Date(Date.now() - CONFIG.POST_EXPIRE_HOURS * 60 * 60 * 1000);
     
     try {
-      // Query jobs that are active and older than cutoff
-      const snapshot = await db.collection('jobs')
+      // Query shifts that are active and older than cutoff
+      const snapshot = await db.collection('shifts')
         .where('status', '==', 'active')
         .where('createdAt', '<', cutoffDate)
         .get();
@@ -259,14 +380,14 @@ exports.expireOldJobs = functions.pubsub
 // ส่ง notification เมื่อมีคนสนใจงาน
 // ============================================
 exports.onNewApplication = functions.firestore
-  .document('applications/{applicationId}')
+  .document('shift_contacts/{applicationId}')
   .onCreate(async (snap, context) => {
     const application = snap.data();
     console.log('📬 New application:', context.params.applicationId);
     
     try {
-      // Get job details
-      const jobDoc = await db.collection('jobs').doc(application.jobId).get();
+      // Get shift details
+      const jobDoc = await db.collection('shifts').doc(application.jobId).get();
       if (!jobDoc.exists) {
         console.log('❌ Job not found');
         return null;
@@ -290,7 +411,7 @@ exports.onNewApplication = functions.firestore
         await createInAppNotification(job.posterId, {
           type: 'new_application',
           title: '📩 มีคนสนใจงานของคุณ!',
-          body: `${application.applicantName} สนใจงาน "${job.title}"`,
+          body: `${application.interestedUserName || 'ผู้สมัคร'} สนใจงาน "${job.title}"`,
           data: {
             jobId: application.jobId,
             applicationId: context.params.applicationId,
@@ -303,7 +424,7 @@ exports.onNewApplication = functions.firestore
       const message = {
         notification: {
           title: '📩 มีคนสนใจงานของคุณ!',
-          body: `${application.applicantName} สนใจงาน "${job.title}"`,
+          body: `${application.interestedUserName || 'ผู้สมัคร'} สนใจงาน "${job.title}"`,
         },
         data: {
           type: 'new_application',
@@ -320,7 +441,7 @@ exports.onNewApplication = functions.firestore
       await createInAppNotification(job.posterId, {
         type: 'new_application',
         title: '📩 มีคนสนใจงานของคุณ!',
-        body: `${application.applicantName} สนใจงาน "${job.title}"`,
+        body: `${application.interestedUserName || 'ผู้สมัคร'} สนใจงาน "${job.title}"`,
         data: {
           jobId: application.jobId,
           applicationId: context.params.applicationId,
@@ -506,9 +627,8 @@ exports.autoCloseFilledJobs = functions.pubsub
     console.log('🔄 Checking for filled jobs...');
     
     try {
-      const snapshot = await db.collection('jobs')
+      const snapshot = await db.collection('shifts')
         .where('status', '==', 'active')
-        .where('acceptedApplicants', '>=', 1)
         .get();
       
       if (snapshot.empty) {
@@ -522,8 +642,10 @@ exports.autoCloseFilledJobs = functions.pubsub
       snapshot.docs.forEach((doc) => {
         const job = doc.data();
         
-        // If accepted applicants >= positions needed, close the job
-        if (job.acceptedApplicants >= (job.positions || 1)) {
+        // Close when filled slots reach required slots.
+        const filled = Number(job.filledShifts || job.acceptedApplicants || 0);
+        const required = Number(job.totalShifts || job.positions || 1);
+        if (filled >= required && required > 0) {
           batch.update(doc.ref, {
             status: 'closed',
             closedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -563,8 +685,8 @@ exports.weeklyStatsReport = functions.pubsub
         .where('createdAt', '>=', oneWeekAgo)
         .get();
       
-      // Count new jobs
-      const newJobsSnapshot = await db.collection('jobs')
+      // Count new shifts
+      const newJobsSnapshot = await db.collection('shifts')
         .where('createdAt', '>=', oneWeekAgo)
         .get();
       
@@ -733,7 +855,11 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 // Uses Expo Push API (works with Expo push tokens)
 // ============================================
 async function sendExpoPush(pushToken, title, body, data = {}) {
-  if (!pushToken || !pushToken.startsWith('ExponentPushToken')) return false;
+  if (!pushToken) return false;
+  const validExpoToken =
+    pushToken.startsWith('ExponentPushToken') ||
+    pushToken.startsWith('ExpoPushToken');
+  if (!validExpoToken) return false;
   try {
     const response = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
@@ -780,7 +906,7 @@ exports.onNewShift = functions.firestore
     const shiftLat = shift.lat ?? shift.location?.lat ?? shift.location?.coordinates?.lat;
     const shiftLng = shift.lng ?? shift.location?.lng ?? shift.location?.coordinates?.lng;
 
-    if (!shiftLat || !shiftLng) {
+    if (shiftLat == null || shiftLng == null) {
       console.log('⚠️ No lat/lng on shift, skipping nearby alerts');
       return null;
     }
@@ -825,9 +951,13 @@ exports.onNewShift = functions.firestore
 
         const userData = userDoc.data();
         const alert = userData.nearbyJobAlert;
-        const userLat = alert.lat;
-        const userLng = alert.lng;
+        const userLat = alert?.lat;
+        const userLng = alert?.lng;
         const radiusKm = alert.radiusKm ?? 5;
+
+        if (userLat == null || userLng == null) {
+          continue;
+        }
 
         const distKm = haversineKm(userLat, userLng, shiftLat, shiftLng);
 
@@ -890,6 +1020,7 @@ async function createInAppNotification(userId, notification) {
     await db.collection('notifications').add({
       userId,
       ...notification,
+      isRead: false,
       read: false,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -899,6 +1030,173 @@ async function createInAppNotification(userId, notification) {
     return false;
   }
 }
+
+function requireCallableAuth(context) {
+  const uid = context?.auth?.uid;
+  if (!uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Authentication required');
+  }
+  return uid;
+}
+
+// ============================================
+// SECURE NOTIFICATION CALLABLES (cross-user)
+// ============================================
+exports.notifyNewApplicant = functions.https.onCall(async (data, context) => {
+  const callerUid = requireCallableAuth(context);
+  const { applicationId, jobId, applicantName, hospitalUserId } = data || {};
+
+  if (!applicationId || typeof applicationId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'applicationId required');
+  }
+
+  const appDoc = await db.collection('shift_contacts').doc(applicationId).get();
+  if (!appDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'Application not found');
+  }
+
+  const appData = appDoc.data() || {};
+  if (appData.interestedUserId !== callerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Only applicant can trigger this notification');
+  }
+
+  let posterId = appData.posterId;
+  if (!posterId && appData.jobId) {
+    const shiftDoc = await db.collection('shifts').doc(appData.jobId).get();
+    if (shiftDoc.exists) posterId = shiftDoc.data()?.posterId;
+  }
+  if (!posterId) {
+    throw new functions.https.HttpsError('failed-precondition', 'Application is missing posterId');
+  }
+  if (hospitalUserId && hospitalUserId !== posterId) {
+    throw new functions.https.HttpsError('invalid-argument', 'hospitalUserId mismatch');
+  }
+
+  let resolvedJobTitle = jobId || appData.jobId;
+  const shiftId = appData.jobId;
+  if (shiftId) {
+    const shiftDoc = await db.collection('shifts').doc(shiftId).get();
+    if (shiftDoc.exists) {
+      resolvedJobTitle = shiftDoc.data()?.title || resolvedJobTitle;
+    }
+  }
+
+  await createInAppNotification(posterId, {
+    type: 'new_applicant',
+    title: 'มีผู้สมัครงานใหม่',
+    body: `${applicantName || appData.interestedUserName || 'ผู้สมัคร'} สมัครตำแหน่ง ${resolvedJobTitle || 'ที่คุณประกาศ'}`,
+    data: {
+      applicationId,
+      jobId: appData.jobId || null,
+    },
+  });
+
+  return { ok: true };
+});
+
+exports.notifyApplicationStatus = functions.https.onCall(async (data, context) => {
+  const callerUid = requireCallableAuth(context);
+  const { applicationId, status, jobTitle, hospitalName, nurseUserId } = data || {};
+
+  if (!applicationId || typeof applicationId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'applicationId required');
+  }
+  if (!['accepted', 'rejected'].includes(status)) {
+    throw new functions.https.HttpsError('invalid-argument', 'status must be accepted or rejected');
+  }
+
+  const appDoc = await db.collection('shift_contacts').doc(applicationId).get();
+  if (!appDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'Application not found');
+  }
+
+  const appData = appDoc.data() || {};
+  let posterId = appData.posterId;
+  if (!posterId && appData.jobId) {
+    const shiftDoc = await db.collection('shifts').doc(appData.jobId).get();
+    if (shiftDoc.exists) posterId = shiftDoc.data()?.posterId;
+  }
+
+  if (posterId !== callerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Only poster can trigger this notification');
+  }
+
+  const targetNurseId = appData.interestedUserId;
+  if (!targetNurseId) {
+    throw new functions.https.HttpsError('failed-precondition', 'Application is missing interestedUserId');
+  }
+  if (nurseUserId && nurseUserId !== targetNurseId) {
+    throw new functions.https.HttpsError('invalid-argument', 'nurseUserId mismatch');
+  }
+
+  let resolvedTitle = jobTitle;
+  if (!resolvedTitle && appData.jobId) {
+    const shiftDoc = await db.collection('shifts').doc(appData.jobId).get();
+    if (shiftDoc.exists) resolvedTitle = shiftDoc.data()?.title;
+  }
+
+  let resolvedHospitalName = hospitalName;
+  if (!resolvedHospitalName) {
+    const posterDoc = await db.collection('users').doc(callerUid).get();
+    if (posterDoc.exists) resolvedHospitalName = posterDoc.data()?.displayName;
+  }
+
+  const type = status === 'accepted' ? 'application_accepted' : 'application_rejected';
+  const title = status === 'accepted' ? 'ยินดีด้วย! 🎉' : 'ผลการสมัครงาน';
+  const body = status === 'accepted'
+    ? `${resolvedHospitalName || 'ผู้ว่าจ้าง'} ตอบรับใบสมัครตำแหน่ง ${resolvedTitle || 'งานที่สมัคร'} ของคุณแล้ว`
+    : `${resolvedHospitalName || 'ผู้ว่าจ้าง'} ไม่สามารถรับสมัครตำแหน่ง ${resolvedTitle || 'งานที่สมัคร'} ได้ในขณะนี้`;
+
+  await createInAppNotification(targetNurseId, {
+    type,
+    title,
+    body,
+    data: {
+      applicationId,
+      jobId: appData.jobId || null,
+    },
+  });
+
+  return { ok: true };
+});
+
+exports.notifyNewMessage = functions.https.onCall(async (data, context) => {
+  const callerUid = requireCallableAuth(context);
+  const { conversationId, messagePreview, senderName, userId } = data || {};
+
+  if (!conversationId || typeof conversationId !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'conversationId required');
+  }
+
+  const convDoc = await db.collection('conversations').doc(conversationId).get();
+  if (!convDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'Conversation not found');
+  }
+
+  const convData = convDoc.data() || {};
+  const participants = Array.isArray(convData.participants) ? convData.participants : [];
+  if (!participants.includes(callerUid)) {
+    throw new functions.https.HttpsError('permission-denied', 'Caller is not a participant');
+  }
+
+  const recipientId = participants.find((p) => p !== callerUid);
+  if (!recipientId) {
+    throw new functions.https.HttpsError('failed-precondition', 'Recipient not found');
+  }
+  if (userId && userId !== recipientId) {
+    throw new functions.https.HttpsError('invalid-argument', 'userId mismatch');
+  }
+
+  const safePreview = (messagePreview || '').toString().slice(0, 120) || 'ส่งข้อความถึงคุณ';
+  await createInAppNotification(recipientId, {
+    type: 'new_message',
+    title: `ข้อความจาก ${senderName || 'ผู้ใช้'}`,
+    body: safePreview,
+    data: { conversationId },
+  });
+
+  return { ok: true };
+});
 
 // ============================================
 // 9. ON USER CREATE - Welcome notification
@@ -956,8 +1254,8 @@ exports.notifyJobExpiringSoon = functions.pubsub
     const cutoffDate = new Date(now.getTime() - (CONFIG.POST_EXPIRE_HOURS - 6) * 60 * 60 * 1000);
     
     try {
-      // Find jobs that will expire in ~6 hours
-      const snapshot = await db.collection('jobs')
+      // Find shifts that will expire in ~6 hours
+      const snapshot = await db.collection('shifts')
         .where('status', '==', 'active')
         .where('createdAt', '<=', cutoffDate)
         .where('expiryNotified', '!=', true)
@@ -1000,6 +1298,27 @@ exports.notifyJobExpiringSoon = functions.pubsub
   });
 
 // ============================================
+// EXCHANGE TOKEN — native Firebase auth → JS SDK custom token
+// Called after @react-native-firebase/auth phone sign-in succeeds.
+// The client sends its Firebase ID token; we verify it and return
+// a custom token so the JS SDK auth state can be synced.
+// ============================================
+exports.exchangeToken = functions.https.onCall(async (data, _context) => {
+  const { idToken } = data;
+  if (!idToken || typeof idToken !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'idToken required');
+  }
+  let decoded;
+  try {
+    decoded = await admin.auth().verifyIdToken(idToken);
+  } catch {
+    throw new functions.https.HttpsError('unauthenticated', 'Invalid or expired token');
+  }
+  const customToken = await admin.auth().createCustomToken(decoded.uid);
+  return { customToken };
+});
+
+// ============================================
 // CUSTOM OTP AUTH — no reCAPTCHA, no Firebase Phone Auth
 // Uses Firebase Admin SDK to create/get phone users and issue custom tokens.
 // Client calls signInWithCustomToken() → no ApplicationVerifier required.
@@ -1007,7 +1326,7 @@ exports.notifyJobExpiringSoon = functions.pubsub
 
 /**
  * Step 1: Generate OTP and store it in Firestore.
- * ⚠️  devCode is returned for testing — wire Twilio/SNS and remove it for production.
+ * devCode is returned only in emulator/dev mode (never in production).
  */
 exports.sendCustomOTP = functions.https.onCall(async (data, _context) => {
   const { phone } = data;
@@ -1057,10 +1376,17 @@ exports.sendCustomOTP = functions.https.onCall(async (data, _context) => {
   // await SNS.publish({ Message: `รหัส OTP NurseGo: ${otpCode}`, PhoneNumber: phone }).promise();
   // ─────────────────────────────────────────────────────────────────────
 
-  functions.logger.log(`[OTP] ${phone} → ${otpCode}`);
+  // Only allow returning devCode in emulator.
+  if (isEmulator) {
+    functions.logger.log(`[OTP DEV] ${phone} → ${otpCode}`);
+    return { success: true, devCode: otpCode };
+  }
 
-  // TODO: Remove devCode once SMS provider is wired
-  return { success: true, devCode: otpCode };
+  // Production: do not leak OTP in API response.
+  throw new functions.https.HttpsError(
+    'failed-precondition',
+    'OTP provider is not configured for production. Please configure SMS provider first.',
+  );
 });
 
 /**

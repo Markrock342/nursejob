@@ -17,6 +17,8 @@ import {
 import { db } from '../config/firebase';
 import { ShiftContact, JobPost } from '../types';
 import { getUserProfile } from './authService';
+import { assertAuthUser } from './security/authGuards';
+import { notifyApplicationStatus } from './notificationsService';
 
 const CONTACTS_COLLECTION = 'shift_contacts';
 const SHIFTS_COLLECTION = 'shifts';
@@ -174,12 +176,57 @@ export async function updateApplicationStatus(
   updatedBy?: string
 ): Promise<void> {
   try {
+    const currentUser = assertAuthUser();
+
     const docRef = doc(db, CONTACTS_COLLECTION, contactId);
+    const contactDoc = await getDoc(docRef);
+    if (!contactDoc.exists()) throw new Error('ไม่พบใบสมัครนี้');
+
+    const contactData = contactDoc.data();
+    let posterId = contactData.posterId;
+    if (!posterId && contactData.jobId) {
+      const shiftDoc = await getDoc(doc(db, SHIFTS_COLLECTION, contactData.jobId));
+      if (shiftDoc.exists()) {
+        posterId = shiftDoc.data().posterId;
+      }
+    }
+
+    if (posterId !== currentUser.uid && contactData.interestedUserId !== currentUser.uid) {
+      throw new Error('ไม่มีสิทธิ์อัปเดตสถานะใบสมัครนี้');
+    }
+
     await updateDoc(docRef, { 
       status,
       updatedAt: serverTimestamp(),
-      updatedBy,
+      updatedBy: updatedBy || currentUser.uid,
     });
+
+    if (status === 'confirmed' || status === 'cancelled') {
+      const mappedStatus = status === 'confirmed' ? 'accepted' : 'rejected';
+      try {
+        let jobTitle = 'งานที่สมัคร';
+        let hospitalName = 'ผู้ว่าจ้าง';
+        if (contactData.jobId) {
+          const shiftDoc = await getDoc(doc(db, SHIFTS_COLLECTION, contactData.jobId));
+          if (shiftDoc.exists()) {
+            const shiftData = shiftDoc.data();
+            jobTitle = shiftData.title || jobTitle;
+            hospitalName = shiftData.posterName || hospitalName;
+          }
+        }
+
+        await notifyApplicationStatus(
+          contactData.interestedUserId,
+          jobTitle,
+          hospitalName,
+          mappedStatus,
+          contactId,
+          contactData.jobId,
+        );
+      } catch (e) {
+        console.warn('[updateApplicationStatus] notifyApplicationStatus failed:', e);
+      }
+    }
   } catch (error) {
     console.error('Error updating contact status:', error);
     throw error;

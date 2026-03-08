@@ -17,7 +17,9 @@ import {
   writeBatch,
   Timestamp,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../config/firebase';
+import { assertAuthUser, isAuthUser } from './security/authGuards';
 
 const NOTIFICATIONS_COLLECTION = 'notifications';
 
@@ -60,6 +62,14 @@ export async function createNotification(
   data?: Notification['data']
 ): Promise<string> {
   try {
+    const currentUser = assertAuthUser();
+    // Client app should only create notifications for itself.
+    // Cross-user notifications must be sent by Cloud Functions/Admin SDK.
+    if (userId !== currentUser.uid) {
+      console.warn('[createNotification] blocked cross-user notification on client');
+      return '';
+    }
+
     const docRef = await addDoc(collection(db, NOTIFICATIONS_COLLECTION), {
       userId,
       type,
@@ -79,6 +89,8 @@ export async function createNotification(
 // Get user notifications
 export async function getUserNotifications(userId: string): Promise<Notification[]> {
   try {
+    if (!isAuthUser(userId)) return [];
+
     // Simple query without orderBy (sorted client-side to avoid index requirement)
     const q = query(
       collection(db, NOTIFICATIONS_COLLECTION),
@@ -103,6 +115,8 @@ export async function getUserNotifications(userId: string): Promise<Notification
 // Get unread notification count
 export async function getUnreadNotificationCount(userId: string): Promise<number> {
   try {
+    if (!isAuthUser(userId)) return 0;
+
     const q = query(
       collection(db, NOTIFICATIONS_COLLECTION),
       where('userId', '==', userId)
@@ -121,6 +135,10 @@ export function subscribeToNotifications(
   userId: string,
   callback: (notifications: Notification[]) => void
 ): () => void {
+  if (!isAuthUser(userId)) {
+    callback([]);
+    return () => {};
+  }
   // Simple query without orderBy (sorted client-side to avoid index requirement)
   const q = query(
     collection(db, NOTIFICATIONS_COLLECTION),
@@ -164,6 +182,8 @@ export async function markAsRead(notificationId: string): Promise<void> {
 // Mark all notifications as read
 export async function markAllAsRead(userId: string): Promise<void> {
   try {
+    if (!isAuthUser(userId)) return;
+
     const q = query(
       collection(db, NOTIFICATIONS_COLLECTION),
       where('userId', '==', userId),
@@ -194,6 +214,8 @@ export async function deleteNotification(notificationId: string): Promise<void> 
 // Delete all notifications
 export async function deleteAllNotifications(userId: string): Promise<void> {
   try {
+    if (!isAuthUser(userId)) return;
+
     const q = query(
       collection(db, NOTIFICATIONS_COLLECTION),
       where('userId', '==', userId)
@@ -214,6 +236,8 @@ export async function deleteAllNotifications(userId: string): Promise<void> {
 // Get unread count
 export async function getUnreadNotificationsCount(userId: string): Promise<number> {
   try {
+    if (!isAuthUser(userId)) return 0;
+
     const q = query(
       collection(db, NOTIFICATIONS_COLLECTION),
       where('userId', '==', userId),
@@ -236,13 +260,8 @@ export async function notifyNewApplicant(
   applicationId: string,
   jobId: string
 ): Promise<void> {
-  await createNotification(
-    hospitalUserId,
-    'new_applicant',
-    'มีผู้สมัครงานใหม่',
-    `${applicantName} สมัครตำแหน่ง ${jobTitle}`,
-    { applicationId, jobId }
-  );
+  const fn = httpsCallable(getFunctions(), 'notifyNewApplicant');
+  await fn({ hospitalUserId, applicantName, jobTitle, applicationId, jobId });
 }
 
 // Helper: Send application status notification to nurse
@@ -254,13 +273,8 @@ export async function notifyApplicationStatus(
   applicationId: string,
   jobId: string
 ): Promise<void> {
-  const type = status === 'accepted' ? 'application_accepted' : 'application_rejected';
-  const title = status === 'accepted' ? 'ยินดีด้วย! 🎉' : 'ผลการสมัครงาน';
-  const body = status === 'accepted'
-    ? `${hospitalName} ตอบรับใบสมัครตำแหน่ง ${jobTitle} ของคุณแล้ว`
-    : `${hospitalName} ไม่สามารถรับสมัครตำแหน่ง ${jobTitle} ได้ในขณะนี้`;
-  
-  await createNotification(nurseUserId, type, title, body, { applicationId, jobId });
+  const fn = httpsCallable(getFunctions(), 'notifyApplicationStatus');
+  await fn({ nurseUserId, jobTitle, hospitalName, status, applicationId, jobId });
 }
 
 // Helper: Send new message notification
@@ -270,13 +284,8 @@ export async function notifyNewMessage(
   messagePreview: string,
   conversationId: string
 ): Promise<void> {
-  await createNotification(
-    userId,
-    'new_message',
-    `ข้อความจาก ${senderName}`,
-    messagePreview.length > 50 ? messagePreview.substring(0, 50) + '...' : messagePreview,
-    { conversationId }
-  );
+  const fn = httpsCallable(getFunctions(), 'notifyNewMessage');
+  await fn({ userId, senderName, messagePreview, conversationId });
 }
 
 // Helper: แจ้งเตือนผลการตรวจสอบใบประกอบวิชาชีพ

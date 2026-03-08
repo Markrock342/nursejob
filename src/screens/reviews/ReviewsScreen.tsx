@@ -299,7 +299,7 @@ export default function ReviewsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <CustomAlert {...alert} onClose={closeAlert} />}
+      <CustomAlert {...alert} onClose={closeAlert} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />

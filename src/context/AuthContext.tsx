@@ -2,29 +2,27 @@
 // AUTH CONTEXT - Production Ready
 // ============================================
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from 'react';
 import { Alert, AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import CustomAlert, { AlertState, initialAlertState, createAlert } from '../components/common/CustomAlert';
 import { 
   loginUser, 
   registerUser, 
   logoutUser, 
   subscribeToAuthChanges,
   getUserProfile,
+  resolveAuthenticatedUserProfile,
   updateUserProfile as updateProfile,
   resetPassword,
   loginWithGoogle as loginWithGoogleService,
   loginAsAdmin as loginAsAdminService,
   loginWithPhoneOTP,
-  findUserByPhone,
-  isAdminEmail,
   findEmailByUsername,
-  validateAdminCredentials,
-  isEmailVerified,
-  sendVerificationEmail,
   updateOnlineStatus,
   UserProfile,
 } from '../services/authService';
+import { ADMIN_CONFIG } from '../config/adminConfig';
 import { getErrorMessage } from '../utils/helpers';
 
 // ============================================
@@ -40,7 +38,7 @@ interface AuthState {
 interface AuthContextType extends AuthState {
   // Actions
   login: (emailOrUsername: string, password: string) => Promise<void>;
-  loginWithGoogle: (idToken: string) => Promise<void>;
+  loginWithGoogle: (idToken: string) => Promise<{ isNewUser: boolean }>;
   loginAsAdmin: (username: string, password: string) => Promise<void>;
   loginWithPhone: (phone: string) => Promise<void>;
     register: (email: string, password: string, displayName: string, role?: 'user' | 'nurse' | 'hospital', username?: string, phone?: string, staffType?: string, orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency') => Promise<void>;
@@ -58,6 +56,8 @@ interface AuthContextType extends AuthState {
   pendingAction: (() => void) | null;
   requireAuth: (action: () => void) => void;
   executePendingAction: () => void;
+  authAlert: { visible: boolean; title?: string; message?: string } | null;
+  setAuthAlert: (alert: { visible: boolean; title?: string; message?: string } | null) => void;
   
   // Error handling
   error: string | null;
@@ -84,6 +84,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authAlert, setAuthAlert] = useState<{ visible: boolean; title?: string; message?: string } | null>(null);
 
   // ✅ Refs to prevent race conditions and memory leaks
   const isMountedRef = useRef(true);
@@ -98,17 +99,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const unsubscribe = subscribeToAuthChanges(async (firebaseUser) => {
       // ⚠️ Skip if component is unmounted
       if (!isMountedRef.current) return;
-
-      // Check if this is an admin session (don't override with Firebase state)
-      const isAdminSession = await AsyncStorage.getItem('isAdminSession');
-      
-      if (isAdminSession === 'true') {
-        // Admin session - don't change user state from Firebase listener
-        if (isMountedRef.current) {
-          setIsInitialized(true);
-        }
-        return;
-      }
       
       if (firebaseUser) {
         try {
@@ -119,12 +109,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
           
           profileFetchInProgressRef.current = true;
-          let profile = await getUserProfile(firebaseUser.uid);
-          // Fallback: ถ้า profile ไม่เจอด้วย uid (เช่น sign-in ด้วย phone)
-          // ให้ look up ด้วยเบอร์โทรแทน
-          if (!profile && firebaseUser.phoneNumber) {
-            profile = await findUserByPhone(firebaseUser.phoneNumber);
-          }
+          const profile = await resolveAuthenticatedUserProfile(firebaseUser, {
+            fallbackPhone: firebaseUser.phoneNumber || undefined,
+          });
           // ⚠️ Only update state if still mounted
           if (isMountedRef.current) {
             // Merge Firestore profile with AsyncStorage cache:
@@ -219,6 +206,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const cached = await AsyncStorage.getItem('user');
       if (cached) {
         const cachedUser = JSON.parse(cached);
+        // Never trust cached admin profile without a real Firebase auth session.
+        if (cachedUser?.isAdmin) {
+          return;
+        }
         // Only use cache if still loading (use ref to avoid stale closure)
         if (!isInitializedRef.current) {
           setUser(cachedUser);
@@ -236,13 +227,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       let email = emailOrUsername;
       
-      // ✅ Validate admin credentials (await the async function)
-      const isAdminCredentials = await validateAdminCredentials(emailOrUsername, password);
-      if (isAdminCredentials) {
-        // Login as admin
+      // Route admin username directly to server-side admin verification.
+      const inputNormalized = emailOrUsername.trim().toLowerCase();
+      const adminUsername = (ADMIN_CONFIG.username || 'adminmark').toLowerCase();
+      const isAdminUsername = inputNormalized === adminUsername;
+      if (isAdminUsername) {
         const profile = await loginAsAdminService(emailOrUsername, password);
         await AsyncStorage.setItem('user', JSON.stringify(profile));
-        await AsyncStorage.setItem('isAdminSession', 'true');
         // ⚠️ Only update state if still mounted
         if (isMountedRef.current) {
           setUser(profile);
@@ -308,11 +299,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   // Login with Google
-  const loginWithGoogle = async (idToken: string) => {
+  const loginWithGoogle = async (idToken: string): Promise<{ isNewUser: boolean }> => {
     setIsLoading(true);
     setError(null);
     try {
-      const profile = await loginWithGoogleService(idToken);
+      const { profile, isNewUser } = await loginWithGoogleService(idToken);
       // Save to AsyncStorage first
       await AsyncStorage.setItem('user', JSON.stringify(profile));
       // ⚠️ Only update state if still mounted
@@ -321,8 +312,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setIsInitialized(true);
         setShowLoginModal(false);
       }
-      // Execute pending action after login
-      if (pendingAction) {
+      // Execute pending action only for returning users
+      if (!isNewUser && pendingAction) {
         setTimeout(() => {
           if (isMountedRef.current) {
             pendingAction();
@@ -330,8 +321,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
         }, 100);
       }
+      return { isNewUser };
     } catch (err: any) {
-      const errorMessage = getErrorMessage(err);
+      const isThai = /[\u0E00-\u0E7F]/.test(err.message || '');
+      const errorMessage = isThai ? err.message : getErrorMessage(err);
       if (isMountedRef.current) {
         setError(errorMessage);
       }
@@ -351,7 +344,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const profile = await loginAsAdminService(username, password);
       // Save to AsyncStorage first
       await AsyncStorage.setItem('user', JSON.stringify(profile));
-      await AsyncStorage.setItem('isAdminSession', 'true');
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(profile);
@@ -388,7 +380,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const profile = await loginWithPhoneOTP(phone);
       // Save to AsyncStorage first
       await AsyncStorage.setItem('user', JSON.stringify(profile));
-      await AsyncStorage.setItem('isPhoneSession', 'true');
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(profile);
@@ -469,16 +460,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = async () => {
     setIsLoading(true);
     try {
-      // Check if admin session or phone session (these don't use Firebase Auth)
-      const isAdminSession = await AsyncStorage.getItem('isAdminSession');
-      const isPhoneSession = await AsyncStorage.getItem('isPhoneSession');
-      if (!isAdminSession && !isPhoneSession) {
-        await logoutUser();
-      }
-      // Clear AsyncStorage first
+      // Always sign out from Firebase Auth (covers email, phone, Google, and anonymous admin sessions)
+      await logoutUser();
+      // Clear AsyncStorage
       await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('isAdminSession');
-      await AsyncStorage.removeItem('isPhoneSession');
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(null);
@@ -490,8 +475,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
       }
       await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('isAdminSession');
-      await AsyncStorage.removeItem('isPhoneSession');
     } finally {
       if (isMountedRef.current) {
         setIsLoading(false);
@@ -505,16 +488,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     setIsLoading(true);
     try {
+      // Never allow profile edit path to change authz fields.
+      // Role/isAdmin can only be changed by secure admin/server flows.
+      const blockedKeys = new Set(['role', 'isAdmin', 'uid', 'id', 'email']);
+
       // Filter out undefined values and prepare for Firestore
       const cleanUpdates: Record<string, any> = {};
       Object.entries(updates).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && !blockedKeys.has(key)) {
           cleanUpdates[key] = value;
         }
       });
       
       await updateProfile(user.uid, cleanUpdates as Partial<UserProfile>);
-      const updatedProfile = { ...user, ...updates };
+      const updatedProfile = { ...user, ...cleanUpdates };
       
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
@@ -554,7 +541,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   // Refresh user data
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     if (!user?.uid) return;
     
     try {
@@ -577,31 +564,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } finally {
       profileFetchInProgressRef.current = false;
     }
-  };
+  }, [user?.uid]);
 
   // Require authentication (for guest mode)
   const requireAuth = (action: () => void) => {
     if (user) {
       action();
     } else {
-      // Show alert first, then open login modal
-      Alert.alert(
-        '🔐 กรุณาเข้าสู่ระบบ',
-        'คุณต้องเข้าสู่ระบบก่อนใช้งานฟีเจอร์นี้',
-        [
-          { 
-            text: 'ยกเลิก', 
-            style: 'cancel' 
-          },
-          { 
-            text: 'เข้าสู่ระบบ', 
-            onPress: () => {
-              setPendingAction(() => action);
-              setShowLoginModal(true);
-            }
-          }
-        ]
-      );
+      // Show custom alert instead of native Alert.alert
+      setAuthAlert({
+        visible: true,
+        title: '🔐 กรุณาเข้าสู่ระบบ',
+        message: 'คุณต้องเข้าสู่ระบบก่อนใช้งานฟีเจอร์นี้'
+      });
+      setPendingAction(() => action);
     }
   };
 
@@ -616,8 +592,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Clear error
   const clearError = () => setError(null);
 
-  // Check if user is admin
-  const isAdmin = user?.isAdmin || isAdminEmail(user?.email || '');
+  // Check admin from persisted profile only (no email-based elevation)
+  const isAdmin = user?.isAdmin === true || user?.role === 'admin';
 
   // Context value
   const value: AuthContextType = {
@@ -640,6 +616,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     pendingAction,
     requireAuth,
     executePendingAction,
+    authAlert,
+    setAuthAlert,
     error,
     clearError,
   };
@@ -647,6 +625,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
   return (
     <AuthContext.Provider value={value}>
       {children}
+      
+      {/* Auth Alert Modal */}
+      {authAlert?.visible && (
+        <CustomAlert
+          visible={true}
+          type="warning"
+          title={authAlert.title || '⚠️ แจ้งเตือน'}
+          message={authAlert.message || ''}
+          buttons={[
+            {
+              text: 'ยกเลิก',
+              onPress: () => setAuthAlert(null),
+              style: 'cancel'
+            },
+            {
+              text: 'เข้าสู่ระบบ',
+              onPress: () => {
+                setAuthAlert(null);
+                setShowLoginModal(true);
+              },
+              style: 'default'
+            }
+          ]}
+          onClose={() => setAuthAlert(null)}
+        />
+      )}
     </AuthContext.Provider>
   );
 }

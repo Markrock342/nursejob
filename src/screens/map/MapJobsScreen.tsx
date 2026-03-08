@@ -16,6 +16,7 @@ import {
   Alert,
   Modal,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import MapView, { Marker, Region, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,11 +33,16 @@ const { width: W, height: H } = Dimensions.get('window');
 const STAFF_LABELS: Record<string, string> = {
   rn: 'พยาบาลวิชาชีพ',
   RN: 'พยาบาลวิชาชีพ',
-  lpn: 'พยาบาลเทคนิค',
-  LPN: 'พยาบาลเทคนิค',
+  lpn: 'ผู้ช่วยพยาบาล',
+  LPN: 'ผู้ช่วยพยาบาล',
+  PN: 'ผู้ช่วยพยาบาล',
+  NA: 'ผู้ช่วยพยาบาล',
   nurse_aide: 'ผู้ช่วยพยาบาล',
-  ward_clerk: 'เสมียนวอร์ด',
+  CG: 'ผู้ดูแลผู้ป่วย',
   caregiver: 'ผู้ดูแลผู้ป่วย',
+  SITTER: 'เฝ้าไข้',
+  ANES: 'ผู้ช่วยวิสัญญี / วิสัญญีพยาบาล',
+  OTHER: 'อื่นๆ',
   other: 'อื่นๆ',
 };
 
@@ -88,12 +94,33 @@ interface MapJobsProps { navigation: any; route?: any; }
 
 // ── Filter types ─────────────────────────────────────────────────────────
 interface MapFilter {
+  searchTerm: string;
   postType: string;
   staffType: string;
+  province: string;
+  sortBy: 'latest' | 'rate_desc' | 'nearby';
   rateMin: number;
   urgentOnly: boolean;
 }
-const DEFAULT_FILTER: MapFilter = { postType: '', staffType: '', rateMin: 0, urgentOnly: false };
+const DEFAULT_FILTER: MapFilter = {
+  searchTerm: '',
+  postType: '',
+  staffType: '',
+  province: '',
+  sortBy: 'latest',
+  rateMin: 0,
+  urgentOnly: false,
+};
+
+function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
 
 function serializeJob(job: JobPost) {
   return {
@@ -124,27 +151,74 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
   const [filter, setFilter]             = useState<MapFilter>(DEFAULT_FILTER);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [draftFilter, setDraftFilter]   = useState<MapFilter>(DEFAULT_FILTER);
+  const [searchInput, setSearchInput] = useState('');
+
+  const provinceOptions = useMemo(() => {
+    const set = new Set<string>();
+    allJobs.forEach((j) => {
+      const p = (j as any).location?.province || (j as any).province;
+      if (p) set.add(p);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'));
+  }, [allJobs]);
 
   const activeFilterCount = (
+    (filter.searchTerm ? 1 : 0) +
     (filter.postType   ? 1 : 0) +
     (filter.staffType  ? 1 : 0) +
+    (filter.province ? 1 : 0) +
+    (filter.sortBy !== 'latest' ? 1 : 0) +
     (filter.rateMin > 0  ? 1 : 0) +
     (filter.urgentOnly ? 1 : 0)
   );
 
   const jobs = useMemo(() => {
-    let list = allJobs;
+    let list = [...allJobs];
+    const q = filter.searchTerm.trim().toLowerCase();
+    if (q) {
+      list = list.filter((j) => {
+        const title = String((j as any).title || '').toLowerCase();
+        const hospital = String((j as any).location?.hospital || '').toLowerCase();
+        const province = String((j as any).location?.province || (j as any).province || '').toLowerCase();
+        return title.includes(q) || hospital.includes(q) || province.includes(q);
+      });
+    }
     if (filter.postType)    list = list.filter(j => (j as any).postType === filter.postType);
     if (filter.staffType)   list = list.filter(j => (j as any).staffType === filter.staffType);
+    if (filter.province)    list = list.filter(j => ((j as any).location?.province || (j as any).province || '') === filter.province);
     if (filter.rateMin > 0) list = list.filter(j => ((j as any).shiftRate || 0) >= filter.rateMin);
     if (filter.urgentOnly)  list = list.filter(j => j.status === 'urgent' || (j as any).isUrgent);
+
+    if (filter.sortBy === 'rate_desc') {
+      list.sort((a, b) => Number((b as any).shiftRate || 0) - Number((a as any).shiftRate || 0));
+    }
+    if (filter.sortBy === 'nearby' && userLocation) {
+      list.sort((a, b) => {
+        const ca = getCoords(a);
+        const cb = getCoords(b);
+        if (!ca && !cb) return 0;
+        if (!ca) return 1;
+        if (!cb) return -1;
+        return haversineKm(userLocation, ca) - haversineKm(userLocation, cb);
+      });
+    }
     return list;
-  }, [allJobs, filter]);
+  }, [allJobs, filter, userLocation]);
 
   const draftCount = useMemo(() => {
     let list = allJobs;
+    const q = draftFilter.searchTerm.trim().toLowerCase();
+    if (q) {
+      list = list.filter((j) => {
+        const title = String((j as any).title || '').toLowerCase();
+        const hospital = String((j as any).location?.hospital || '').toLowerCase();
+        const province = String((j as any).location?.province || (j as any).province || '').toLowerCase();
+        return title.includes(q) || hospital.includes(q) || province.includes(q);
+      });
+    }
     if (draftFilter.postType)    list = list.filter(j => (j as any).postType === draftFilter.postType);
     if (draftFilter.staffType)   list = list.filter(j => (j as any).staffType === draftFilter.staffType);
+    if (draftFilter.province)    list = list.filter(j => ((j as any).location?.province || (j as any).province || '') === draftFilter.province);
     if (draftFilter.rateMin > 0) list = list.filter(j => ((j as any).shiftRate || 0) >= draftFilter.rateMin);
     if (draftFilter.urgentOnly)  list = list.filter(j => j.status === 'urgent' || (j as any).isUrgent);
     return list.length;
@@ -168,9 +242,8 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
 
   useEffect(() => {
     if (!isLoading && allJobs.length > 0) {
-      // Android: flip fast (100ms) — just enough for one render pass before bitmap capture
-      // iOS: 600ms is fine since it uses native UIView (not bitmap)
-      const delay = Platform.OS === 'android' ? 100 : 600;
+      // Keep iOS optimization; Android markers can visually clip when frozen too early.
+      const delay = 600;
       const t = setTimeout(() => setTracksViewChanges(false), delay);
       return () => clearTimeout(t);
     }
@@ -227,6 +300,14 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
   const openFilter = () => { setDraftFilter(filter); setShowFilterModal(true); };
   const applyFilter = () => { setFilter(draftFilter); setShowFilterModal(false); setSelectedJob(null); };
   const resetFilter = () => setDraftFilter(DEFAULT_FILTER);
+  const applySearch = () => {
+    setFilter((f) => ({ ...f, searchTerm: searchInput.trim() }));
+    setSelectedJob(null);
+  };
+
+  useEffect(() => {
+    setSearchInput(filter.searchTerm);
+  }, [filter.searchTerm]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -256,9 +337,10 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
               key={job.id}
               coordinate={{ latitude: coords.lat, longitude: coords.lng }}
               onPress={(e) => { e.stopPropagation(); setSelectedJob(job); }}
-              tracksViewChanges={tracksViewChanges}
+              tracksViewChanges={Platform.OS === 'android' ? true : tracksViewChanges}
               opacity={hasExact ? 1 : 0.7}
               anchor={Platform.OS === 'ios' ? { x: 0.5, y: 1 } : { x: 0.5, y: 0.5 }}
+              pinColor={Platform.OS === 'android' ? pinColor(job) : undefined}
             >
               {Platform.OS === 'ios' ? (
                 // iOS: bubble + tail — native UIView renders correctly
@@ -269,11 +351,8 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
                   <View style={[styles.pinTail, { borderTopColor: pinColor(job) }]} />
                 </View>
               ) : (
-                // Android: fixed-size pill, tracksViewChanges=false, single view
-                // Dynamic sizing (paddingVertical/maxWidth) causes bitmap crop bug
-                <View collapsable={false} style={[styles.pinBubbleAndroid, { backgroundColor: pinColor(job) }]}>
-                  <Text style={styles.pinRate} numberOfLines={1}>{formatRate(job)}</Text>
-                </View>
+                // Android: use tiny native-safe dot overlay only (rate shown in bottom card)
+                <View collapsable={false} style={[styles.pinDotAndroid, { backgroundColor: pinColor(job) }]} />
               )}
             </Marker>
           );
@@ -282,51 +361,83 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
 
       {/* ── Top bar ─────────────────────────────── */}
       <SafeAreaView edges={['top']} style={styles.topBar} pointerEvents="box-none">
-        <TouchableOpacity
-          style={[styles.topBtn, { backgroundColor: colors.surface }]}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={20} color={colors.text} />
-        </TouchableOpacity>
+        <View style={styles.topRow}>
+          <TouchableOpacity
+            style={[styles.topBtn, { backgroundColor: colors.surface }]}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={20} color={colors.text} />
+          </TouchableOpacity>
 
-        <View style={[styles.topTitle, { backgroundColor: colors.surface }]}>
-          <Ionicons name="map" size={16} color={colors.primary} />
-          <Text style={[styles.topTitleText, { color: colors.text }]}>
-            {isLoading ? 'กำลังโหลด...' : `${jobs.length} งานบนแผนที่`}
-          </Text>
+          <View style={[styles.topTitle, { backgroundColor: colors.surface }]}>
+            <Ionicons name="map" size={16} color={colors.primary} />
+            <Text style={[styles.topTitleText, { color: colors.text }]}>
+              {isLoading ? 'กำลังโหลด...' : `${jobs.length} งานบนแผนที่`}
+            </Text>
+          </View>
+
+          {/* Filter button */}
+          <TouchableOpacity
+            style={[styles.topBtn, { backgroundColor: colors.surface }]}
+            onPress={openFilter}
+          >
+            <Ionicons name="options-outline" size={20} color={activeFilterCount > 0 ? colors.primary : colors.text} />
+            {activeFilterCount > 0 && (
+              <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* GPS button */}
+          <TouchableOpacity
+            style={[styles.topBtn, { backgroundColor: colors.surface }]}
+            onPress={flyToUser}
+          >
+            <Ionicons name="locate" size={20} color={colors.primary} />
+          </TouchableOpacity>
         </View>
 
-        {/* Filter button */}
-        <TouchableOpacity
-          style={[styles.topBtn, { backgroundColor: colors.surface }]}
-          onPress={openFilter}
-        >
-          <Ionicons name="options-outline" size={20} color={activeFilterCount > 0 ? colors.primary : colors.text} />
-          {activeFilterCount > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
+        <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Ionicons name="search" size={18} color={colors.textMuted} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.text }]}
+            value={searchInput}
+            onChangeText={setSearchInput}
+            placeholder="ค้นหาชื่องาน หรือชื่อสถานที่"
+            placeholderTextColor={colors.textMuted}
+            returnKeyType="search"
+            onSubmitEditing={applySearch}
+          />
+          {!!searchInput && (
+            <TouchableOpacity onPress={() => { setSearchInput(''); setFilter((f) => ({ ...f, searchTerm: '' })); }}>
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-
-        {/* GPS button */}
-        <TouchableOpacity
-          style={[styles.topBtn, { backgroundColor: colors.surface }]}
-          onPress={flyToUser}
-        >
-          <Ionicons name="locate" size={20} color={colors.primary} />
-        </TouchableOpacity>
+          <TouchableOpacity style={[styles.searchBtn, { backgroundColor: colors.primary }]} onPress={applySearch}>
+            <Text style={styles.searchBtnText}>Search</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
 
       {/* ── Active filter chips ─────────────────────── */}
       {activeFilterCount > 0 && (
-        <View style={[styles.activeFiltersRow, { top: insets.top + 62 }]} pointerEvents="box-none">
+        <View style={[styles.activeFiltersRow, { top: insets.top + 108 }]} pointerEvents="box-none">
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingHorizontal: 16 }}>
             {filter.postType && (
               <FilterChip label={POST_TYPE_LABELS[filter.postType] || filter.postType} onRemove={() => setFilter(f => ({ ...f, postType: '' }))} />
             )}
+            {filter.searchTerm && (
+              <FilterChip label={`ค้นหา: ${filter.searchTerm}`} onRemove={() => setFilter(f => ({ ...f, searchTerm: '' }))} />
+            )}
             {filter.staffType && (
               <FilterChip label={STAFF_LABELS[filter.staffType] || filter.staffType} onRemove={() => setFilter(f => ({ ...f, staffType: '' }))} />
+            )}
+            {filter.province && (
+              <FilterChip label={filter.province} onRemove={() => setFilter(f => ({ ...f, province: '' }))} />
+            )}
+            {filter.sortBy !== 'latest' && (
+              <FilterChip label={filter.sortBy === 'rate_desc' ? 'เรียง: ค่าจ้างสูงสุด' : 'เรียง: ใกล้ฉัน'} onRemove={() => setFilter(f => ({ ...f, sortBy: 'latest' }))} />
             )}
             {filter.rateMin > 0 && (
               <FilterChip label={`฿${filter.rateMin.toLocaleString()}+`} onRemove={() => setFilter(f => ({ ...f, rateMin: 0 }))} />
@@ -339,7 +450,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
       )}
 
       {/* ── Legend ────────────────────────────────── */}
-      <View style={[styles.legend, { backgroundColor: colors.surface, top: insets.top + (activeFilterCount > 0 ? 102 : 62) }]}>
+      <View style={[styles.legend, { backgroundColor: colors.surface, top: insets.top + (activeFilterCount > 0 ? 152 : 108) }]}>
         <LegendDot color="#EF4444" label="ด่วน" />
         <LegendDot color="#0EA5E9" label="≥฿1,500" />
         <LegendDot color="#10B981" label="≥฿700" />
@@ -447,9 +558,28 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
               ))}
             </View>
 
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
+            <View style={styles.filterChipRow}>
+              <TouchableOpacity
+                style={[styles.filterChip, { borderColor: draftFilter.province === '' ? colors.primary : colors.border }, draftFilter.province === '' && { backgroundColor: colors.primary }]}
+                onPress={() => setDraftFilter(f => ({ ...f, province: '' }))}
+              >
+                <Text style={[styles.filterChipText, { color: draftFilter.province === '' ? '#fff' : colors.text }]}>ทั้งหมด</Text>
+              </TouchableOpacity>
+              {provinceOptions.slice(0, 16).map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  style={[styles.filterChip, { borderColor: draftFilter.province === p ? colors.primary : colors.border }, draftFilter.province === p && { backgroundColor: colors.primary }]}
+                  onPress={() => setDraftFilter(f => ({ ...f, province: p }))}
+                >
+                  <Text style={[styles.filterChipText, { color: draftFilter.province === p ? '#fff' : colors.text }]}>{p}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>ประเภทบุคลากร</Text>
             <View style={styles.filterChipRow}>
-              {(['', 'RN', 'LPN', 'nurse_aide', 'caregiver', 'other'] as const).map(v => (
+              {(['', 'RN', 'PN', 'CG', 'SITTER', 'ANES', 'OTHER'] as const).map(v => (
                 <TouchableOpacity
                   key={v || 'all'}
                   style={[styles.filterChip, { borderColor: draftFilter.staffType === v ? colors.primary : colors.border }, draftFilter.staffType === v && { backgroundColor: colors.primary }]}
@@ -473,6 +603,23 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
                   <Text style={[styles.filterChipText, { color: draftFilter.rateMin === v ? '#fff' : colors.text }]}>
                     {v === 0 ? 'ทั้งหมด' : `฿${v.toLocaleString()}+`}
                   </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>เรียงลำดับ</Text>
+            <View style={styles.filterChipRow}>
+              {([
+                { value: 'latest', label: 'ล่าสุด' },
+                { value: 'rate_desc', label: 'ค่าจ้างสูงสุด' },
+                { value: 'nearby', label: 'ใกล้ฉัน' },
+              ] as const).map((opt) => (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.filterChip, { borderColor: draftFilter.sortBy === opt.value ? colors.primary : colors.border }, draftFilter.sortBy === opt.value && { backgroundColor: colors.primary }]}
+                  onPress={() => setDraftFilter((f) => ({ ...f, sortBy: opt.value }))}
+                >
+                  <Text style={[styles.filterChipText, { color: draftFilter.sortBy === opt.value ? '#fff' : colors.text }]}>{opt.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -525,13 +672,14 @@ const styles = StyleSheet.create({
   topBar: {
     position: 'absolute',
     top: 0, left: 0, right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     paddingHorizontal: 12,
+    paddingTop: 6,
     paddingBottom: 8,
-    gap: 8,
+    gap: 10,
     zIndex: 10,
   },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   topBtn: {
     width: 42, height: 42,
     borderRadius: 21,
@@ -564,6 +712,35 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   topTitleText: { fontSize: 14, fontWeight: '600' },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    minHeight: 48,
+    gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 10,
+  },
+  searchBtn: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  searchBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 
   activeFiltersRow: {
     position: 'absolute', left: 0, right: 0, zIndex: 9,
@@ -595,14 +772,12 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 6,
   },
-  // Android: fixed dimensions — Android must know exact size before bitmap capture
-  pinBubbleAndroid: {
-    minWidth: 62,
-    height: 26,
-    paddingHorizontal: 8,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
+  pinDotAndroid: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
   pinRate: { color: '#FFF', fontSize: 11, fontWeight: '700' },
   pinTail: {

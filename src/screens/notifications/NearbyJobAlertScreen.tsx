@@ -22,6 +22,7 @@ import { doc, getDoc } from 'firebase/firestore';
 
 import { db } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
+import { useNotifications } from '../../context/NotificationContext';
 import { useTheme } from '../../context/ThemeContext';
 import { encodeGeohash } from '../../utils/geohash';
 import { SPACING, BORDER_RADIUS, FONT_SIZES } from '../../theme';
@@ -33,6 +34,7 @@ const RADIUS_OPTIONS = [1, 3, 5, 10, 20, 50];
 export default function NearbyJobAlertScreen() {
   const navigation = useNavigation() as any;
   const { user, updateUser } = useAuth();
+  const { hasPermission, registerForNotifications } = useNotifications();
   const { colors } = useTheme();
 
   const [enabled, setEnabled] = useState(false);
@@ -142,6 +144,11 @@ export default function NearbyJobAlertScreen() {
 
     setIsSaving(true);
     try {
+      if (enabled) {
+        // Make sure push permission/token flow is triggered when user enables nearby alerts.
+        await registerForNotifications();
+      }
+
       const geohash4 = lat && lng ? encodeGeohash(lat, lng, 4) : '';
       // updateUser เขียน Firestore + sync AuthContext + AsyncStorage ทันที
       await updateUser({
@@ -210,6 +217,33 @@ export default function NearbyJobAlertScreen() {
           <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>
             เมื่อมีคนโพสต์งานเวรในรัศมีที่คุณกำหนด{'\n'}คุณจะได้รับ Push Notification ทันที
           </Text>
+        </View>
+
+        {/* Push status */}
+        <View
+          style={[
+            styles.statusCard,
+            {
+              backgroundColor: hasPermission ? '#ECFDF5' : '#FFF7ED',
+              borderColor: hasPermission ? '#86EFAC' : '#FDBA74',
+            },
+          ]}
+        >
+          <Ionicons
+            name={hasPermission ? 'notifications-circle' : 'notifications-off-circle'}
+            size={22}
+            color={hasPermission ? '#059669' : '#EA580C'}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.statusTitle, { color: hasPermission ? '#065F46' : '#9A3412' }]}>
+              {hasPermission ? 'Push Notification พร้อมใช้งาน' : 'ยังไม่เปิดสิทธิ์แจ้งเตือน'}
+            </Text>
+            <Text style={[styles.statusSub, { color: hasPermission ? '#047857' : '#C2410C' }]}>
+              {hasPermission
+                ? 'เมื่อมีงานใหม่ในรัศมีที่ตั้งไว้ ระบบจะส่งแจ้งเตือนทันที'
+                : 'กดบันทึกเพื่อขอสิทธิ์แจ้งเตือน และรับงานใหม่ใกล้ตัว'}
+            </Text>
+          </View>
         </View>
 
         {/* ── Toggle card ───────────────────── */}
@@ -313,7 +347,19 @@ export default function NearbyJobAlertScreen() {
                 รัศมีการแจ้งเตือน
               </Text>
 
-              <Text style={styles.radiusBig}>{radiusKm} กม.</Text>
+              <View style={styles.radiusHeroRow}>
+                <View style={styles.radiusBigWrap}>
+                  <Text style={styles.radiusBig}>{radiusKm}</Text>
+                  <Text style={styles.radiusUnit}>กม.</Text>
+                </View>
+                <View style={styles.radiusMetaWrap}>
+                  <Text style={styles.radiusMetaTitle}>โหมดครอบคลุม</Text>
+                  <Text style={styles.radiusMetaValue}>
+                    {radiusKm <= 3 ? 'แม่นยำสูง' : radiusKm <= 10 ? 'สมดุล' : 'ครอบคลุมกว้าง'}
+                  </Text>
+                  <Text style={styles.radiusMetaHint}>ปรับระยะได้ตามความต้องการรับงาน</Text>
+                </View>
+              </View>
 
               <View style={styles.radiusGrid}>
                 {RADIUS_OPTIONS.map((r) => {
@@ -450,6 +496,26 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderWidth: 1,
   },
+  statusCard: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm + 2,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  statusTitle: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+  },
+  statusSub: {
+    marginTop: 2,
+    fontSize: FONT_SIZES.xs,
+    lineHeight: 16,
+  },
   cardTitle: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
@@ -510,12 +576,51 @@ const styles = StyleSheet.create({
   },
   locationHintText: { fontSize: FONT_SIZES.xs, color: '#92400E', flex: 1 },
 
+  radiusHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+    gap: SPACING.md,
+  },
+  radiusBigWrap: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#7DD3FC',
+  },
   radiusBig: {
-    fontSize: 52,
+    fontSize: 36,
     fontWeight: '800',
     color: '#0EA5E9',
-    textAlign: 'center',
-    marginBottom: SPACING.md,
+    lineHeight: 40,
+  },
+  radiusUnit: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '700',
+    color: '#0284C7',
+  },
+  radiusMetaWrap: {
+    flex: 1,
+  },
+  radiusMetaTitle: {
+    fontSize: FONT_SIZES.xs,
+    color: '#64748B',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  radiusMetaValue: {
+    fontSize: FONT_SIZES.lg,
+    color: '#0F172A',
+    fontWeight: '800',
+  },
+  radiusMetaHint: {
+    marginTop: 4,
+    fontSize: FONT_SIZES.xs,
+    color: '#64748B',
   },
   radiusGrid: {
     flexDirection: 'row',

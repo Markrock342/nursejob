@@ -28,8 +28,9 @@ import { getUserSubscription } from '../../services/subscriptionService';
 import { getOrCreateConversation } from '../../services/chatService';
 import { toggleFavorite, isFavorited } from '../../services/favoritesService';
 import { useToast } from '../../context/ToastContext';
-import { JobPost, RootStackParamList } from '../../types';
+import { JobPost, RootStackParamList, SubscriptionPlan, StaffType } from '../../types';
 import { formatDate, formatRelativeTime, callPhone, openLine, openMapsDirections } from '../../utils/helpers';
+import { getStaffTypeLabel } from '../../constants/jobOptions';
 
 // ============================================
 // Types
@@ -104,7 +105,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const [showContactSuccessModal, setShowContactSuccessModal] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [jobStatus, setJobStatus] = useState(job?.status ?? 'active');
-  const [posterPlan, setPosterPlan] = useState<'free' | 'premium'>('free');
+  const [posterPlan, setPosterPlan] = useState<SubscriptionPlan>('free');
+  const [viewsCount, setViewsCount] = useState<number>(job?.viewsCount ?? 0);
 
   // Check if user is logged in
   const isLoggedIn = isAuthenticated && user;
@@ -115,6 +117,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   // Increment view count when screen loads
   useEffect(() => {
     if (job?.id && !isOwner) {
+      setViewsCount((prev) => prev + 1);
       incrementViewCount(job.id);
     }
   }, [job?.id, isOwner]);
@@ -396,10 +399,10 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={[]}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header Card */}
-        <View style={styles.headerCard}>
+        <View style={[styles.headerCard, { paddingTop: insets.top + SPACING.sm }]}>
           {/* Back & Actions */}
           <View style={styles.headerTop}>
             <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -440,7 +443,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             <View style={styles.posterInfo}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Text style={styles.posterName}>{job.posterName}</Text>
-                {posterPlan === 'premium' && (
+                {posterPlan !== 'free' && (
                   <View style={[styles.premiumBadge, { marginLeft: 8 }]}>
                     <Text style={styles.premiumBadgeText}>Premium</Text>
                   </View>
@@ -456,11 +459,27 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
           {/* Badges */}
           <View style={styles.badges}>
-            {job.status === 'urgent' && (
+            {(job.status === 'urgent' || job.isUrgent) && (
               <Badge text="🔥 ด่วน" variant="danger" />
             )}
-            <Badge text={job.department} variant="primary" />
-            <Badge text={getShiftTimeLabel(job.shiftTime)} variant="secondary" />
+            {job.department ? (
+              <Badge text={job.department} variant="primary" />
+            ) : null}
+            {job.staffType ? (
+              <Badge text={getStaffTypeLabel(job.staffType as StaffType)} variant="info" />
+            ) : null}
+            {job.locationType === 'HOME' ? (
+              <Badge text="🏠 ดูแลบ้าน" variant="warning" />
+            ) : null}
+            {job.paymentType === 'NET' ? (
+              <Badge text="NET (รับเต็ม)" variant="success" />
+            ) : null}
+            {job.paymentType === 'DEDUCT_PERCENT' && job.deductPercent ? (
+              <Badge text={`หัก ${job.deductPercent}%`} variant="danger" />
+            ) : null}
+            {job.shiftTime && getShiftTimeLabel(job.shiftTime) !== job.shiftTime ? (
+              <Badge text={getShiftTimeLabel(job.shiftTime)} variant="secondary" />
+            ) : null}
           </View>
         </View>
 
@@ -470,22 +489,62 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             <Ionicons name="document-text-outline" size={18} color={colors.primary} />
             <Text style={styles.sectionTitle}>รายละเอียดงาน</Text>
           </View>
-          
-          <View style={styles.detailRow}>
-            <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
-            <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>วันที่</Text>
-              <Text style={styles.detailValue}>{formatShiftDate(job.shiftDate)}</Text>
-            </View>
-          </View>
 
-          <View style={styles.detailRow}>
-            <Ionicons name="time-outline" size={20} color={colors.primary} style={styles.detailIcon} />
-            <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>เวลา</Text>
-              <Text style={styles.detailValue}>{job.shiftTime}</Text>
+          {/* Multi-date shift schedule */}
+          {job.shiftDates && job.shiftDates.length > 1 ? (
+            <View>
+              <View style={styles.detailRow}>
+                <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>ตารางเวร ({job.shiftDates.length} วัน)</Text>
+                </View>
+              </View>
+              {job.shiftDates.map((isoDate, idx) => {
+                const key = isoDate.slice(0, 10);
+                const slot = job.shiftTimeSlots?.[key];
+                const timeStr = slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || 'ตามตกลง');
+                const d = new Date(isoDate);
+                const dateStr = d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
+                return (
+                  <View key={key} style={[styles.shiftSlotRow, { borderColor: colors.borderLight, backgroundColor: colors.backgroundSecondary }]}>
+                    <View style={[styles.shiftSlotIndex, { backgroundColor: colors.primary }]}>
+                      <Text style={styles.shiftSlotIndexText}>{idx + 1}</Text>
+                    </View>
+                    <View style={styles.shiftSlotContent}>
+                      <Text style={[styles.shiftSlotDate, { color: colors.text }]}>{dateStr}</Text>
+                      <View style={styles.shiftSlotTimeRow}>
+                        <Ionicons name="time-outline" size={13} color={colors.textMuted} />
+                        <Text style={[styles.shiftSlotTime, { color: colors.textSecondary }]}>{timeStr}</Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
-          </View>
+          ) : (
+            <>
+              <View style={styles.detailRow}>
+                <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>วันที่</Text>
+                  <Text style={styles.detailValue}>{formatShiftDate(job.shiftDate)}</Text>
+                </View>
+              </View>
+              <View style={styles.detailRow}>
+                <Ionicons name="time-outline" size={20} color={colors.primary} style={styles.detailIcon} />
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>เวลา</Text>
+                  <Text style={styles.detailValue}>
+                    {(() => {
+                      const key = (job.shiftDates?.[0] || (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : String(job.shiftDate)))?.slice(0, 10);
+                      const slot = key ? job.shiftTimeSlots?.[key] : undefined;
+                      return slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || 'ตามตกลง');
+                    })()}
+                  </Text>
+                </View>
+              </View>
+            </>
+          )}
 
           <View style={styles.detailRow}>
             <Ionicons name="cash-outline" size={20} color={colors.success} style={styles.detailIcon} />
@@ -618,10 +677,10 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         )}
 
         {/* Views */}
-        {job.viewsCount !== undefined && (
+        {viewsCount !== undefined && (
           <View style={styles.viewsRow}>
             <Ionicons name="eye-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.viewsText}>{job.viewsCount} คนดู</Text>
+            <Text style={styles.viewsText}>{viewsCount} คนดู</Text>
           </View>
         )}
 
@@ -935,6 +994,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+    paddingTop: Platform.OS === 'android' ? 0 : 0,
   },
 
   // Header
@@ -949,7 +1009,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: Platform.OS === 'android' ? SPACING.lg : SPACING.sm,
     paddingBottom: SPACING.md,
   },
   backButton: {
@@ -1014,6 +1073,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.xs,
+    alignItems: 'flex-start',
+    marginBottom: SPACING.sm,
   },
 
   // Section
@@ -1067,6 +1128,46 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.md,
     color: COLORS.text,
     lineHeight: 24,
+  },
+
+  // Shift schedule rows (multi-date)
+  shiftSlotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.sm,
+    marginBottom: SPACING.xs,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    gap: SPACING.sm,
+  },
+  shiftSlotIndex: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  shiftSlotIndexText: {
+    color: '#fff',
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '700',
+  },
+  shiftSlotContent: {
+    flex: 1,
+  },
+  shiftSlotDate: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+  },
+  shiftSlotTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  shiftSlotTime: {
+    fontSize: FONT_SIZES.xs,
   },
 
   // Map button

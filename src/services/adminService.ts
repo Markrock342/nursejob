@@ -18,7 +18,30 @@ import {
   startAfter,
   getCountFromServer,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../config/firebase';
+import { getAuthUid } from './security/authGuards';
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withPermissionRetry<T>(fn: () => Promise<T>, retries = 1): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    const code = error?.code || '';
+    if (retries > 0 && code === 'permission-denied') {
+      // Firebase token can be briefly unavailable right after sign-in.
+      await wait(450);
+      return withPermissionRetry(fn, retries - 1);
+    }
+    throw error;
+  }
+}
+
+async function callAdminMutation(functionName: 'adminVerifyUser' | 'adminUpdateUserRole', payload: Record<string, any>): Promise<void> {
+  const fn = httpsCallable(getFunctions(), functionName);
+  await fn(payload);
+}
 
 // ============================================
 // Types
@@ -84,77 +107,43 @@ export interface DashboardStats {
 // Dashboard Stats
 // ============================================
 export async function getDashboardStats(): Promise<DashboardStats> {
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-    // Get total users
-    const usersRef = collection(db, 'users');
-    const usersSnapshot = await getCountFromServer(usersRef);
-    const totalUsers = usersSnapshot.data().count;
-
-    // Get today's new users
-    const todayUsersQuery = query(
-      usersRef,
-      where('createdAt', '>=', Timestamp.fromDate(today))
-    );
-    const todayUsersSnapshot = await getCountFromServer(todayUsersQuery);
-    const todayNewUsers = todayUsersSnapshot.data().count;
-
-    // Get total jobs (collection is 'shifts')
-    const jobsRef = collection(db, 'shifts');
-    const jobsSnapshot = await getCountFromServer(jobsRef);
-    const totalJobs = jobsSnapshot.data().count;
-
-    // Get active jobs
-    const activeJobsQuery = query(jobsRef, where('status', '==', 'active'));
-    const activeJobsSnapshot = await getCountFromServer(activeJobsQuery);
-    const activeJobs = activeJobsSnapshot.data().count;
-
-    // Get today's new jobs
-    const todayJobsQuery = query(
-      jobsRef,
-      where('createdAt', '>=', Timestamp.fromDate(today))
-    );
-    const todayJobsSnapshot = await getCountFromServer(todayJobsQuery);
-    const todayNewJobs = todayJobsSnapshot.data().count;
-
-    // Get pending verifications
-    const pendingVerifQuery = query(
-      collection(db, 'verifications'),
-      where('status', '==', 'pending')
-    );
-    let pendingVerifications = 0;
+  // Run every count independently — one failure does not zero out the rest
+  const safeCount = async (ref: any): Promise<number> => {
     try {
-      const pendingSnap = await getCountFromServer(pendingVerifQuery);
-      pendingVerifications = pendingSnap.data().count;
-    } catch (_) {}
+      const snap = await withPermissionRetry(() => getCountFromServer(ref), 1);
+      return snap.data().count;
+    } catch {
+      return 0;
+    }
+  };
 
-    // Get total conversations
-    const conversationsRef = collection(db, 'conversations');
-    const conversationsSnapshot = await getCountFromServer(conversationsRef);
-    const totalConversations = conversationsSnapshot.data().count;
+  const usersRef = collection(db, 'users');
+  const jobsRef = collection(db, 'shifts');
+  const conversationsRef = collection(db, 'conversations');
 
-    return {
-      totalUsers,
-      totalJobs,
-      activeJobs,
-      totalConversations,
-      todayNewUsers,
-      todayNewJobs,
-      pendingVerifications,
-    };
-  } catch (error) {
-    console.error('Error getting dashboard stats:', error);
-    return {
-      totalUsers: 0,
-      totalJobs: 0,
-      activeJobs: 0,
-      totalConversations: 0,
-      todayNewUsers: 0,
-      todayNewJobs: 0,
-    };
-  }
+  const [totalUsers, todayNewUsers, totalJobs, activeJobs, todayNewJobs, totalConversations, pendingVerifications] =
+    await Promise.all([
+      safeCount(usersRef),
+      safeCount(query(usersRef, where('createdAt', '>=', Timestamp.fromDate(today)))),
+      safeCount(jobsRef),
+      safeCount(query(jobsRef, where('status', '==', 'active'))),
+      safeCount(query(jobsRef, where('createdAt', '>=', Timestamp.fromDate(today)))),
+      safeCount(conversationsRef),
+      safeCount(query(collection(db, 'verifications'), where('status', '==', 'pending'))),
+    ]);
+
+  return {
+    totalUsers,
+    totalJobs,
+    activeJobs,
+    totalConversations,
+    todayNewUsers,
+    todayNewJobs,
+    pendingVerifications,
+  };
 }
 
 // ============================================
@@ -164,7 +153,7 @@ export async function getAllUsers(limitCount: number = 50): Promise<AdminUser[]>
   try {
     const usersRef = collection(db, 'users');
     const q = query(usersRef, orderBy('createdAt', 'desc'), limit(limitCount));
-    const snapshot = await getDocs(q);
+    const snapshot = await withPermissionRetry(() => getDocs(q), 1);
 
     return snapshot.docs.map((doc) => {
       const data = doc.data();
@@ -186,8 +175,12 @@ export async function getAllUsers(limitCount: number = 50): Promise<AdminUser[]>
         lastLoginAt: data.lastLoginAt?.toDate?.(),
       };
     });
-  } catch (error) {
-    console.error('Error getting users:', error);
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') {
+      console.warn('[getAllUsers] permission-denied — auth token not ready');
+      return [];
+    }
+    console.warn('Error getting users:', error);
     return [];
   }
 }
@@ -239,8 +232,12 @@ export async function verifyUser(userId: string, isVerified: boolean): Promise<v
       updatedAt: serverTimestamp(),
     };
     
-    await updateDoc(userRef, updateData);
-  } catch (error) {
+    await withPermissionRetry(() => updateDoc(userRef, updateData), 1);
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') {
+      await callAdminMutation('adminVerifyUser', { userId, isVerified });
+      return;
+    }
     console.error('Error verifying user:', error);
     throw new Error('ไม่สามารถยืนยันผู้ใช้ได้');
   }
@@ -252,14 +249,18 @@ export async function updateUserRole(
 ): Promise<void> {
   try {
     const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
+    await withPermissionRetry(() => updateDoc(userRef, {
       role,
       isAdmin: role === 'admin',
       updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
+    }), 1);
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') {
+      await callAdminMutation('adminUpdateUserRole', { userId, role });
+      return;
+    }
     console.error('Error updating user role:', error);
-    throw new Error('ไม่สามารถเปลี่ยน role ได้');
+    throw new Error(`ไม่สามารถเปลี่ยน role ได้ (${error?.code || 'unknown'})`);
   }
 }
 
@@ -386,6 +387,7 @@ export async function deleteJob(jobId: string): Promise<void> {
 export async function getAllConversations(
   limitCount: number = 50
 ): Promise<AdminConversation[]> {
+  if (!getAuthUid()) return [];
   try {
     const conversationsRef = collection(db, 'conversations');
     const q = query(
@@ -407,8 +409,12 @@ export async function getAllConversations(
         createdAt: data.createdAt?.toDate?.() || new Date(),
       };
     });
-  } catch (error) {
-    console.error('Error getting conversations:', error);
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') {
+      console.warn('[getAllConversations] permission-denied — admin session not ready');
+      return [];
+    }
+    console.warn('Error getting conversations:', error);
     return [];
   }
 }

@@ -67,6 +67,30 @@ import { debounce } from '../../utils/helpers';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+const PROVINCE_COORDS: Record<string, { lat: number; lng: number }> = {
+  'กรุงเทพมหานคร': { lat: 13.7563, lng: 100.5018 },
+  'นนทบุรี': { lat: 13.8621, lng: 100.5134 },
+  'ปทุมธานี': { lat: 14.0208, lng: 100.5250 },
+  'สมุทรปราการ': { lat: 13.5990, lng: 100.5998 },
+  'เชียงใหม่': { lat: 18.7883, lng: 98.9853 },
+  'ขอนแก่น': { lat: 16.4419, lng: 102.8359 },
+  'นครราชสีมา': { lat: 14.9799, lng: 102.0978 },
+  'อุดรธานี': { lat: 17.4156, lng: 102.7870 },
+  'สงขลา': { lat: 7.1897, lng: 100.5953 },
+  'ภูเก็ต': { lat: 7.8804, lng: 98.3923 },
+  'ชลบุรี': { lat: 13.3611, lng: 100.9847 },
+  'ระยอง': { lat: 12.6814, lng: 101.2816 },
+};
+
+function getJobCoords(job: JobPost): { lat: number; lng: number } | null {
+  const lat = (job as any).lat ?? job.location?.lat ?? (job.location as any)?.coordinates?.lat;
+  const lng = (job as any).lng ?? job.location?.lng ?? (job.location as any)?.coordinates?.lng;
+  if (lat != null && lng != null) return { lat, lng };
+
+  const province = job.location?.province || (job as any).province || '';
+  return PROVINCE_COORDS[province] ?? null;
+}
+
 // ─── Category Tabs ──────────────────────────────────────────────────
 const CATEGORY_TABS = [
   { key: 'all',      label: 'ทั้งหมด',      icon: 'apps-outline'             as const, color: '#0EA5E9' },
@@ -738,15 +762,17 @@ export default function HomeScreen({ navigation }: Props) {
 
   // Compute distance for each job (if user location is available)
   const jobsWithDistance = useMemo(() => {
-    if (!location) return jobs;
+    const baseLat = location?.latitude ?? user?.nearbyJobAlert?.lat;
+    const baseLng = location?.longitude ?? user?.nearbyJobAlert?.lng;
+    if (baseLat == null || baseLng == null) return jobs;
+
     return jobs.map(job => {
-      const jobLat = (job as any).lat ?? job.location?.lat ?? job.location?.coordinates?.lat;
-      const jobLng = (job as any).lng ?? job.location?.lng ?? job.location?.coordinates?.lng;
-      if (!jobLat || !jobLng) return job;
-      const dist = getDistanceKm(location.latitude, location.longitude, jobLat, jobLng);
+      const coords = getJobCoords(job);
+      if (!coords) return job;
+      const dist = getDistanceKm(baseLat, baseLng, coords.lat, coords.lng);
       return { ...job, _distanceKm: Math.round(dist * 10) / 10 } as JobPost;
     });
-  }, [jobs, location]);
+  }, [jobs, location, user?.nearbyJobAlert?.lat, user?.nearbyJobAlert?.lng]);
 
   // Render job item
   const renderJobItem = ({ item }: { item: JobPost }) => (
@@ -1232,6 +1258,12 @@ export default function HomeScreen({ navigation }: Props) {
             label: 'โพสต์งาน',
             onPress: () => navigation.navigate('PostJob' as any),
             color: '#0EA5E9',
+          },
+          {
+            icon: 'navigate-outline',
+            label: 'งานใกล้ฉัน',
+            onPress: () => (navigation as any).navigate('NearbyJobAlert'),
+            color: '#14B8A6',
           },
           {
             icon: 'map-outline',

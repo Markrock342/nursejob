@@ -42,6 +42,36 @@ const formatShiftDate = (date: Date): string => {
   return d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
 };
 
+// Build display for multi-date jobs
+const getShiftDateSummary = (job: JobPost): string => {
+  const dates = job.shiftDates;
+  if (!dates || dates.length === 0) return formatShiftDate(job.shiftDate);
+  if (dates.length === 1) {
+    return formatShiftDate(new Date(dates[0]));
+  }
+  const first = new Date(dates[0]).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  const last = new Date(dates[dates.length - 1]).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  return `${first} – ${last} (${dates.length} วัน)`;
+};
+
+const getShiftTimeSummary = (job: JobPost): string => {
+  const slots = job.shiftTimeSlots;
+  const dates = job.shiftDates;
+  if (!slots || !dates || dates.length === 0) {
+    return job.shiftTime || 'ตามตกลง';
+  }
+  const times = dates.map(d => {
+    const key = d.slice(0, 10);
+    const s = slots[key];
+    return s ? `${s.start}-${s.end}` : null;
+  }).filter(Boolean) as string[];
+
+  if (times.length === 0) return job.shiftTime || 'ตามตกลง';
+  const unique = [...new Set(times)];
+  if (unique.length === 1) return unique[0];
+  return 'หลายช่วงเวลา';
+};
+
 // ============================================
 // Props
 // ============================================
@@ -173,13 +203,16 @@ export function JobCard({
               {[job.location?.hospital, job.location?.district, job.location?.province]
                 .filter(Boolean)
                 .join(', ')}
-              {distanceKm !== undefined ? (
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>
-                  {'  '}• {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} ม.` : `${distanceKm.toFixed(1)} กม.`}
-                </Text>
-              ) : null}
             </Text>
           </View>
+          {distanceKm !== undefined ? (
+            <View style={[styles.distanceBadge, { backgroundColor: colors.primaryBackground }]}> 
+              <Ionicons name="navigate" size={11} color={colors.primary} />
+              <Text style={[styles.distanceText, { color: colors.primary }]}>
+                ห่างจากคุณ {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} ม.` : `${distanceKm.toFixed(1)} กม.`}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.headerRight}>
@@ -270,14 +303,14 @@ export function JobCard({
         <View style={styles.shiftItem}>
           <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
           <Text style={[styles.shiftItemText, { color: colors.text }]}>
-            {formatShiftDate(job.shiftDate)}
+            {getShiftDateSummary(job)}
           </Text>
         </View>
         <View style={[styles.shiftDivider, { backgroundColor: colors.borderLight }]} />
         <View style={styles.shiftItem}>
           <Ionicons name="time-outline" size={14} color={colors.textMuted} />
           <Text style={[styles.shiftItemText, { color: colors.text }]}>
-            {job.shiftTime || 'ตามตกลง'}
+            {getShiftTimeSummary(job)}
           </Text>
         </View>
       </View>
@@ -373,6 +406,19 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.xs,
     flex: 1,
     flexShrink: 1,
+  },
+  distanceBadge: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  distanceText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   headerRight: {
     alignItems: 'flex-end',

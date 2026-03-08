@@ -13,10 +13,10 @@ import {
   serverTimestamp,
   onSnapshot,
 } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
 import { db } from '../config/firebase';
 import { JobPost } from '../types';
 import { getJobById } from './jobService';
+import { assertAuthUser, isAuthUser } from './security/authGuards';
 
 const FAVORITES_COLLECTION = 'favorites';
 
@@ -31,6 +31,8 @@ export interface Favorite {
 // Add job to favorites
 export async function addToFavorites(userId: string, jobId: string): Promise<string> {
   try {
+    assertAuthUser(userId, 'ไม่สามารถบันทึกรายการโปรดแทนผู้ใช้อื่นได้');
+
     // Check if already favorited
     const existing = await getFavoriteByJobId(userId, jobId);
     if (existing) {
@@ -52,6 +54,8 @@ export async function addToFavorites(userId: string, jobId: string): Promise<str
 // Remove from favorites
 export async function removeFromFavorites(userId: string, jobId: string): Promise<void> {
   try {
+    assertAuthUser(userId, 'ไม่สามารถลบรายการโปรดแทนผู้ใช้อื่นได้');
+
     const favorite = await getFavoriteByJobId(userId, jobId);
     if (favorite) {
       await deleteDoc(doc(db, FAVORITES_COLLECTION, favorite.id));
@@ -65,6 +69,8 @@ export async function removeFromFavorites(userId: string, jobId: string): Promis
 // Get favorite by job ID
 export async function getFavoriteByJobId(userId: string, jobId: string): Promise<Favorite | null> {
   try {
+    if (!isAuthUser(userId)) return null;
+
     const q = query(
       collection(db, FAVORITES_COLLECTION),
       where('userId', '==', userId),
@@ -111,7 +117,7 @@ export async function toggleFavorite(userId: string, jobId: string): Promise<boo
 
 // Get all user favorites with job details
 export async function getUserFavorites(userId: string): Promise<Favorite[]> {
-  if (!getAuth().currentUser) return [];
+  if (!isAuthUser(userId)) return [];
   try {
     const q = query(
       collection(db, FAVORITES_COLLECTION),
@@ -146,6 +152,10 @@ export function subscribeToFavorites(
   userId: string,
   callback: (favorites: Favorite[]) => void
 ): () => void {
+  if (!isAuthUser(userId)) {
+    callback([]);
+    return () => {};
+  }
   const q = query(
     collection(db, FAVORITES_COLLECTION),
     where('userId', '==', userId)
@@ -175,7 +185,7 @@ export function subscribeToFavorites(
 
 // Get favorites count
 export async function getFavoritesCount(userId: string): Promise<number> {
-  if (!getAuth().currentUser) return 0;
+  if (!isAuthUser(userId)) return 0;
   try {
     const q = query(
       collection(db, FAVORITES_COLLECTION),

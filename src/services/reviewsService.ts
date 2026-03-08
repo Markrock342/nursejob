@@ -18,6 +18,7 @@ import {
   increment,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { assertAuthUser } from './security/authGuards';
 
 const REVIEWS_COLLECTION = 'reviews';
 const HOSPITALS_COLLECTION = 'hospitals';
@@ -72,6 +73,8 @@ export async function createReview(
   }
 ): Promise<string> {
   try {
+    assertAuthUser(userId, 'ไม่สามารถรีวิวแทนผู้ใช้อื่นได้');
+
     // Check if user already reviewed this hospital
     const existing = await getUserReviewForHospital(userId, hospitalId);
     if (existing) {
@@ -80,6 +83,7 @@ export async function createReview(
 
     const docRef = await addDoc(collection(db, REVIEWS_COLLECTION), {
       hospitalId,
+      reviewerId: userId,
       userId,
       userName,
       userPhotoURL: options?.userPhotoURL || null,
@@ -136,12 +140,22 @@ export async function getUserReviewForHospital(
   hospitalId: string
 ): Promise<Review | null> {
   try {
-    const q = query(
+    const reviewerQuery = query(
       collection(db, REVIEWS_COLLECTION),
-      where('userId', '==', userId),
+      where('reviewerId', '==', userId),
       where('hospitalId', '==', hospitalId)
     );
-    const snapshot = await getDocs(q);
+    let snapshot = await getDocs(reviewerQuery);
+
+    // Backward compatibility for old docs that used userId instead of reviewerId
+    if (snapshot.empty) {
+      const legacyQuery = query(
+        collection(db, REVIEWS_COLLECTION),
+        where('userId', '==', userId),
+        where('hospitalId', '==', hospitalId)
+      );
+      snapshot = await getDocs(legacyQuery);
+    }
     
     if (snapshot.empty) return null;
     
@@ -162,7 +176,7 @@ export async function getUserReviews(userId: string): Promise<Review[]> {
   try {
     const q = query(
       collection(db, REVIEWS_COLLECTION),
-      where('userId', '==', userId),
+      where('reviewerId', '==', userId),
       orderBy('createdAt', 'desc')
     );
     const snapshot = await getDocs(q);

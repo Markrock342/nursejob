@@ -21,6 +21,7 @@ import {
 import { db } from '../config/firebase';
 import { JobPost, ShiftContact, JobFilters, PostShift } from '../types';
 import { getQueryGeohashes, getDistanceKm, encodeGeohash } from '../utils/geohash';
+import { assertAuthUser, isAuthUser } from './security/authGuards';
 
 // Re-export types for backward compatibility
 export type { JobPost, ShiftContact };
@@ -29,8 +30,40 @@ const JOBS_COLLECTION = 'shifts';
 const CONTACTS_COLLECTION = 'shift_contacts';
 const PAGE_SIZE = 20;
 
-// Feature flag — true เฉพาะ dev/staging เท่านั้น
-const SHOW_MOCK_DATA = process.env.EXPO_PUBLIC_SHOW_MOCK_DATA === 'true' && __DEV__;
+// Production mode: never fall back to mock jobs.
+const SHOW_MOCK_DATA = false;
+
+// Sync poster snapshot fields on already-created posts.
+export async function syncPosterSnapshotToMyPosts(
+  userId: string,
+  profile: { displayName?: string; photoURL?: string | null }
+): Promise<number> {
+  if (!isAuthUser(userId)) return 0;
+
+  const newName = profile.displayName || 'ไม่ระบุชื่อ';
+  const newPhoto = profile.photoURL || '';
+
+  const q = query(collection(db, JOBS_COLLECTION), where('posterId', '==', userId));
+  const snap = await getDocs(q);
+  if (snap.empty) return 0;
+
+  const updates = snap.docs
+    .filter((d) => {
+      const data = d.data();
+      return (data.posterName || 'ไม่ระบุชื่อ') !== newName || (data.posterPhoto || '') !== newPhoto;
+    })
+    .map((d) =>
+      updateDoc(d.ref, {
+        posterName: newName,
+        posterPhoto: newPhoto,
+        updatedAt: serverTimestamp(),
+      })
+    );
+
+  if (updates.length === 0) return 0;
+  await Promise.all(updates);
+  return updates.length;
+}
 
 // ==========================================
 // Helpers
@@ -305,6 +338,8 @@ export function validateJobPost(jobData: Partial<JobPost>): PostValidationResult
 // Create new job post
 export async function createJob(jobData: Partial<JobPost>): Promise<string> {
   try {
+    const currentUser = assertAuthUser(jobData.posterId, 'ไม่สามารถยืนยันตัวตนผู้โพสต์ได้ กรุณาเข้าสู่ระบบใหม่');
+
     // Rate limit check
     if (jobData.posterId) {
       const allowed = await checkRateLimit(jobData.posterId);
@@ -344,7 +379,15 @@ export async function createJob(jobData: Partial<JobPost>): Promise<string> {
       status: cleanData.status || 'active',
     });
     return docRef.id;
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') {
+      throw new Error('สิทธิ์ไม่เพียงพอหรือเซสชันยังไม่พร้อม กรุณาออกแล้วเข้าใหม่');
+    }
+    const msg = String(error?.message || '');
+    if (msg.includes('เซสชันหมดอายุ') || msg.includes('ยืนยันตัวตนผู้โพสต์')) {
+      // Auth cache/token race is handled by UI prompt; avoid noisy red overlay.
+      throw error;
+    }
     console.error('[createJob] error:', error);
     throw error;
   }
@@ -353,7 +396,15 @@ export async function createJob(jobData: Partial<JobPost>): Promise<string> {
 // Update job
 export async function updateJob(jobId: string, updates: Partial<JobPost>): Promise<void> {
   try {
+    const currentUser = assertAuthUser();
+
     const docRef = doc(db, JOBS_COLLECTION, jobId);
+    const currentDoc = await getDoc(docRef);
+    if (!currentDoc.exists()) throw new Error('ไม่พบประกาศนี้');
+    const data = currentDoc.data();
+    if (data.posterId !== currentUser.uid) {
+      throw new Error('ไม่มีสิทธิ์แก้ไขประกาศนี้');
+    }
     await updateDoc(docRef, updates);
   } catch (error) {
     console.error('Error updating job:', error);
@@ -376,7 +427,15 @@ export async function incrementViewCount(jobId: string): Promise<void> {
 // Delete job
 export async function deleteJob(jobId: string): Promise<void> {
   try {
+    const currentUser = assertAuthUser();
+
     const docRef = doc(db, JOBS_COLLECTION, jobId);
+    const currentDoc = await getDoc(docRef);
+    if (!currentDoc.exists()) throw new Error('ไม่พบประกาศนี้');
+    const data = currentDoc.data();
+    if (data.posterId !== currentUser.uid) {
+      throw new Error('ไม่มีสิทธิ์ลบประกาศนี้');
+    }
     await deleteDoc(docRef);
   } catch (error) {
     console.error('Error deleting job:', error);
@@ -387,6 +446,8 @@ export async function deleteJob(jobId: string): Promise<void> {
 // Get jobs by user ID (ประกาศของฉัน)
 export async function getUserPosts(userId: string): Promise<JobPost[]> {
   try {
+    if (!isAuthUser(userId)) return [];
+
     const jobsQuery = query(
       collection(db, JOBS_COLLECTION),
       where('posterId', '==', userId),
@@ -405,6 +466,11 @@ export function subscribeToUserPosts(
   userId: string,
   callback: (posts: JobPost[]) => void,
 ): () => void {
+  if (!isAuthUser(userId)) {
+    callback([]);
+    return () => {};
+  }
+
   const postsQuery = query(
     collection(db, JOBS_COLLECTION),
     where('posterId', '==', userId),
@@ -422,7 +488,15 @@ export function subscribeToUserPosts(
 // Update job status
 export async function updateJobStatus(jobId: string, status: 'active' | 'urgent' | 'closed'): Promise<void> {
   try {
+    const currentUser = assertAuthUser();
+
     const docRef = doc(db, JOBS_COLLECTION, jobId);
+    const currentDoc = await getDoc(docRef);
+    if (!currentDoc.exists()) throw new Error('ไม่พบประกาศนี้');
+    const data = currentDoc.data();
+    if (data.posterId !== currentUser.uid) {
+      throw new Error('ไม่มีสิทธิ์แก้ไขสถานะประกาศนี้');
+    }
     await updateDoc(docRef, {
       status,
       updatedAt: serverTimestamp(),
@@ -446,6 +520,15 @@ export async function contactForShift(
   message?: string
 ): Promise<string> {
   try {
+    const currentUser = assertAuthUser(userId, 'ไม่สามารถแสดงความสนใจแทนผู้ใช้อื่นได้');
+
+    const jobRef = doc(db, JOBS_COLLECTION, jobId);
+    const jobDoc = await getDoc(jobRef);
+    if (!jobDoc.exists()) throw new Error('ไม่พบประกาศนี้');
+    const jobData = jobDoc.data();
+    const posterId = jobData.posterId;
+    if (!posterId) throw new Error('ประกาศนี้ไม่มีข้อมูลผู้โพสต์');
+
     // Check if already contacted
     const existingQuery = query(
       collection(db, CONTACTS_COLLECTION),
@@ -461,6 +544,7 @@ export async function contactForShift(
     // Create contact record
     const docRef = await addDoc(collection(db, CONTACTS_COLLECTION), {
       jobId,
+      posterId,
       interestedUserId: userId,
       interestedUserName: userName,
       interestedUserPhone: userPhone,
@@ -470,10 +554,8 @@ export async function contactForShift(
     });
 
     // Update views count
-    const jobRef = doc(db, JOBS_COLLECTION, jobId);
-    const jobDoc = await getDoc(jobRef);
     if (jobDoc.exists()) {
-      const currentCount = jobDoc.data().viewsCount || 0;
+      const currentCount = jobData.viewsCount || 0;
       await updateDoc(jobRef, {
         viewsCount: currentCount + 1
       });
@@ -488,6 +570,7 @@ export async function contactForShift(
 
 // Get user's interested shifts
 export async function getUserShiftContacts(userId: string): Promise<ShiftContact[]> {
+  if (!isAuthUser(userId)) return [];
   try {
     // Use simpler query without orderBy to avoid index requirement
     const contactsQuery = query(
@@ -542,7 +625,7 @@ export async function getUserShiftContacts(userId: string): Promise<ShiftContact
     return contacts;
   } catch (error: any) {
     if (error?.code === 'permission-denied') return []; // auth not ready yet
-    console.error('Error fetching contacts:', error);
+    console.warn('[getUserShiftContacts] non-critical error:', error?.code || error?.message || error);
     return [];
   }
 }
@@ -576,8 +659,9 @@ export async function getShiftContacts(jobId: string): Promise<ShiftContact[]> {
     });
     
     return contacts;
-  } catch (error) {
-    console.error('Error fetching shift contacts:', error);
+  } catch (error: any) {
+    if (error?.code === 'permission-denied') return [];
+    console.warn('[getShiftContacts] non-critical error:', error?.code || error?.message || error);
     return []; // Return empty instead of throwing
   }
 }

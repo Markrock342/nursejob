@@ -2,7 +2,7 @@
 // PROFILE SCREEN - Production Ready
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,7 @@ import { sendOTP, verifyOTP } from '../../services/otpService';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, POSITIONS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { getUserShiftContacts, deleteShiftContact } from '../../services/jobService';
+import { getUserShiftContacts, deleteShiftContact, syncPosterSnapshotToMyPosts } from '../../services/jobService';
 import { getUserSubscription } from '../../services/subscriptionService';
 import { getFavoritesCount } from '../../services/favoritesService';
 import { getUnreadNotificationsCount } from '../../services/notificationsService';
@@ -46,7 +46,7 @@ interface Props {
 // ============================================
 export default function ProfileScreen({ navigation }: Props) {
   // Auth context
-  const { user, isAuthenticated, logout, updateUser, isLoading: isAuthLoading, isAdmin, isInitialized } = useAuth();
+  const { user, isAuthenticated, logout, updateUser, refreshUser, isLoading: isAuthLoading, isAdmin, isInitialized } = useAuth();
   const { colors, isDark } = useTheme();
   const nav = useNavigation<any>();
   const insets = useSafeAreaInsets();
@@ -92,15 +92,39 @@ export default function ProfileScreen({ navigation }: Props) {
 
   // Check if user is hospital (no longer used but kept for reference)
   const isHospital = user?.role === 'hospital';
+  const focusSyncInProgressRef = useRef(false);
+  const posterSnapshotSyncDoneRef = useRef(false);
 
   // Load data when screen is focused
   useFocusEffect(
     useCallback(() => {
+      const syncAndLoad = async () => {
+        if (focusSyncInProgressRef.current) return;
+        focusSyncInProgressRef.current = true;
+        try {
+          await refreshUser();
+          if (!posterSnapshotSyncDoneRef.current && user?.uid) {
+            try {
+              await syncPosterSnapshotToMyPosts(user.uid, {
+                displayName: user.displayName,
+                photoURL: user.photoURL || '',
+              });
+            } catch (err) {
+              console.warn('Poster snapshot sync failed:', err);
+            }
+            posterSnapshotSyncDoneRef.current = true;
+          }
+          await loadAllData();
+        } finally {
+          focusSyncInProgressRef.current = false;
+        }
+      };
+
       // Only load after real Firebase auth is confirmed (not cached user)
       if (user?.uid && isInitialized) {
-        loadAllData();
+        syncAndLoad();
       }
-    }, [user?.uid, isInitialized])
+    }, [user?.uid, isInitialized, refreshUser])
   );
 
   // Load all data
@@ -272,7 +296,6 @@ export default function ProfileScreen({ navigation }: Props) {
     setOtpError('');
     try {
       const result = await sendOTP(phone);
-      if (result.devCode && __DEV__) console.log('[OTP] devCode:', result.devCode);
       if (!result.success) {
         setPhoneStep('idle');
         setOtpError(result.error || 'ส่งรหัส OTP ไม่สำเร็จ');

@@ -186,7 +186,7 @@ function MainTabNavigator() {
         component={PostJobScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} iconName={focused ? 'add-circle' : 'add-circle-outline'} label="ลงประกาศ" />
+            <TabIcon focused={focused} iconName={focused ? 'add-circle' : 'add-circle-outline'} label="โพสต์" />
           ),
         }}
       />
@@ -354,41 +354,45 @@ function RootNavigator() {
         }}
       />
 
-      {/* Admin Dashboard (Admin only) */}
-      <RootStack.Screen 
-        name="AdminDashboard" 
-        component={AdminDashboardScreen}
-        options={{
-          animation: 'slide_from_right',
-        }}
-      />
+      {isAdmin && (
+        <>
+          {/* Admin Dashboard (Admin only) */}
+          <RootStack.Screen 
+            name="AdminDashboard" 
+            component={AdminDashboardScreen}
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
 
-      {/* Admin Verification (Admin only) */}
-      <RootStack.Screen 
-        name="AdminVerification" 
-        component={AdminVerificationScreen}
-        options={{
-          animation: 'slide_from_right',
-        }}
-      />
+          {/* Admin Verification (Admin only) */}
+          <RootStack.Screen 
+            name="AdminVerification" 
+            component={AdminVerificationScreen}
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
 
-      {/* Admin Reports (Admin only) */}
-      <RootStack.Screen 
-        name="AdminReports" 
-        component={AdminReportsScreen}
-        options={{
-          animation: 'slide_from_right',
-        }}
-      />
+          {/* Admin Reports (Admin only) */}
+          <RootStack.Screen 
+            name="AdminReports" 
+            component={AdminReportsScreen}
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
 
-      {/* Admin Feedback (Admin only) */}
-      <RootStack.Screen 
-        name="AdminFeedback" 
-        component={AdminFeedbackScreen}
-        options={{
-          animation: 'slide_from_right',
-        }}
-      />
+          {/* Admin Feedback (Admin only) */}
+          <RootStack.Screen 
+            name="AdminFeedback" 
+            component={AdminFeedbackScreen}
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
+        </>
+      )}
 
       {/* User Feedback */}
       <RootStack.Screen 

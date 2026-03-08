@@ -3,7 +3,6 @@ import {
   doc, 
   addDoc, 
   updateDoc,
-  deleteDoc,
   query, 
   where, 
   orderBy, 
@@ -13,11 +12,11 @@ import {
   getDocs,
   limit,
   getDoc,
-  writeBatch
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
 import { Message, Conversation } from '../types';
+import { assertAuthUser, isAuthUser } from './security/authGuards';
 
 // Create or get existing conversation
 export const getOrCreateConversation = async (
@@ -29,6 +28,7 @@ export const getOrCreateConversation = async (
   jobTitle?: string,
   hospitalName?: string
 ): Promise<string> => {
+  assertAuthUser(userId, 'เซสชันไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
   try {
     // Check if conversation already exists
     const conversationsRef = collection(db, 'conversations');
@@ -83,6 +83,8 @@ export const sendMessage = async (
   text: string
 ): Promise<void> => {
   try {
+    assertAuthUser(senderId, 'ไม่สามารถส่งข้อความแทนผู้ใช้อื่นได้');
+
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
     
     await addDoc(messagesRef, {
@@ -116,6 +118,7 @@ export const sendMessage = async (
         lastMessageAt: serverTimestamp(),
         lastMessageSenderId: senderId,
         unreadBy,
+        deletedBy: [],
         unreadCount: totalUnread, // Keep old field updated for backwards compatibility
       });
     }
@@ -170,6 +173,10 @@ export const subscribeToConversations = (
   userId: string,
   callback: (conversations: Conversation[]) => void
 ): (() => void) => {
+  if (!isAuthUser(userId)) {
+    callback([]);
+    return () => {};
+  }
   const conversationsRef = collection(db, 'conversations');
   // Use simpler query without orderBy to avoid index requirement
   const q = query(
@@ -211,6 +218,8 @@ export const markConversationAsRead = async (
   userId: string
 ): Promise<void> => {
   try {
+    if (!isAuthUser(userId)) return;
+
     const conversationRef = doc(db, 'conversations', conversationId);
     const conversationDoc = await getDoc(conversationRef);
     
@@ -234,6 +243,8 @@ export const markConversationAsRead = async (
 // Get unread count for user
 export const getUnreadCount = async (userId: string): Promise<number> => {
   try {
+    if (!isAuthUser(userId)) return 0;
+
     const conversationsRef = collection(db, 'conversations');
     const q = query(
       conversationsRef,
@@ -257,22 +268,35 @@ export const getUnreadCount = async (userId: string): Promise<number> => {
 };
 
 // Delete conversation and all messages
-export const deleteConversation = async (conversationId: string): Promise<void> => {
+export const deleteConversation = async (conversationId: string, userId: string): Promise<void> => {
   try {
-    const batch = writeBatch(db);
-    
-    // Delete all messages in the conversation
-    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-    const messagesSnapshot = await getDocs(messagesRef);
-    messagesSnapshot.docs.forEach(messageDoc => {
-      batch.delete(messageDoc.ref);
-    });
-    
-    // Delete the conversation document
     const conversationRef = doc(db, 'conversations', conversationId);
-    batch.delete(conversationRef);
-    
-    await batch.commit();
+    const conversationDoc = await getDoc(conversationRef);
+    if (!conversationDoc.exists()) {
+      throw new Error('ไม่พบการสนทนา');
+    }
+
+    const data = conversationDoc.data();
+    const participants: string[] = Array.isArray(data.participants) ? data.participants : [];
+    if (!participants.includes(userId)) {
+      throw new Error('ไม่มีสิทธิ์ลบการสนทนานี้');
+    }
+
+    const deletedBy: string[] = Array.isArray(data.deletedBy) ? data.deletedBy : [];
+    const hiddenBy: string[] = Array.isArray(data.hiddenBy) ? data.hiddenBy : [];
+    const unreadBy = { ...(data.unreadBy || {}) };
+    unreadBy[userId] = 0;
+
+    if (!deletedBy.includes(userId)) {
+      deletedBy.push(userId);
+    }
+
+    await updateDoc(conversationRef, {
+      deletedBy,
+      hiddenBy: hiddenBy.filter((id: string) => id !== userId),
+      unreadBy,
+      updatedAt: serverTimestamp(),
+    });
   } catch (error) {
     console.error('Error deleting conversation:', error);
     throw new Error('ไม่สามารถลบการสนทนาได้');
@@ -286,6 +310,8 @@ export const deleteMessage = async (
   userId: string
 ): Promise<void> => {
   try {
+    assertAuthUser(userId, 'ไม่สามารถลบข้อความแทนผู้ใช้อื่นได้');
+
     const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
     const messageDoc = await getDoc(messageRef);
     
@@ -425,13 +451,16 @@ export const sendImage = async (
   fileName: string
 ): Promise<void> => {
   try {
+    assertAuthUser(senderId, 'ไม่สามารถส่งรูปแทนผู้ใช้อื่นได้');
+
     // Convert URI to blob
     const response = await fetch(imageUri);
     const blob = await response.blob();
     
     // Upload to Firebase Storage
     const timestamp = Date.now();
-    const filePath = `chat/${conversationId}/${timestamp}_${fileName}`;
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `chats/${conversationId}/${timestamp}_${safeName}`;
     const storageRef = ref(storage, filePath);
     await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
     const imageUrl = await getDownloadURL(storageRef);
@@ -457,6 +486,7 @@ export const sendImage = async (
       await updateDoc(conversationRef, {
         lastMessage: '📷 รูปภาพ',
         lastMessageAt: serverTimestamp(),
+        deletedBy: [],
         unreadCount: (data.unreadCount || 0) + 1,
       });
     }
@@ -477,6 +507,8 @@ export const sendDocument = async (
   mimeType: string
 ): Promise<void> => {
   try {
+    assertAuthUser(senderId, 'ไม่สามารถส่งไฟล์แทนผู้ใช้อื่นได้');
+
     // Convert URI to blob
     const response = await fetch(documentUri);
     const blob = await response.blob();
@@ -484,7 +516,7 @@ export const sendDocument = async (
     // Upload to Firebase Storage
     const timestamp = Date.now();
     const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const filePath = `chat/${conversationId}/${timestamp}_${safeName}`;
+    const filePath = `chats/${conversationId}/${timestamp}_${safeName}`;
     const storageRef = ref(storage, filePath);
     await uploadBytes(storageRef, blob, { contentType: mimeType });
     const fileUrl = await getDownloadURL(storageRef);

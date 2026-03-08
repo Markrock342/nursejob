@@ -28,18 +28,10 @@ export const STAFF_TYPES: StaffTypeInfo[] = [
   },
   {
     code: 'PN',
-    nameTH: 'พยาบาลเทคนิค',
-    nameEN: 'Practical Nurse',
-    shortName: 'PN',
-    description: 'จบ ปวส. มีใบประกอบวิชาชีพ',
-    requiresLicense: true,
-  },
-  {
-    code: 'NA',
     nameTH: 'ผู้ช่วยพยาบาล',
-    nameEN: 'Nurse Aide',
-    shortName: 'NA',
-    description: 'ผ่านการอบรมหลักสูตรผู้ช่วยพยาบาล',
+    nameEN: 'Practical Nurse / Nurse Aide',
+    shortName: 'PN/NA',
+    description: 'พยาบาลเทคนิค (PN) / ผู้ช่วยพยาบาล (NA)',
     requiresLicense: false,
   },
   {
@@ -81,6 +73,8 @@ export const STAFF_TYPE_MAP = STAFF_TYPES.reduce((acc, type) => {
   acc[type.code] = type;
   return acc;
 }, {} as Record<StaffType, StaffTypeInfo>);
+// NA is an alias for PN/NA display
+STAFF_TYPE_MAP['NA'] = STAFF_TYPE_MAP['PN'];
 
 // ============================================
 // ประเภทสถานที่ (Location Types)
@@ -99,31 +93,31 @@ export const LOCATION_TYPES: LocationTypeInfo[] = [
   {
     code: 'HOSPITAL',
     nameTH: 'โรงพยาบาล',
-    icon: '🏥',
+    icon: 'business-outline',
     description: 'โรงพยาบาลรัฐหรือเอกชน',
   },
   {
     code: 'CLINIC',
     nameTH: 'คลินิก',
-    icon: '🏨',
+    icon: 'medkit-outline',
     description: 'คลินิกเอกชน, คลินิกความงาม',
   },
   {
     code: 'HOME',
     nameTH: 'บ้านผู้ป่วย',
-    icon: '🏠',
+    icon: 'home-outline',
     description: 'ดูแลผู้ป่วยที่บ้าน (Home Care)',
   },
   {
     code: 'NURSING_HOME',
     nameTH: 'สถานดูแลผู้สูงอายุ',
-    icon: '🏡',
+    icon: 'bed-outline',
     description: 'Nursing Home, บ้านพักผู้สูงอายุ',
   },
   {
     code: 'OTHER',
     nameTH: 'อื่นๆ',
-    icon: '📍',
+    icon: 'location-outline',
     description: 'สถานที่อื่น (ระบุเอง)',
   },
 ];

@@ -46,10 +46,10 @@ const REDIRECT_URI = makeRedirectUri({
 });
 
 const GOOGLE_AUTH_CONFIG = {
-  clientId: GOOGLE_WEB_CLIENT_ID,
+  expoClientId: GOOGLE_WEB_CLIENT_ID,
+  webClientId: GOOGLE_WEB_CLIENT_ID,
   androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
   iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
-  redirectUri: REDIRECT_URI,
 };
 
 // ============================================
@@ -89,6 +89,12 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
   useEffect(() => {
     if (response?.type === 'success') {
       const { id_token } = response.params;
+      if (!id_token) {
+        setErrorMessage('Google Sign-In สำเร็จไม่ครบขั้นตอน: ไม่ได้รับ id_token จาก Google');
+        setShowErrorModal(true);
+        setGoogleLoading(false);
+        return;
+      }
       handleGoogleLogin(id_token);
     } else if (response?.type === 'error') {
       const errCode = (response as any).error?.code || (response as any).params?.error || '';
@@ -109,9 +115,14 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
   const handleGoogleLogin = async (idToken: string) => {
     setGoogleLoading(true);
     try {
-      await loginWithGoogle(idToken);
-      // Navigate back to main after successful Google login
-      setShowSuccessModal(true);
+      const { isNewUser } = await loginWithGoogle(idToken);
+      if (isNewUser) {
+        // New Google user → must pick role before entering app
+        navigation.navigate('ChooseRole', { fromGoogle: true });
+      } else {
+        // Returning user → close auth modal
+        setShowSuccessModal(true);
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'กรุณาลองใหม่อีกครั้ง');
       setShowErrorModal(true);

@@ -9,6 +9,7 @@ import {
   View,
   Text,
   StyleSheet,
+  Animated,
   FlatList,
   TouchableOpacity,
   TextInput,
@@ -21,9 +22,11 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Swipeable } from 'react-native-gesture-handler';
+import { PanGestureHandler, PinchGestureHandler, State, Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
 
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -207,12 +210,15 @@ export function ChatListScreen({ navigation }: any) {
 
   const visible = conversations.filter(
     c =>
+      !c.deletedBy?.includes(user?.uid || '') &&
       !c.hiddenBy?.includes(user?.uid || '') &&
       (!search || (c.participantDetails?.find((p: any) => p.id !== user?.uid)?.displayName || '')
         .toLowerCase().includes(search.toLowerCase()))
   );
 
-  const hidden = conversations.filter(c => c.hiddenBy?.includes(user?.uid || ''));
+  const hidden = conversations.filter(
+    c => c.hiddenBy?.includes(user?.uid || '') && !c.deletedBy?.includes(user?.uid || '')
+  );
 
   const handlePress = (c: any) => {
     const other = c.participantDetails?.find((p: any) => p.id !== user?.uid);
@@ -232,13 +238,19 @@ export function ChatListScreen({ navigation }: any) {
     const other = c.participantDetails?.find((p: any) => p.id !== user?.uid);
     Alert.alert(
       'ลบการสนทนา',
-      `ลบแชทกับ "${other?.displayName || 'ผู้ใช้'}"?\nข้อความทั้งหมดจะหายถาวร`,
+      `ลบแชทกับ "${other?.displayName || 'ผู้ใช้'}" ออกจากรายการของคุณ?`,
       [
         { text: 'ยกเลิก', style: 'cancel' },
         {
           text: 'ลบ',
           style: 'destructive',
-          onPress: async () => { try { await deleteConversation(c.id); } catch {} },
+          onPress: async () => {
+            try {
+              await deleteConversation(c.id, user.uid);
+            } catch (error: any) {
+              Alert.alert('ผิดพลาด', error?.message || 'ไม่สามารถลบการสนทนาได้');
+            }
+          },
         },
       ]
     );
@@ -374,7 +386,19 @@ export function ChatListScreen({ navigation }: any) {
 // ============================================
 // MESSAGE BUBBLE
 // ============================================
-function MessageBubble({ msg, isOwn, colors, onLongPress }: { msg: Message; isOwn: boolean; colors: any; onLongPress: () => void }) {
+function MessageBubble({
+  msg,
+  isOwn,
+  colors,
+  onLongPress,
+  onImagePress,
+}: {
+  msg: Message;
+  isOwn: boolean;
+  colors: any;
+  onLongPress: () => void;
+  onImagePress: (uri: string) => void;
+}) {
   const isDeleted = (msg as any).isDeleted;
   const hasImage = (msg as any).imageUrl;
   const time = msg.createdAt ? formatTime(msg.createdAt) : '';
@@ -397,7 +421,16 @@ function MessageBubble({ msg, isOwn, colors, onLongPress }: { msg: Message; isOw
             🗑 ข้อความนี้ถูกลบแล้ว
           </Text>
         ) : hasImage ? (
-          <Image source={{ uri: (msg as any).imageUrl }} style={styles.msgImage} resizeMode="cover" />
+          <TouchableOpacity
+            onPress={() => onImagePress((msg as any).imageUrl)}
+            activeOpacity={0.9}
+          >
+            <Image source={{ uri: (msg as any).imageUrl }} style={styles.msgImage} resizeMode="cover" />
+            <View style={styles.imageHintBadge}>
+              <Ionicons name="open-outline" size={12} color="#FFF" />
+              <Text style={styles.imageHintText}>แตะเพื่อเปิด</Text>
+            </View>
+          </TouchableOpacity>
         ) : (
           <Text style={[styles.bubbleText, { color: isOwn ? '#FFF' : colors.text }]}>{msg.text}</Text>
         )}
@@ -423,7 +456,19 @@ export function ChatRoomScreen({ navigation, route }: any) {
   const [isSending, setIsSending] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [selectedMsg, setSelectedMsg] = useState<Message | null>(null);
+  const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
+  const [imageScale, setImageScale] = useState(1);
+  const [isDownloadingImage, setIsDownloadingImage] = useState(false);
   const flatRef = useRef<FlatList>(null);
+
+  const baseScale = useRef(new Animated.Value(1)).current;
+  const pinchScale = useRef(new Animated.Value(1)).current;
+  const scale = Animated.multiply(baseScale, pinchScale);
+  const lastScale = useRef(1);
+
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const lastOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     setActiveConversationId(conversationId);
@@ -472,6 +517,101 @@ export function ChatRoomScreen({ navigation, route }: any) {
     catch (e: any) { Alert.alert('ไม่สามารถลบได้', e.message); }
   };
 
+  const resetImageViewer = () => {
+    setImageScale(1);
+    lastScale.current = 1;
+    baseScale.setValue(1);
+    pinchScale.setValue(1);
+    lastOffset.current = { x: 0, y: 0 };
+    translateX.setValue(0);
+    translateY.setValue(0);
+  };
+
+  const handleCloseImageViewer = () => {
+    setImagePreviewUri(null);
+    resetImageViewer();
+  };
+
+  const setViewerScale = (next: number) => {
+    const normalized = Math.max(1, Math.min(next, 4));
+    lastScale.current = normalized;
+    baseScale.setValue(normalized);
+    pinchScale.setValue(1);
+    setImageScale(normalized);
+  };
+
+  const onPinchGestureEvent = Animated.event(
+    [{ nativeEvent: { scale: pinchScale } }],
+    { useNativeDriver: true }
+  );
+
+  const onPinchHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      const next = lastScale.current * event.nativeEvent.scale;
+      setViewerScale(next);
+    }
+  };
+
+  const onPanGestureEvent = Animated.event(
+    [{ nativeEvent: { translationX: translateX, translationY: translateY } }],
+    { useNativeDriver: true }
+  );
+
+  const onPanHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.state === State.BEGAN) {
+      translateX.setOffset(lastOffset.current.x);
+      translateY.setOffset(lastOffset.current.y);
+      translateX.setValue(0);
+      translateY.setValue(0);
+    }
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      lastOffset.current = {
+        x: lastOffset.current.x + event.nativeEvent.translationX,
+        y: lastOffset.current.y + event.nativeEvent.translationY,
+      };
+      translateX.setOffset(lastOffset.current.x);
+      translateY.setOffset(lastOffset.current.y);
+      translateX.setValue(0);
+      translateY.setValue(0);
+    }
+  };
+
+  const handleDownloadImage = async () => {
+    if (!imagePreviewUri || isDownloadingImage) return;
+
+    setIsDownloadingImage(true);
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('บันทึกรูปไม่ได้', 'กรุณาอนุญาตสิทธิ์เข้าถึงรูปภาพก่อน');
+        return;
+      }
+
+      const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!baseDir) {
+        throw new Error('ไม่พบพื้นที่จัดเก็บไฟล์');
+      }
+
+      const localPath = `${baseDir}chat_${Date.now()}.jpg`;
+      const downloaded = await FileSystem.downloadAsync(imagePreviewUri, localPath);
+      const asset = await MediaLibrary.createAssetAsync(downloaded.uri);
+
+      const albumName = 'NurseGo';
+      const album = await MediaLibrary.getAlbumAsync(albumName);
+      if (!album) {
+        await MediaLibrary.createAlbumAsync(albumName, asset, false);
+      } else {
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      }
+
+      Alert.alert('บันทึกสำเร็จ', 'รูปถูกบันทึกไว้ในอัลบั้ม NurseGo แล้ว');
+    } catch (error: any) {
+      Alert.alert('บันทึกรูปไม่ได้', error?.message || 'กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsDownloadingImage(false);
+    }
+  };
+
   const renderItem = ({ item, index }: { item: Message; index: number }) => {
     const isOwn = item.senderId === user?.uid;
     const prev = index > 0 ? messages[index - 1] : null;
@@ -494,6 +634,10 @@ export function ChatRoomScreen({ navigation, route }: any) {
           isOwn={isOwn}
           colors={colors}
           onLongPress={() => { setSelectedMsg(item); setShowActions(true); }}
+          onImagePress={(uri) => {
+            resetImageViewer();
+            setImagePreviewUri(uri);
+          }}
         />
       </>
     );
@@ -574,6 +718,72 @@ export function ChatRoomScreen({ navigation, route }: any) {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={!!imagePreviewUri}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseImageViewer}
+      >
+        <View style={styles.imageViewerOverlay}>
+          <TouchableOpacity style={styles.imageViewerClose} onPress={handleCloseImageViewer}>
+            <Ionicons name="close" size={24} color="#FFF" />
+          </TouchableOpacity>
+
+          <PanGestureHandler
+            enabled={imageScale > 1.01}
+            onGestureEvent={onPanGestureEvent}
+            onHandlerStateChange={onPanHandlerStateChange}
+          >
+            <Animated.View style={styles.imageViewerStage}>
+              <PinchGestureHandler
+                onGestureEvent={onPinchGestureEvent}
+                onHandlerStateChange={onPinchHandlerStateChange}
+              >
+                <Animated.Image
+                  source={imagePreviewUri ? { uri: imagePreviewUri } : undefined}
+                  style={[
+                    styles.imageViewerImage,
+                    {
+                      transform: [
+                        { translateX },
+                        { translateY },
+                        { scale },
+                      ],
+                    },
+                  ]}
+                  resizeMode="contain"
+                />
+              </PinchGestureHandler>
+            </Animated.View>
+          </PanGestureHandler>
+
+          <View style={styles.imageViewerFooter}>
+            <View style={styles.imageViewerControls}>
+              <TouchableOpacity style={styles.imageControlBtn} onPress={() => setViewerScale(imageScale - 0.25)}>
+                <Ionicons name="remove" size={20} color="#FFF" />
+              </TouchableOpacity>
+              <Text style={styles.imageScaleText}>{Math.round(imageScale * 100)}%</Text>
+              <TouchableOpacity style={styles.imageControlBtn} onPress={() => setViewerScale(imageScale + 0.25)}>
+                <Ionicons name="add" size={20} color="#FFF" />
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.imageControlBtn, styles.imageResetBtn]} onPress={resetImageViewer}>
+                <Text style={styles.imageControlText}>รีเซ็ต</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.imageControlBtn, styles.imageDownloadBtn]}
+                onPress={handleDownloadImage}
+                disabled={isDownloadingImage}
+              >
+                {isDownloadingImage
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Ionicons name="download-outline" size={18} color="#FFF" />}
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.imageViewerHint}>ใช้ 2 นิ้วซูม/ลาก หรือกดปุ่มซูมและดาวน์โหลดด้านบน</Text>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -675,6 +885,19 @@ const styles = StyleSheet.create({
   bubbleTime: { fontSize: 10, alignSelf: 'flex-end' },
   deletedText: { fontSize: 13, fontStyle: 'italic' },
   msgImage: { width: 200, height: 200, borderRadius: 12 },
+  imageHintBadge: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 99,
+  },
+  imageHintText: { color: '#FFF', fontSize: 10, fontWeight: '600' },
 
   dateSep: { flexDirection: 'row', alignItems: 'center', marginVertical: 12, gap: 8 },
   dateSepLine: { flex: 1, height: 1 },
@@ -706,4 +929,78 @@ const styles = StyleSheet.create({
   actionTitle: { textAlign: 'center', fontSize: 13, paddingVertical: 14 },
   actionItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, gap: 14 },
   actionItemText: { fontSize: 15, fontWeight: '500' },
+
+  imageViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.96)',
+  },
+  imageViewerClose: {
+    position: 'absolute',
+    top: 52,
+    right: 18,
+    zIndex: 3,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  imageViewerStage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageViewerImage: {
+    width: SCREEN_W,
+    height: '75%',
+  },
+  imageViewerFooter: {
+    alignItems: 'center',
+    paddingBottom: 28,
+    paddingHorizontal: 16,
+  },
+  imageViewerControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  imageControlBtn: {
+    minWidth: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 10,
+  },
+  imageResetBtn: {
+    borderRadius: 14,
+    minWidth: 62,
+    height: 36,
+  },
+  imageDownloadBtn: {
+    borderRadius: 14,
+    minWidth: 46,
+    height: 36,
+    backgroundColor: 'rgba(14,165,233,0.75)',
+  },
+  imageControlText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  imageScaleText: {
+    color: '#FFF',
+    minWidth: 52,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  imageViewerHint: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
 });

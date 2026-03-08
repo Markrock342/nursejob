@@ -138,7 +138,9 @@ export default function AdminDashboardScreen() {
               prev.map((u) => (u.id === user.id ? { ...u, isActive: newStatus } : u))
             );
             setUserModalVisible(false);
-          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถดำเนินการได้'); }
+          } catch (error: any) {
+            Alert.alert('ผิดพลาด', error?.message || 'ไม่สามารถดำเนินการได้');
+          }
         },
       },
     ]);
@@ -162,7 +164,9 @@ export default function AdminDashboardScreen() {
               )
             );
             setUserModalVisible(false);
-          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถดำเนินการได้'); }
+          } catch (error: any) {
+            Alert.alert('ผิดพลาด', error?.message || 'ไม่สามารถดำเนินการได้');
+          }
         },
       },
     ]);
@@ -183,7 +187,9 @@ export default function AdminDashboardScreen() {
               )
             );
             setUserModalVisible(false);
-          } catch { Alert.alert('ผิดพลาด', 'ไม่สามารถดำเนินการได้'); }
+          } catch (error: any) {
+            Alert.alert('ผิดพลาด', error?.message || 'ไม่สามารถดำเนินการได้');
+          }
         },
       },
     ]);
@@ -322,11 +328,11 @@ export default function AdminDashboardScreen() {
   // RENDER
   // ============================================
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
       {/* ====== HEADER ====== */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerTop}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={COLORS.white} />
