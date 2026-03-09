@@ -525,6 +525,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
           posterName: user.displayName || 'ไม่ระบุชื่อ',
           posterPhoto: user.photoURL || '',
           posterVerified: user.isVerified || false,
+          posterRole: (user.role as any) || 'user',
         });
         await incrementPostCount(user.uid);
         

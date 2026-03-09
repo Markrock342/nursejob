@@ -281,5 +281,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ==========================================
+    // OMISE CHARGES — Cloud Function Admin SDK only
+    // ==========================================
+    match /omise_charges/{chargeId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
   }
 }

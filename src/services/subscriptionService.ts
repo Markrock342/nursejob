@@ -17,7 +17,7 @@ import { Subscription, SubscriptionPlan, SUBSCRIPTION_PLANS, PRICING, BillingCyc
 import { grantReferralReward } from './referralService';
 
 const USERS_COLLECTION = 'users';
-const JOBS_COLLECTION = 'jobs';
+const JOBS_COLLECTION = 'shifts';
 
 // ============================================
 // GET USER SUBSCRIPTION

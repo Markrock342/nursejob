@@ -67,13 +67,13 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
   // Skip on web - push notifications not fully supported
   if (Platform.OS === 'web') {
-    console.log('Push notifications not supported on web');
+    if (__DEV__) console.log('Push notifications not supported on web');
     return null;
   }
 
   // Check if physical device (required for push notifications)
   if (!Device.isDevice) {
-    console.log('Push notifications require a physical device');
+    if (__DEV__) console.log('Push notifications require a physical device');
     return null;
   }
 
@@ -87,7 +87,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   }
 
   if (finalStatus !== 'granted') {
-    console.log('Push notification permission not granted');
+    if (__DEV__) console.log('Push notification permission not granted');
     return null;
   }
 
@@ -105,7 +105,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     // Get Expo push token (omit projectId if not available to avoid invalid UUID errors)
     const tokenData = await N.getExpoPushTokenAsync(Object.keys(options).length ? options : undefined);
     token = tokenData.data;
-    console.log('Push token:', token);
+    if (__DEV__) console.log('Push token:', token);
   } catch (error: any) {
     // If the server complains about projectId being invalid, log a helpful hint
     if (error?.message?.includes?.('projectId')) {
@@ -173,7 +173,7 @@ export async function savePushTokenToUser(userId: string, token: string): Promis
       pushToken: token,
       pushTokenUpdatedAt: new Date(),
     });
-    console.log('Push token saved to user profile');
+    if (__DEV__) console.log('Push token saved to user profile');
   } catch (error) {
     console.error('Error saving push token:', error);
   }

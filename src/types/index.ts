@@ -345,6 +345,7 @@ export interface JobPost {
   applicantsCount?: number;
   tags?: string[];
   posterVerified?: boolean; // ผู้โพสต์ได้รับการยืนยันตัวตนแล้ว
+  posterRole?: 'user' | 'nurse' | 'hospital' | 'admin';
 }
 
 // การติดต่อแสดงความสนใจ
@@ -501,6 +502,9 @@ export type RootStackParamList = {
     description?: string;
     formData?: any;
     returnTo?: string;
+    plan?: string;         // SubscriptionPlan — activate after payment
+    billingCycle?: string; // 'monthly' | 'annual'
+    productKey?: string;   // 'extraPost' | 'extendPost' | 'urgent'
   };
   MapJobs: undefined; // แผนที่งานใกล้ตัว
   NearbyJobAlert: undefined; // ตั้งค่าแจ้งเตือนงานใกล้ตัว

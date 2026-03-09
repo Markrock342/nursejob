@@ -661,6 +661,11 @@ export default function ProfileScreen({ navigation }: Props) {
         <Card style={{ borderRadius: 16, marginBottom: 18 }}>
           <Text style={[styles.linksSectionTitle, { marginBottom: 8 }]}>เมนู</Text>
           <View style={{ gap: 2 }}>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: '#F3F4F6', borderRadius: 10 }]} onPress={() => nav.navigate('MyPosts')}>
+              <Ionicons name="list-outline" size={20} color={colors.text} />
+              <Text style={[styles.linkText, { color: colors.text, fontWeight: '700' }]}>ประกาศของฉัน</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
+            </TouchableOpacity>
             <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Favorites')}>
               <Ionicons name="heart-outline" size={20} color={colors.primary} />
               <Text style={styles.linkText}>งานที่บันทึกไว้</Text>
@@ -698,11 +703,6 @@ export default function ProfileScreen({ navigation }: Props) {
                   <Text style={styles.countText}>รอ</Text>
                 </View>
               ) : null}
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('MyPosts')}>
-              <Ionicons name="list-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>ประกาศของฉัน</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: '#FFF8E1', borderRadius: 10 }]} onPress={() => nav.navigate('Shop')}>

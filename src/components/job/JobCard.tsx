@@ -72,6 +72,13 @@ const getShiftTimeSummary = (job: JobPost): string => {
   return 'หลายช่วงเวลา';
 };
 
+const getPosterVerifiedTagText = (job: JobPost): string => {
+  const role = (job.posterRole || '').toLowerCase();
+  if (role === 'nurse') return 'พยาบาลยืนยันตัวตน';
+  if (role === 'hospital') return 'องค์กรยืนยันตัวตน';
+  return 'ผู้ใช้ยืนยันตัวตน';
+};
+
 // ============================================
 // Props
 // ============================================
@@ -192,7 +199,7 @@ export function JobCard({
             {job.posterVerified ? (
               <View style={[styles.verifiedBadge, { backgroundColor: colors.primaryBackground }]}>
                 <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
-                <Text style={[styles.verifiedText, { color: colors.primary }]}>ยืนยันแล้ว</Text>
+                <Text style={[styles.verifiedText, { color: colors.primary }]}>{getPosterVerifiedTagText(job)}</Text>
               </View>
             ) : null}
           </View>

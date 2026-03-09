@@ -22,6 +22,12 @@ import { ReferralInfo, ReferralRecord } from '../types';
 const USERS_COL = 'users';
 const REFERRALS_COL = 'referrals';
 
+function isPermissionDeniedError(error: any): boolean {
+  const code = error?.code;
+  const message = String(error?.message || '');
+  return code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+}
+
 // ============================================
 // GENERATE REFERRAL CODE
 // รูปแบบ: NURSE-XXXXXX (6 chars จาก uid)
@@ -36,6 +42,15 @@ export function generateReferralCode(uid: string): string {
 // GET OR CREATE REFERRAL INFO FOR A USER
 // ============================================
 export async function getReferralInfo(uid: string): Promise<ReferralInfo> {
+  if (!uid) {
+    return {
+      referralCode: generateReferralCode('guest'),
+      referredCount: 0,
+      rewardMonthsEarned: 0,
+      rewardMonthsUsed: 0,
+    };
+  }
+
   try {
     const userDoc = await getDoc(doc(db, USERS_COL, uid));
     if (!userDoc.exists()) throw new Error('User not found');
@@ -70,8 +85,11 @@ export async function getReferralInfo(uid: string): Promise<ReferralInfo> {
       rewardMonthsEarned,
       rewardMonthsUsed: data.referralRewardMonthsUsed || 0,
     };
-  } catch (error) {
-    console.error('[referralService] getReferralInfo error:', error);
+  } catch (error: any) {
+    // Auth state may still be initializing. Return safe fallback silently.
+    if (!isPermissionDeniedError(error)) {
+      console.error('[referralService] getReferralInfo error:', error);
+    }
     return {
       referralCode: generateReferralCode(uid),
       referredCount: 0,

@@ -79,6 +79,7 @@ function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
     posterName: data.posterName || 'ไม่ระบุชื่อ',
     posterId: data.posterId || '',
     posterVerified: data.posterVerified || false,
+    posterRole: data.posterRole,
     department: data.department || 'ทั่วไป',
     shiftRate: data.shiftRate || 0,
     rateType: data.rateType || 'shift',

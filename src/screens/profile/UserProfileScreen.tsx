@@ -65,6 +65,13 @@ interface UserData {
   phone?: string;
 }
 
+function getVerifiedTagText(role?: string): string {
+  const r = (role || '').toLowerCase();
+  if (r === 'nurse') return 'พยาบาลยืนยันตัวตน';
+  if (r === 'hospital') return 'องค์กรยืนยันตัวตน';
+  return 'ผู้ใช้ยืนยันตัวตน';
+}
+
 // ============================================
 // Component
 // ============================================
@@ -271,7 +278,15 @@ export default function UserProfileScreen() {
             )}
           </View>
 
-          <Text style={styles.userName}>{userData?.displayName}</Text>
+          <View style={styles.userNameRow}>
+            <Text style={styles.userName}>{userData?.displayName}</Text>
+            {userData?.isVerified ? (
+              <View style={styles.userNameVerifiedTag}>
+                <Ionicons name="checkmark-circle" size={12} color="#047857" />
+                <Text style={styles.userNameVerifiedText}>{getVerifiedTagText(userData?.role)}</Text>
+              </View>
+            ) : null}
+          </View>
           
           {userData?.role && (
             <View style={styles.roleTag}>
@@ -540,7 +555,30 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.xl,
     fontWeight: '700',
     color: COLORS.text,
+  },
+  userNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
     marginBottom: SPACING.xs,
+  },
+  userNameVerifiedTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  userNameVerifiedText: {
+    fontSize: FONT_SIZES.xs,
+    color: '#065F46',
+    fontWeight: '600',
   },
   roleTag: {
     flexDirection: 'row',

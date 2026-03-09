@@ -115,9 +115,10 @@ interface Props {
 interface UrgentBannerProps {
   urgentJobs: JobPost[];
   onPress: (job: JobPost) => void;
+  userLocation?: { latitude: number; longitude: number } | null;
 }
 
-function UrgentJobsBanner({ urgentJobs, onPress }: UrgentBannerProps) {
+function UrgentJobsBanner({ urgentJobs, onPress, userLocation }: UrgentBannerProps) {
   const scrollRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -221,9 +222,19 @@ function UrgentJobsBanner({ urgentJobs, onPress }: UrgentBannerProps) {
                 <Text style={urgentStyles.cardTitle} numberOfLines={1}>
                   {job.title || job.department}
                 </Text>
-                <Text style={urgentStyles.cardLocation} numberOfLines={1}>
-                  📍 {job.location?.hospital || job.location?.district}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={urgentStyles.cardLocation} numberOfLines={1}>
+                    📍 {job.location?.hospital || job.location?.district}
+                  </Text>
+                  {userLocation && job.location?.lat && job.location?.lng && (() => {
+                    const d = getDistanceKm(userLocation.latitude, userLocation.longitude, job.location.lat, job.location.lng);
+                    return (
+                      <Text style={{ fontSize: 11, color: '#FF6B6B', fontWeight: '600' }}>
+                        {d < 1 ? `${Math.round(d * 1000)} ม.` : `${d.toFixed(1)} กม.`}
+                      </Text>
+                    );
+                  })()}
+                </View>
                 <View style={urgentStyles.cardMeta}>
                   <Text style={urgentStyles.cardDate}>
                     📅 {formatShortDate(job.shiftDate)}
@@ -572,7 +583,7 @@ export default function HomeScreen({ navigation }: Props) {
           setShowExpiryPopup(true);
         }
       } catch (error) {
-        console.log('Error checking expiring posts:', error);
+        if (__DEV__) console.log('Error checking expiring posts:', error);
       }
     };
 
@@ -656,7 +667,7 @@ export default function HomeScreen({ navigation }: Props) {
         filteredJobs = filteredJobs.sort((a, b) => (b.shiftRate || 0) - (a.shiftRate || 0));
       }
       
-      console.log(`Jobs loaded: ${newJobs.length} total, ${filteredJobs.length} after filter`);
+      if (__DEV__) console.log(`Jobs loaded: ${newJobs.length} total, ${filteredJobs.length} after filter`);
       setJobs(filteredJobs);
       setIsLoading(false);
     });
@@ -867,7 +878,8 @@ export default function HomeScreen({ navigation }: Props) {
         <View style={{ paddingHorizontal: SPACING.md }}>
           <UrgentJobsBanner 
             urgentJobs={urgentJobs} 
-            onPress={handleJobPress} 
+            onPress={handleJobPress}
+            userLocation={location}
           />
         </View>
       )}

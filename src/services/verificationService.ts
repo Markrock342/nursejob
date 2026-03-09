@@ -21,6 +21,12 @@ import {
 const VERIFICATIONS_COLLECTION = 'verifications';
 const USERS_COLLECTION = 'users';
 
+function isPermissionDeniedError(error: any): boolean {
+  const code = error?.code;
+  const message = String(error?.message || '');
+  return code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+}
+
 // ============================================
 // Types
 // ============================================
@@ -186,6 +192,8 @@ export async function submitVerificationRequest(
 export async function getPendingVerificationRequest(
   userId: string
 ): Promise<VerificationRequest | null> {
+  if (!userId) return null;
+
   try {
     const q = query(
       collection(db, VERIFICATIONS_COLLECTION),
@@ -204,7 +212,9 @@ export async function getPendingVerificationRequest(
       submittedAt: data.submittedAt?.toDate() || new Date(),
       licenseExpiry: data.licenseExpiry?.toDate() || new Date(),
     } as VerificationRequest;
-  } catch (error) {
+  } catch (error: any) {
+    // Auth state may still be initializing. Treat this as no pending request for now.
+    if (isPermissionDeniedError(error)) return null;
     console.error('Error getting pending verification:', error);
     return null;
   }
@@ -236,7 +246,7 @@ export async function getUserVerificationStatus(
       pendingRequest: Boolean(pendingRequest),
     };
   } catch (error: any) {
-    if (error?.code === 'permission-denied') return { isVerified: false }; // auth not ready yet
+    if (isPermissionDeniedError(error)) return { isVerified: false }; // auth not ready yet
     console.error('Error getting verification status:', error);
     return { isVerified: false };
   }

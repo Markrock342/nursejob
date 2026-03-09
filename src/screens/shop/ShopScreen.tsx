@@ -1,5 +1,5 @@
 ﻿// ============================================
-// SHOP SCREEN - ร้านค้า / ซื้อบริการ (Role-aware)
+// SHOP SCREEN - ร้านค้า / ซื้อบริการ Role-aware
 // ============================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -38,13 +38,6 @@ import {
   SubscriptionPlan,
   BillingCycle,
 } from '../../types';
-import {
-  initializeIAP,
-  requestIAPPurchase,
-  restoreIAPPurchases,
-  cleanupIAP,
-  IAP_PRODUCTS,
-} from '../../services/iapService';
 
 // ============================================
 // Helpers
@@ -97,124 +90,55 @@ export default function ShopScreen() {
   }, [user?.uid]);
 
   useEffect(() => {
-    initializeIAP();
     loadData();
-    return () => {
-      cleanupIAP();
-    };
   }, [loadData]);
 
   // ----------------------------------------
-  // Purchase plan
+  // Purchase plan — navigate to PaymentScreen
   // ----------------------------------------
-  const handleBuyPlan = async (plan: SubscriptionPlan) => {
+  const handleBuyPlan = (plan: SubscriptionPlan) => {
     if (!user?.uid) {
       setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', '') } as AlertState);
       return;
     }
-    const productId = IAP_PRODUCTS.PREMIUM_MONTHLY;
-
-    setIsPurchasing(true);
-    try {
-      const result = await requestIAPPurchase(
-        productId,
-        user.uid,
-        user.displayName || 'User',
-      );
-      if (result.success) {
-        await upgradePlan(user.uid, plan, billingCycle);
-        setAlert({
-          ...createAlert.success(
-            '✅ อัพเกรดสำเร็จ!',
-            'แพ็กเกจของคุณถูกเปิดใช้งานแล้ว',
-          ),
-        } as AlertState);
-        loadData();
-      } else if (result.error && result.error !== 'ผู้ใช้ยกเลิก') {
-        setAlert({
-          ...createAlert.error('❌ เกิดข้อผิดพลาด', result.error),
-        } as AlertState);
-      }
-    } catch (e: any) {
-      setAlert({
-        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
-      } as AlertState);
-    } finally {
-      setIsPurchasing(false);
-    }
+    const price = priceFor(plan);
+    const planLabels: Record<string, string> = {
+      nurse_pro: 'NursePro',
+      hospital_starter: 'Hospital Starter',
+      hospital_pro: 'Hospital Pro',
+      hospital_enterprise: 'Hospital Enterprise',
+    };
+    (navigation as any).navigate('Payment', {
+      type: 'subscription',
+      amount: price,
+      title: `ชำระเงิน ${planLabels[plan] || plan}`,
+      description: `แพ็กเกจ ${planLabels[plan] || plan} · ${billingCycle === 'annual' ? 'รายปี' : 'รายเดือน'}`,
+      plan: billingCycle === 'annual' ? `${plan}_annual` : `${plan}_monthly`,
+      billingCycle,
+    });
   };
 
   // ----------------------------------------
-  // Purchase add-on
+  // Purchase add-on — navigate to PaymentScreen
   // ----------------------------------------
-  const handleBuyAddon = async (
-    item: 'extraPost' | 'extendPost' | 'urgent',
-  ) => {
+  const handleBuyAddon = (item: 'extraPost' | 'extendPost' | 'urgent') => {
     if (!user?.uid) return;
-    const productIdMap = {
-      extraPost: IAP_PRODUCTS.EXTRA_POST,
-      extendPost: IAP_PRODUCTS.EXTEND_POST,
-      urgent: IAP_PRODUCTS.URGENT_POST,
-    };
-    const labels = {
-      extraPost: 'โพสต์เพิ่ม',
-      extendPost: 'ต่ออายุโพสต์',
-      urgent: 'ปุ่มด่วน',
-    };
-
-    setIsPurchasing(true);
-    try {
-      const result = await requestIAPPurchase(
-        productIdMap[item],
-        user.uid,
-        user.displayName || 'User',
-      );
-      if (result.success) {
-        setAlert({
-          ...createAlert.success(
-            '✅ ซื้อสำเร็จ!',
-            `${labels[item]} เปิดใช้งานแล้ว`,
-          ),
-        } as AlertState);
-      } else if (result.error && result.error !== 'ผู้ใช้ยกเลิก') {
-        setAlert({
-          ...createAlert.error('❌ เกิดข้อผิดพลาด', result.error),
-        } as AlertState);
-      }
-    } catch (e: any) {
-      setAlert({
-        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
-      } as AlertState);
-    } finally {
-      setIsPurchasing(false);
-    }
+    const amountMap = { extraPost: PRICING.extraPost, extendPost: PRICING.extendPost, urgent: PRICING.urgentPost };
+    const labelMap = { extraPost: 'โพสต์เพิ่ม', extendPost: 'ต่ออายุโพสต์', urgent: 'ปุ่มด่วน' };
+    const productMap = { extraPost: 'extra_post', extendPost: 'extend_post', urgent: 'urgent_post' };
+    (navigation as any).navigate('Payment', {
+      type: 'addon',
+      amount: amountMap[item],
+      title: `ซื้อ ${labelMap[item]}`,
+      description: labelMap[item],
+      productKey: productMap[item],
+    });
   };
 
-  const handleRestore = async () => {
-    setIsPurchasing(true);
-    try {
-      const results = await restoreIAPPurchases();
-      const ok = results.filter(r => r.success);
-      if (ok.length > 0) {
-        setAlert({
-          ...createAlert.success('✅ กู้คืนสำเร็จ', `พบ ${ok.length} รายการ`),
-        } as AlertState);
-        loadData();
-      } else {
-        setAlert({
-          ...createAlert.info(
-            'ℹ️ ไม่พบรายการ',
-            'ไม่พบรายการซื้อที่สามารถกู้คืนได้',
-          ),
-        } as AlertState);
-      }
-    } catch (e: any) {
-      setAlert({
-        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
-      } as AlertState);
-    } finally {
-      setIsPurchasing(false);
-    }
+  const handleRestore = () => {
+    setAlert({
+      ...createAlert.info('ℹ️ ระบบ Omise', 'การชำระเงินผ่าน Omise ไม่จำเป็นต้องกู้คืน'),
+    } as AlertState);
   };
 
   const copyReferralCode = () => {

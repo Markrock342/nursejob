@@ -385,7 +385,7 @@ exports.onNewApplication = functions.firestore
     const application = snap.data();
     console.log('📬 New application:', context.params.applicationId);
     
-    try {
+        try {
       // Get shift details
       const jobDoc = await db.collection('shifts').doc(application.jobId).get();
       if (!jobDoc.exists) {
@@ -1276,14 +1276,35 @@ exports.notifyJobExpiringSoon = functions.pubsub
           continue;
         }
         
-        // Notify poster
+        // Notify poster — in-app + push
+        const posterRef = db.collection('users').doc(job.posterId);
+        const posterSnap = await posterRef.get();
+        const poster = posterSnap.exists ? posterSnap.data() : null;
+
         await createInAppNotification(job.posterId, {
           type: 'job_expiring',
           title: '⏰ งานของคุณกำลังจะหมดอายุ',
           body: `"${job.title}" จะหมดอายุใน 6 ชั่วโมง ขยายเวลาหรือปิดรับสมัคร?`,
           data: { jobId: doc.id },
         });
-        
+
+        // Push notification
+        if (poster) {
+          const pushTitle = '⏰ งานของคุณกำลังจะหมดอายุ';
+          const pushBody = `"${job.title}" จะหมดอายุใน 6 ชั่วโมง`;
+          const pushData = { type: 'job_expiring', jobId: doc.id };
+          if (poster.pushToken) {
+            await sendExpoPush(poster.pushToken, pushTitle, pushBody, pushData);
+          } else if (poster.fcmToken) {
+            await admin.messaging().send({
+              token: poster.fcmToken,
+              notification: { title: pushTitle, body: pushBody },
+              data: { type: 'job_expiring', jobId: doc.id },
+              android: { priority: 'high' },
+            }).catch(() => {});
+          }
+        }
+
         // Mark as notified
         await doc.ref.update({ expiryNotified: true });
         count++;
@@ -1436,3 +1457,215 @@ exports.verifyCustomOTP = functions.https.onCall(async (data, _context) => {
   const customToken = await admin.auth().createCustomToken(uid);
   return { success: true, customToken, uid };
 });
+
+// ============================================
+// OMISE PAYMENT — PromptPay / Credit Card
+// ℹ️  ตั้งค่า: firebase functions:config:set omise.secret_key="skey_test_..."
+//     หรือ deploy ด้วย OMISE_SECRET_KEY environment variable
+// ============================================
+
+/**
+ * createOmiseCharge
+ * สร้าง Omise charge (PromptPay หรือ card token)
+ * Client ส่ง: { amount (satang), currency, description, productId, source?, cardToken? }
+ * Return: { success, chargeId, status, qrCodeUri, authorizeUri }
+ */
+exports.createOmiseCharge = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'กรุณาเข้าสู่ระบบ');
+  }
+
+  const OMISE_SECRET = process.env.OMISE_SECRET_KEY
+    || (functions.config().omise && functions.config().omise.secret_key);
+  if (!OMISE_SECRET) {
+    throw new functions.https.HttpsError('internal', 'ยังไม่ได้ตั้งค่า Omise secret key');
+  }
+
+  const { amount, currency = 'thb', description, productId, source, cardToken } = data;
+  const userId = context.auth.uid;
+
+  // Minimum 2000 satang = 20 THB
+  if (!amount || typeof amount !== 'number' || amount < 2000) {
+    throw new functions.https.HttpsError('invalid-argument', 'จำนวนเงินไม่ถูกต้อง (ขั้นต่ำ 20 บาท)');
+  }
+
+  const authHeader = 'Basic ' + Buffer.from(OMISE_SECRET + ':').toString('base64');
+
+  try {
+    let sourceId = null;
+
+    // ── PromptPay: สร้าง source ก่อน ─────────────────────────────────
+    if (source && source.type === 'promptpay') {
+      const srcRes = await fetch('https://api.omise.co/sources', {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          type: 'promptpay',
+          amount: String(amount),
+          currency,
+        }),
+      });
+      const srcData = await srcRes.json();
+      if (srcData.object === 'error') {
+        throw new functions.https.HttpsError('internal', srcData.message);
+      }
+      sourceId = srcData.id;
+    }
+
+    // ── สร้าง charge ──────────────────────────────────────────────────
+    const chargeBody = new URLSearchParams({
+      amount: String(amount),
+      currency,
+      description: description || 'NurseGo payment',
+      'metadata[userId]': userId,
+      'metadata[productId]': productId || '',
+    });
+    if (sourceId) chargeBody.append('source', sourceId);
+    if (cardToken) chargeBody.append('card', cardToken);
+
+    const chargeRes = await fetch('https://api.omise.co/charges', {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: chargeBody,
+    });
+    const charge = await chargeRes.json();
+
+    if (charge.object === 'error') {
+      throw new functions.https.HttpsError('internal', charge.message);
+    }
+
+    // ── บันทึก charge ─────────────────────────────────────────────────
+    await db.collection('omise_charges').doc(charge.id).set({
+      chargeId: charge.id,
+      userId,
+      productId: productId || '',
+      amount,
+      currency,
+      status: charge.status,
+      activated: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const qrCodeUri = charge.source?.scannable_code?.image?.download_uri || null;
+
+    return {
+      success: true,
+      chargeId: charge.id,
+      status: charge.status,
+      qrCodeUri,
+      authorizeUri: charge.authorize_uri || null,
+    };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('❌ createOmiseCharge error:', error);
+    throw new functions.https.HttpsError('internal', 'เกิดข้อผิดพลาดในการสร้าง charge');
+  }
+});
+
+/**
+ * checkOmiseCharge
+ * ตรวจสถานะ charge — ถ้า successful จะ activate product ให้อัตโนมัติ
+ * Client ส่ง: { chargeId }
+ * Return: { status: 'pending' | 'successful' | 'failed' | 'expired' | 'reversed' }
+ */
+exports.checkOmiseCharge = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'กรุณาเข้าสู่ระบบ');
+  }
+
+  const OMISE_SECRET = process.env.OMISE_SECRET_KEY
+    || (functions.config().omise && functions.config().omise.secret_key);
+  if (!OMISE_SECRET) {
+    throw new functions.https.HttpsError('internal', 'ยังไม่ได้ตั้งค่า Omise secret key');
+  }
+
+  const { chargeId } = data;
+  if (!chargeId) {
+    throw new functions.https.HttpsError('invalid-argument', 'chargeId จำเป็น');
+  }
+
+  const authHeader = 'Basic ' + Buffer.from(OMISE_SECRET + ':').toString('base64');
+
+  try {
+    const res = await fetch(`https://api.omise.co/charges/${chargeId}`, {
+      headers: { Authorization: authHeader },
+    });
+    const charge = await res.json();
+
+    if (charge.object === 'error') {
+      throw new functions.https.HttpsError('internal', charge.message);
+    }
+
+    // ── Activate product เมื่อชำระเงินสำเร็จ ─────────────────────────
+    if (charge.status === 'successful') {
+      const chargeRef = db.collection('omise_charges').doc(chargeId);
+      const chargeDoc = await chargeRef.get();
+      if (chargeDoc.exists && !chargeDoc.data().activated) {
+        const d = chargeDoc.data();
+        await activateOmiseProduct(d.userId, d.productId, d.amount);
+        await chargeRef.update({
+          status: 'successful',
+          activated: true,
+          activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    } else {
+      await db.collection('omise_charges').doc(chargeId).update({ status: charge.status });
+    }
+
+    return { status: charge.status };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error('❌ checkOmiseCharge error:', error);
+    throw new functions.https.HttpsError('internal', 'ไม่สามารถตรวจสอบสถานะได้');
+  }
+});
+
+// Helper: activate product after successful Omise payment
+async function activateOmiseProduct(userId, productId, amountSatang) {
+  const userRef = db.collection('users').doc(userId);
+
+  const subPlans = {
+    nurse_pro_monthly: { plan: 'nurse_pro', months: 1 },
+    nurse_pro_annual: { plan: 'nurse_pro', months: 12 },
+    hospital_starter_monthly: { plan: 'hospital_starter', months: 1 },
+    hospital_pro_monthly: { plan: 'hospital_pro', months: 1 },
+    hospital_enterprise_monthly: { plan: 'hospital_enterprise', months: 1 },
+  };
+
+  const subPlan = subPlans[productId];
+  if (subPlan) {
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + subPlan.months);
+    await userRef.update({
+      'subscription.plan': subPlan.plan,
+      'subscription.startedAt': new Date(),
+      'subscription.expiresAt': expiresAt,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`✅ Omise subscription: ${subPlan.plan} for ${userId}`);
+    return;
+  }
+
+  if (productId === 'extra_post') {
+    await userRef.update({
+      'subscription.extraPosts': admin.firestore.FieldValue.increment(1),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } else if (productId === 'urgent_post') {
+    await userRef.update({
+      'subscription.freeUrgentUsed': false,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } else if (productId === 'extend_post') {
+    console.log(`📝 extend_post activated for ${userId}`);
+  }
+
+  console.log(`✅ Omise product ${productId} activated for ${userId}`);
+}

@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import Constants from 'expo-constants';
+import { Ionicons } from '@expo/vector-icons';
 import { Button, Input, Divider, SuccessModal, ErrorModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -168,7 +169,9 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
         >
           {/* Logo & Title */}
           <View style={styles.header}>
-            <Text style={styles.logo}>👩‍⚕️</Text>
+            <View style={styles.logoContainer}>
+              <Ionicons name="medkit" size={44} color="#FFF" />
+            </View>
             <Text style={styles.title}>NurseGo</Text>
             <Text style={styles.subtitle}>แพลตฟอร์มหางานพยาบาล</Text>
           </View>
@@ -187,7 +190,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
               autoCapitalize="none"
               autoCorrect={false}
               error={errors.email}
-              icon={<Text>👤</Text>}
+              icon={<Ionicons name="person-outline" size={20} color={COLORS.textSecondary} />}
             />
 
             <Input
@@ -202,7 +205,11 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
               error={errors.password}
               icon={
                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                  <Text>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
+                  <Ionicons
+                    name={showPassword ? 'eye-outline' : 'eye-off-outline'}
+                    size={20}
+                    color={COLORS.textSecondary}
+                  />
                 </TouchableOpacity>
               }
               iconPosition="right"
@@ -239,7 +246,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
               style={styles.phoneLoginButton}
               onPress={() => navigation.navigate('PhoneLogin')}
             >
-              <Text style={styles.phoneLoginIcon}>📱</Text>
+              <Ionicons name="phone-portrait-outline" size={20} color={COLORS.primary} />
               <Text style={styles.phoneLoginText}>
                 เข้าสู่ระบบด้วยเบอร์โทร (OTP)
               </Text>
@@ -333,9 +340,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.xl * 2,
   },
-  logo: {
-    fontSize: 72,
+  logoContainer: {
+    width: 88,
+    height: 88,
+    borderRadius: 24,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: SPACING.md,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
   },
   title: {
     fontSize: 32,
@@ -417,10 +434,6 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     paddingHorizontal: SPACING.lg,
     marginBottom: SPACING.md,
-  },
-  phoneLoginIcon: {
-    fontSize: 20,
-    marginRight: SPACING.sm,
   },
   phoneLoginText: {
     fontSize: FONT_SIZES.md,
