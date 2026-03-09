@@ -72,6 +72,7 @@ module.exports = {
     plugins: [
       '@react-native-firebase/app',
       '@react-native-firebase/auth',
+      '@react-native-google-signin/google-signin',
       'expo-web-browser',
       [
         'expo-location',

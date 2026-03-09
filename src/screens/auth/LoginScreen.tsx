@@ -2,7 +2,7 @@
 // LOGIN SCREEN - Production Ready with Google Sign-In
 // ============================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,9 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import Constants from 'expo-constants';
 import { Button, Input, Divider, SuccessModal, ErrorModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
@@ -26,31 +24,15 @@ import { useTheme } from '../../context/ThemeContext';
 import { AuthStackParamList } from '../../types';
 import { validateAdminCredentials } from '../../services/authService';
 
-// Complete auth session for proper redirect handling
-WebBrowser.maybeCompleteAuthSession();
-
 // ============================================
-// Google OAuth Config — อ่านจาก app.config.js extra
+// Google Sign-In Config — Native SDK
 // ============================================
 const extra = Constants.expoConfig?.extra || {};
 const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId || '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com';
-const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || '427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com';
-const GOOGLE_IOS_CLIENT_ID = extra.googleIosClientId || '';
 
-// Explicit redirect URI — ต้อง add URI นี้ใน Google Cloud Console → OAuth 2.0 → Authorized redirect URIs
-const REDIRECT_URI = makeRedirectUri({
-  scheme: 'nursego',
-  path: 'oauth2redirect/google',
-  // ใน Expo Go → จะได้ https://auth.expo.io/@markrock342/nurse-job-app
-  // ใน standalone build → จะได้ nursego://oauth2redirect/google
-});
-
-const GOOGLE_AUTH_CONFIG = {
-  expoClientId: GOOGLE_WEB_CLIENT_ID,
+GoogleSignin.configure({
   webClientId: GOOGLE_WEB_CLIENT_ID,
-  androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
-  iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
-};
+});
 
 // ============================================
 // Types
@@ -80,66 +62,39 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
   const { login, loginWithGoogle, loginAsAdmin, isLoading, error, clearError } = useAuth();
   const { colors, isDark } = useTheme();
 
-  // Google Auth Request
-  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    ...GOOGLE_AUTH_CONFIG,
-  });
-
-  // Handle Google Sign-In response
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token } = response.params;
-      if (!id_token) {
-        setErrorMessage('Google Sign-In สำเร็จไม่ครบขั้นตอน: ไม่ได้รับ id_token จาก Google');
-        setShowErrorModal(true);
-        setGoogleLoading(false);
-        return;
-      }
-      handleGoogleLogin(id_token);
-    } else if (response?.type === 'error') {
-      const errCode = (response as any).error?.code || (response as any).params?.error || '';
-      console.log('[Google OAuth] error response:', JSON.stringify(response));
-      if (errCode === 'access_denied') {
-        setErrorMessage('คุณยกเลิกการเข้าสู่ระบบ Google');
-      } else {
-        setErrorMessage(`Google Sign-In ล้มเหลว (${errCode || 'unknown'}) — กรุณาลองใหม่`);
-      }
-      setShowErrorModal(true);
-      setGoogleLoading(false);
-    } else if (response?.type === 'cancel' || response?.type === 'dismiss') {
-      setGoogleLoading(false);
-    }
-  }, [response]);
-
-  // Handle Google Login
-  const handleGoogleLogin = async (idToken: string) => {
-    setGoogleLoading(true);
-    try {
-      const { isNewUser } = await loginWithGoogle(idToken);
-      if (isNewUser) {
-        // New Google user → must pick role before entering app
-        navigation.navigate('ChooseRole', { fromGoogle: true });
-      } else {
-        // Returning user → close auth modal
-        setShowSuccessModal(true);
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'กรุณาลองใหม่อีกครั้ง');
-      setShowErrorModal(true);
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
-  // Trigger Google Sign-In
+  // Trigger Google Sign-In (native SDK)
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     clearError();
     try {
-      await promptAsync();
+      await GoogleSignin.hasPlayServices();
+      const response = await GoogleSignin.signIn();
+      const idToken = response.data?.idToken;
+      if (!idToken) {
+        setErrorMessage('Google Sign-In สำเร็จไม่ครบขั้นตอน: ไม่ได้รับ id_token');
+        setShowErrorModal(true);
+        setGoogleLoading(false);
+        return;
+      }
+      // Login via AuthContext → Firebase
+      const { isNewUser } = await loginWithGoogle(idToken);
+      if (isNewUser) {
+        navigation.navigate('ChooseRole', { fromGoogle: true });
+      } else {
+        setShowSuccessModal(true);
+      }
     } catch (err: any) {
-      setErrorMessage('ไม่สามารถเปิดหน้า Google ได้');
-      setShowErrorModal(true);
+      console.log('[Google Sign-In] error:', err);
+      if (err.code === 'SIGN_IN_CANCELLED' || err.code === '12501') {
+        // User cancelled — do nothing
+      } else if (err.code === 'PLAY_SERVICES_NOT_AVAILABLE') {
+        setErrorMessage('Google Play Services ไม่พร้อมใช้งาน');
+        setShowErrorModal(true);
+      } else {
+        setErrorMessage(err.message || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ');
+        setShowErrorModal(true);
+      }
+    } finally {
       setGoogleLoading(false);
     }
   };
@@ -294,10 +249,10 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
             <TouchableOpacity
               style={[
                 styles.googleButton,
-                (googleLoading || !request) && styles.googleButtonDisabled,
+                googleLoading && styles.googleButtonDisabled,
               ]}
               onPress={handleGoogleSignIn}
-              disabled={googleLoading || !request}
+              disabled={googleLoading}
             >
               {googleLoading ? (
                 <ActivityIndicator color={colors.text} />

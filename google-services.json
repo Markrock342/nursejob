@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "427547114323-u4a4jdbmaqc9dnm1nd5fnenh824eh0pc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nursego.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
           "client_id": "427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com",
           "client_type": 3
         }

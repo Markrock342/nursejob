@@ -1362,30 +1362,18 @@ exports.sendCustomOTP = functions.https.onCall(async (data, _context) => {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  // ── SMS integration (uncomment ONE provider) ─────────────────────────
-  // Option A — Twilio
-  // const twilio = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
-  // await twilio.messages.create({
-  //   body: `รหัส OTP NurseGo: ${otpCode} (หมดอายุใน 5 นาที)`,
-  //   from: process.env.TWILIO_PHONE,
-  //   to: phone,
-  // });
-  //
-  // Option B — AWS SNS
-  // const SNS = new (require('aws-sdk').SNS)({ region: 'ap-southeast-1' });
-  // await SNS.publish({ Message: `รหัส OTP NurseGo: ${otpCode}`, PhoneNumber: phone }).promise();
-  // ─────────────────────────────────────────────────────────────────────
-
-  // Only allow returning devCode in emulator.
+  // ── Dev / Emulator: return devCode ──────────────────────────────────
   if (isEmulator) {
     functions.logger.log(`[OTP DEV] ${phone} → ${otpCode}`);
     return { success: true, devCode: otpCode };
   }
 
-  // Production: do not leak OTP in API response.
+  // ── Production: ใช้ Firebase Phone Auth แทน (client-side) ──
+  // Cloud Function นี้ใช้เฉพาะ emulator เท่านั้น
+  // Production ใช้ @react-native-firebase/auth signInWithPhoneNumber แทน
   throw new functions.https.HttpsError(
     'failed-precondition',
-    'OTP provider is not configured for production. Please configure SMS provider first.',
+    'Production ใช้ Firebase Phone Auth โดยตรง ไม่ต้องเรียก Cloud Function นี้',
   );
 });
 

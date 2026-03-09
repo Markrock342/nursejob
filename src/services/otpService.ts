@@ -1,7 +1,7 @@
 // ============================================
-// OTP SERVICE
-// DEV (Expo Go): Cloud Function OTP — devCode logged to Metro console
-// PRODUCTION (native APK): Cloud Function OTP — real SMS via Firebase
+// OTP SERVICE — Firebase Phone Authentication
+// ใช้ @react-native-firebase/auth ส่ง SMS ผ่าน Google โดยตรง
+// แล้ว sync กลับมา JS SDK ผ่าน exchangeToken Cloud Function
 // ============================================
 
 import { signInWithCustomToken } from 'firebase/auth';
@@ -10,8 +10,12 @@ import { getApp } from 'firebase/app';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { isAuthUser } from './security/authGuards';
+import nativeAuth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 
 const _functions = getFunctions(getApp());
+
+// เก็บ confirmation result ไว้ใช้ตอน verify
+let _confirmationResult: FirebaseAuthTypes.ConfirmationResult | null = null;
 
 // ==========================================
 // Phone Validation & Formatting
@@ -30,9 +34,7 @@ export function isValidThaiPhone(phone: string): boolean {
 }
 
 // ==========================================
-// sendOTP
-// DEV  → Cloud Function sendCustomOTP (no real SMS; devCode printed to Metro)
-// PROD → Cloud Function sendCustomOTP (real SMS)
+// sendOTP — Firebase Phone Auth (Google ส่ง SMS ให้)
 // ==========================================
 
 export async function sendOTP(
@@ -45,36 +47,30 @@ export async function sendOTP(
     }
     const formattedPhone = formatPhoneNumber(phoneNumber);
 
-    // ── CLOUD FUNCTION OTP ──
-    const sendFn = httpsCallable(_functions, 'sendCustomOTP');
-    const result = await sendFn({ phone: formattedPhone });
-    const data = result.data as any;
-    if (data.devCode) {
-      console.log(`[OTP DEV] รหัส OTP: ${data.devCode}`);
-    }
+    // ── Firebase Phone Auth — Google ส่ง SMS เอง ──
+    const confirmation = await nativeAuth().signInWithPhoneNumber(formattedPhone);
+    _confirmationResult = confirmation;
+
     return {
       success: true,
-      verificationId: formattedPhone,
-      message: data.devCode ? 'OTP ถูกส่งแล้ว (dev)' : 'OTP ถูกส่งแล้ว',
-      devCode: data.devCode,
+      verificationId: confirmation.verificationId ?? undefined,
+      message: 'OTP ถูกส่งแล้ว',
     };
   } catch (error: any) {
     console.error('[OTP] sendOTP error:', error);
     const code: string = error.code || '';
     let errorMessage = 'ไม่สามารถส่ง OTP ได้';
-    if (code === 'auth/invalid-phone-number' || code === 'functions/invalid-argument') errorMessage = 'เบอร์โทรศัพท์ไม่ถูกต้อง';
-    else if (code === 'auth/too-many-requests' || code === 'functions/resource-exhausted') errorMessage = 'ส่ง OTP มากเกินไป กรุณารอสักครู่';
+    if (code === 'auth/invalid-phone-number') errorMessage = 'เบอร์โทรศัพท์ไม่ถูกต้อง';
+    else if (code === 'auth/too-many-requests') errorMessage = 'ส่ง OTP มากเกินไป กรุณารอสักครู่';
     else if (code === 'auth/quota-exceeded') errorMessage = 'เกินโควต้า SMS กรุณาลองใหม่ภายหลัง';
-    else if (code === 'functions/failed-precondition') errorMessage = 'ระบบ OTP ฝั่งเซิร์ฟเวอร์ยังไม่ได้ตั้งค่า SMS provider ถ้าทดสอบใน Expo Go ให้ใช้ Functions Emulator หรือทดสอบผ่าน native build';
-    else if (code === 'functions/unavailable') errorMessage = 'ไม่สามารถเชื่อมต่อ Firebase Functions ได้';
+    else if (code === 'auth/missing-client-identifier') errorMessage = 'ไม่สามารถยืนยันแอปได้ กรุณาลองใหม่';
+    else if (code === 'auth/app-not-authorized') errorMessage = 'แอปยังไม่ได้รับอนุญาตให้ใช้ Firebase Auth';
     return { success: false, error: errorMessage };
   }
 }
 
 // ==========================================
-// verifyOTP
-// DEV  → Cloud Function verifyCustomOTP + signInWithCustomToken
-// PROD → Cloud Function verifyCustomOTP + signInWithCustomToken
+// verifyOTP — ยืนยัน OTP + sync กลับ JS SDK
 // ==========================================
 
 export async function verifyOTP(
@@ -83,24 +79,33 @@ export async function verifyOTP(
   opts?: { skipSignIn?: boolean }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // ── CLOUD FUNCTION VERIFY ──
-    const verifyFn = httpsCallable(_functions, 'verifyCustomOTP');
-    const result = await verifyFn({ phone: verificationId, code: otpCode });
-    const data = result.data as any;
-    if (!opts?.skipSignIn) {
+    if (!_confirmationResult) {
+      return { success: false, error: 'เซสชัน OTP หมดอายุ กรุณาขอรหัสใหม่' };
+    }
+
+    // ── ยืนยัน OTP ผ่าน native Firebase Auth ──
+    const userCredential = await _confirmationResult.confirm(otpCode);
+    _confirmationResult = null; // ใช้แล้วเคลียร์
+
+    if (!opts?.skipSignIn && userCredential?.user) {
+      // ── sync native auth → JS SDK auth ──
+      // ดึง idToken จาก native แล้วแลก customToken ผ่าน exchangeToken Cloud Function
+      const idToken = await userCredential.user.getIdToken();
+      const exchangeFn = httpsCallable(_functions, 'exchangeToken');
+      const result = await exchangeFn({ idToken });
+      const data = result.data as any;
       await signInWithCustomToken(auth, data.customToken);
     }
+
     return { success: true };
   } catch (error: any) {
     console.error('[OTP] verifyOTP error:', error);
+    _confirmationResult = null;
     const code: string = error.code || '';
     let errorMessage = 'รหัส OTP ไม่ถูกต้อง';
-    if (code === 'auth/invalid-verification-code' || code === 'functions/not-found') errorMessage = 'รหัส OTP ไม่ถูกต้อง';
-    else if (code === 'auth/code-expired' || code === 'functions/deadline-exceeded') errorMessage = 'รหัส OTP หมดอายุ กรุณาขอใหม่';
+    if (code === 'auth/invalid-verification-code') errorMessage = 'รหัส OTP ไม่ถูกต้อง';
+    else if (code === 'auth/code-expired') errorMessage = 'รหัส OTP หมดอายุ กรุณาขอใหม่';
     else if (code === 'auth/session-expired') errorMessage = 'หมดเวลา กรุณาขอรหัสใหม่';
-    else if (code === 'functions/resource-exhausted') errorMessage = 'ลองรหัสผิดมากเกินไป กรุณาขอ OTP ใหม่';
-    else if (code === 'functions/invalid-argument') errorMessage = error.message || 'รหัส OTP ไม่ถูกต้อง';
-    else if (code === 'functions/unavailable') errorMessage = 'ไม่สามารถเชื่อมต่อ Firebase Functions ได้';
     return { success: false, error: errorMessage };
   }
 }
