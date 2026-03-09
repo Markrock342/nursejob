@@ -355,6 +355,15 @@ export default function HelpScreen() {
         {/* Quick Links */}
         <View style={styles.quickLinksSection}>
           <Text style={styles.sectionTitle}>ลิงก์ที่เกี่ยวข้อง</Text>
+
+          <TouchableOpacity
+            style={styles.quickLink}
+            onPress={() => (navigation as any).navigate('OnboardingSurvey')}
+          >
+            <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
+            <Text style={[styles.quickLinkText, { color: colors.text }]}>ดูคู่มือเริ่มต้นใช้งาน</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+          </TouchableOpacity>
           
           <TouchableOpacity
             style={styles.quickLink}

@@ -25,19 +25,24 @@ import { useTheme } from '../../context/ThemeContext';
 import { Loading, EmptyState, Avatar, KittenButton as Button } from '../../components/common';
 import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import {
-  getHospitalReviews,
+  getReviewsForTarget,
   createReview,
-  getUserReviewForHospital,
+  getUserReviewForTarget,
   markReviewHelpful,
-  getHospitalRating,
+  getTargetRating,
+  canUserReviewTarget,
   Review,
   HospitalRating,
+  ReviewEligibility,
 } from '../../services/reviewsService';
 import { formatRelativeTime } from '../../utils/helpers';
 
 type ReviewsRouteParams = {
-  hospitalId: string;
-  hospitalName: string;
+  hospitalId?: string;
+  hospitalName?: string;
+  targetUserId?: string;
+  targetName?: string;
+  targetRole?: string;
 };
 
 // Star Rating Component
@@ -90,7 +95,10 @@ export default function ReviewsScreen() {
   const { user, requireAuth } = useAuth();
   const { colors } = useTheme();
   
-  const { hospitalId, hospitalName } = route.params || {};
+  const { hospitalId, hospitalName, targetUserId, targetName, targetRole } = route.params || {};
+  const targetType = targetUserId ? 'user' : 'hospital';
+  const targetId = targetUserId || hospitalId;
+  const screenName = targetUserId ? (targetName || 'ผู้ใช้งาน') : (hospitalName || 'สถานที่ทำงาน');
   
   const [reviews, setReviews] = useState<Review[]>([]);
   const [ratingData, setRatingData] = useState<HospitalRating | null>(null);
@@ -98,6 +106,7 @@ export default function ReviewsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showWriteModal, setShowWriteModal] = useState(false);
+  const [reviewEligibility, setReviewEligibility] = useState<ReviewEligibility | null>(null);
   
   // New review form
   const [newRating, setNewRating] = useState(5);
@@ -111,20 +120,22 @@ export default function ReviewsScreen() {
   const closeAlert = () => setAlert(initialAlertState);
 
   const loadData = useCallback(async () => {
-    if (!hospitalId) return;
+    if (!targetId) return;
 
     try {
-      const [reviewsData, ratingInfo] = await Promise.all([
-        getHospitalReviews(hospitalId),
-        getHospitalRating(hospitalId),
+      const [reviewsData, ratingInfo, eligibility] = await Promise.all([
+        getReviewsForTarget(targetId, targetType),
+        getTargetRating(targetId, targetType),
+        targetType === 'user' && user?.uid ? canUserReviewTarget(user.uid, targetId) : Promise.resolve(null),
       ]);
       
       setReviews(reviewsData);
       setRatingData(ratingInfo);
+      setReviewEligibility(eligibility);
       
       // Check if user already reviewed
       if (user?.uid) {
-        const existing = await getUserReviewForHospital(user.uid, hospitalId);
+        const existing = await getUserReviewForTarget(user.uid, targetId, targetType);
         setUserReview(existing);
       }
     } catch (error) {
@@ -133,7 +144,7 @@ export default function ReviewsScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [hospitalId, user?.uid]);
+  }, [targetId, targetType, user?.uid]);
 
   useEffect(() => {
     loadData();
@@ -150,12 +161,16 @@ export default function ReviewsScreen() {
         setAlert({ ...createAlert.info('แจ้งเตือน', 'คุณได้รีวิวโรงพยาบาลนี้แล้ว') } as AlertState);
         return;
       }
+      if (targetType === 'user' && !reviewEligibility?.canReview) {
+        setAlert({ ...createAlert.warning('ยังรีวิวไม่ได้', 'จะรีวิวได้เมื่อมีงานที่ยืนยันแล้วและจบงานเรียบร้อย') } as AlertState);
+        return;
+      }
       setShowWriteModal(true);
     });
   };
 
   const handleSubmitReview = async () => {
-    if (!user?.uid || !hospitalId) return;
+    if (!user?.uid || !targetId) return;
     
     if (!newTitle.trim()) {
       setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณาใส่หัวข้อรีวิว') } as AlertState);
@@ -170,17 +185,21 @@ export default function ReviewsScreen() {
 
     try {
       await createReview(
-        hospitalId,
+        targetId,
         user.uid,
         user.displayName || 'ผู้ใช้',
         newRating,
         newTitle.trim(),
         newContent.trim(),
         {
+          targetType,
+          targetName: screenName,
           pros: newPros.trim() || undefined,
           cons: newCons.trim() || undefined,
           wouldRecommend,
           userPhotoURL: user.photoURL || undefined,
+          relatedJobId: reviewEligibility?.relatedJobId,
+          isVerified: reviewEligibility?.isVerified ?? false,
         }
       );
 
@@ -211,7 +230,7 @@ export default function ReviewsScreen() {
     );
   };
 
-  if (!hospitalId) {
+  if (!targetId) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <EmptyState
@@ -305,7 +324,7 @@ export default function ReviewsScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{hospitalName}</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{screenName}</Text>
           <Text style={styles.headerSubtitle}>รีวิว</Text>
         </View>
         <View style={{ width: 24 }} />
@@ -333,12 +352,19 @@ export default function ReviewsScreen() {
       )}
 
       {/* Write Review Button */}
-      {!userReview && (
+      {!userReview && (targetType === 'hospital' || reviewEligibility?.canReview) && (
         <TouchableOpacity style={styles.writeButton} onPress={handleWriteReview}>
           <Ionicons name="create-outline" size={20} color={colors.white} />
           <Text style={styles.writeButtonText}>เขียนรีวิว</Text>
         </TouchableOpacity>
       )}
+
+      {targetType === 'user' && !userReview && !reviewEligibility?.canReview ? (
+        <View style={styles.reviewHintBox}>
+          <Ionicons name="information-circle-outline" size={18} color={colors.warning} />
+          <Text style={styles.reviewHintText}>รีวิวได้เมื่อคุณมีงานที่ยืนยันแล้วและจบงานกับโปรไฟล์นี้</Text>
+        </View>
+      ) : null}
 
       {/* Reviews List */}
       <FlatList

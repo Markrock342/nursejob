@@ -11,10 +11,13 @@ import {
   TouchableOpacity,
   RefreshControl,
   Modal,
+  BackHandler,
+  Platform,
+  ToastAndroid,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -46,8 +49,35 @@ export default function MyPostsScreen() {
   const [selectedPost, setSelectedPost] = useState<JobPost | null>(null);
   const [showActionModal, setShowActionModal] = useState(false);
   const [alert, setAlert] = useState<AlertState>(initialAlertState);
+  const [lastBackPressAt, setLastBackPressAt] = useState(0);
 
   const closeAlert = () => setAlert(initialAlertState);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return undefined;
+
+      const onBackPress = () => {
+        if ((navigation as any).canGoBack?.()) {
+          navigation.goBack();
+          return true;
+        }
+
+        const now = Date.now();
+        if (now - lastBackPressAt < 2000) {
+          BackHandler.exitApp();
+          return true;
+        }
+
+        setLastBackPressAt(now);
+        ToastAndroid.show('กดกลับอีกครั้งเพื่อออกจากแอพ', ToastAndroid.SHORT);
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [lastBackPressAt, navigation])
+  );
 
   // Load user's posts
   const loadPosts = useCallback(async () => {
@@ -264,6 +294,24 @@ export default function MyPostsScreen() {
     (navigation as any).navigate('Applicants', { jobId: selectedPost.id });
   };
 
+  const getPostDateLabel = (item: JobPost) => {
+    if (item.postType === 'job') {
+      return item.startDateNote || 'เริ่มงานตามตกลง';
+    }
+    return formatDate(item.shiftDate);
+  };
+
+  const getPostTimeLabel = (item: JobPost) => {
+    if (item.postType === 'job') {
+      return item.workHours || item.shiftTime || 'เวลางานตามตกลง';
+    }
+    return item.shiftTime;
+  };
+
+  const getRateLabel = (item: JobPost) => {
+    return item.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน';
+  };
+
   // Render post item
   const renderPostItem = ({ item }: { item: JobPost }) => {
     const statusConfig = {
@@ -299,12 +347,12 @@ export default function MyPostsScreen() {
             <View style={styles.detailItem}>
               <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
               <Text style={styles.detailText}>
-                {formatDate(item.shiftDate)}
+                {getPostDateLabel(item)}
               </Text>
             </View>
             <View style={styles.detailItem}>
               <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-              <Text style={styles.detailText}>{item.shiftTime}</Text>
+              <Text style={styles.detailText}>{getPostTimeLabel(item)}</Text>
             </View>
           </View>
           
@@ -314,7 +362,7 @@ export default function MyPostsScreen() {
               <Text style={styles.detailText}>{item.department}</Text>
             </View>
             <View style={styles.detailItem}>
-              <Text style={styles.rateText}>💰 {item.shiftRate?.toLocaleString()} บาท/{item.rateType === 'hour' ? 'ชม.' : 'เวร'}</Text>
+              <Text style={styles.rateText}>{getRateLabel(item)} 💰 {item.shiftRate?.toLocaleString()} บาท/{item.rateType === 'hour' ? 'ชม.' : item.rateType === 'day' ? 'วัน' : item.rateType === 'month' ? 'เดือน' : 'เวร'}</Text>
             </View>
           </View>
         </View>

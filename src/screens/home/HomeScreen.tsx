@@ -3,7 +3,7 @@
 // ============================================
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useLocation } from '../../utils/useLocation';
+import { useLocation, UserLocation } from '../../utils/useLocation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // Helper: คำนวณระยะทางระหว่าง 2 จุด (Haversine)
 function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -38,7 +38,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { JobCard } from '../../components/job/JobCard';
-import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, FAB } from '../../components/common';
+import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, FAB, FirstVisitTip } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import {
   ALL_PROVINCES,
@@ -117,6 +117,26 @@ interface UrgentBannerProps {
   onPress: (job: JobPost) => void;
 }
 
+function getUrgentJobDateLabel(job: JobPost) {
+  if (job.postType === 'job') {
+    return job.startDateNote || 'เริ่มงานตามตกลง';
+  }
+  if (!job.shiftDate) return 'ตามตกลง';
+  const d = typeof job.shiftDate === 'string' ? new Date(job.shiftDate) : job.shiftDate;
+  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+}
+
+function getUrgentJobTimeLabel(job: JobPost) {
+  if (job.postType === 'job') {
+    return job.workHours || job.shiftTime || 'เวลางานตามตกลง';
+  }
+  return job.shiftTime || 'ตามตกลง';
+}
+
+function getRateUnit(rateType?: string) {
+  return rateType === 'hour' ? '/ชม.' : rateType === 'day' ? '/วัน' : rateType === 'month' ? '/เดือน' : '/เวร';
+}
+
 function UrgentJobsBanner({ urgentJobs, onPress }: UrgentBannerProps) {
   const scrollRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -160,12 +180,6 @@ function UrgentJobsBanner({ urgentJobs, onPress }: UrgentBannerProps) {
   }, [urgentJobs.length, fadeAnim]);
 
   if (urgentJobs.length === 0) return null;
-
-  const formatShortDate = (date: any) => {
-    if (!date) return '';
-    const d = typeof date === 'string' ? new Date(date) : date.toDate?.() || date;
-    return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
-  };
 
   return (
     <View style={urgentStyles.container}>
@@ -222,22 +236,27 @@ function UrgentJobsBanner({ urgentJobs, onPress }: UrgentBannerProps) {
                   {job.title || job.department}
                 </Text>
                 <Text style={urgentStyles.cardLocation} numberOfLines={1}>
-                  📍 {job.location?.hospital || job.location?.district}
+                  {job.location?.hospital || job.location?.district}
                 </Text>
                 <View style={urgentStyles.cardMeta}>
                   <Text style={urgentStyles.cardDate}>
-                    📅 {formatShortDate(job.shiftDate)}
+                    {job.postType === 'job' ? 'เริ่มงาน ' : 'วันที่ '}{getUrgentJobDateLabel(job)}
                   </Text>
                   <Text style={urgentStyles.cardTime}>
-                    ⏰ {job.shiftTime}
+                    {job.postType === 'job' ? 'เวลางาน ' : 'เวลา '}{getUrgentJobTimeLabel(job)}
                   </Text>
                 </View>
+                {(job as any)._distanceKm !== undefined ? (
+                  <Text style={urgentStyles.cardDistance}>
+                    ห่าง {((job as any)._distanceKm as number) < 1 ? `${Math.round(((job as any)._distanceKm as number) * 1000)} ม.` : `${((job as any)._distanceKm as number).toFixed(1)} กม.`}
+                  </Text>
+                ) : null}
               </View>
               <View style={urgentStyles.cardRight}>
                 <Text style={urgentStyles.cardPrice}>
                   ฿{job.shiftRate?.toLocaleString()}
                 </Text>
-                <Text style={urgentStyles.cardPriceUnit}>/{job.rateType || 'เวร'}</Text>
+                <Text style={urgentStyles.cardPriceUnit}>{getRateUnit(job.rateType)}</Text>
                 <View style={urgentStyles.urgentBadge}>
                   <Ionicons name="flash" size={12} color="#FFF" />
                   <Text style={urgentStyles.urgentBadgeText}>ด่วน</Text>
@@ -338,6 +357,12 @@ const urgentStyles = StyleSheet.create({
     fontSize: FONT_SIZES.xs,
     color: 'rgba(255,255,255,0.6)',
   },
+  cardDistance: {
+    fontSize: FONT_SIZES.xs,
+    color: '#93C5FD',
+    marginTop: 4,
+    fontWeight: '600',
+  },
   cardRight: {
     alignItems: 'flex-end',
     justifyContent: 'space-between',
@@ -373,14 +398,18 @@ const urgentStyles = StyleSheet.create({
 // Component
 // ============================================
 export default function HomeScreen({ navigation }: Props) {
-    // Nearby location
-    const { location, loading: locationLoading, error: locationError, getLocation } = useLocation();
-    const [nearbyMode, setNearbyMode] = useState(false); // true = ใกล้ฉัน
+  // Nearby location
+  const { location, loading: locationLoading, error: locationError, getLocation } = useLocation();
+  const [nearbyMode, setNearbyMode] = useState(false); // true = ใกล้ฉัน
   // Auth context
   const { user, requireAuth, isInitialized } = useAuth();
   const toast = useToast();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
+  const headerBackground = isDark ? colors.surface : colors.primary;
+  const headerTextColor = isDark ? colors.text : colors.white;
+  const headerMutedTextColor = isDark ? colors.textSecondary : 'rgba(255,255,255,0.8)';
+  const headerButtonBackground = isDark ? colors.backgroundSecondary : 'rgba(255,255,255,0.2)';
 
   // State
   const [jobs, setJobs] = useState<JobPost[]>([]);
@@ -396,6 +425,9 @@ export default function HomeScreen({ navigation }: Props) {
   const [showExpiryPopup, setShowExpiryPopup] = useState(false);
   const [expiringPosts, setExpiringPosts] = useState<JobPost[]>([]);
   const [showNearbyPromo, setShowNearbyPromo] = useState(false);
+  const nearbyRadiusKm = user?.nearbyJobAlert?.radiusKm ?? 20;
+  const hasSavedNearbyLocation = user?.nearbyJobAlert?.lat != null && user?.nearbyJobAlert?.lng != null;
+  const hasNearbyAlertSetup = Boolean(user?.nearbyJobAlert?.enabled && hasSavedNearbyLocation);
   const [filters, setFilters] = useState<JobFilters>({
     province: '',
     district: '',
@@ -409,24 +441,9 @@ export default function HomeScreen({ navigation }: Props) {
     paymentType: undefined,
   });
 
-  // Set default tab based on role when user first loads
-  // user (คนทั่วไป) → homecare tab, hospital → job tab, nurse → all (default)
-  const roleDefaultAppliedRef = useRef(false);
-  useEffect(() => {
-    if (!user?.uid || roleDefaultAppliedRef.current) return;
-    roleDefaultAppliedRef.current = true;
-    if (user.role === 'user') {
-      setFilters(prev => ({ ...prev, postType: 'homecare' }));
-    } else if (user.role === 'hospital') {
-      setFilters(prev => ({ ...prev, postType: 'job' }));
-    }
-  }, [user?.uid, user?.role]);
+  // ทุก role เริ่มที่แท็บ "ทั้งหมด" โดยใช้ค่าเริ่มต้นของ filters.postType = undefined
 
   // Get urgent jobs for banner (paid premium placement)
-  const urgentJobs = useMemo(() => {
-    return jobs.filter(job => job.status === 'urgent').slice(0, 5);
-  }, [jobs]);
-
   // Fetch location silently on mount — enables distance badges on all job cards
   useEffect(() => {
     if (!location) {
@@ -434,6 +451,42 @@ export default function HomeScreen({ navigation }: Props) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const getNearbyBaseLocation = useCallback((override?: UserLocation | null): UserLocation | null => {
+    if (override) return override;
+    if (location) return location;
+
+    const savedLat = user?.nearbyJobAlert?.lat;
+    const savedLng = user?.nearbyJobAlert?.lng;
+    if (savedLat != null && savedLng != null) {
+      return {
+        latitude: savedLat,
+        longitude: savedLng,
+      };
+    }
+
+    return null;
+  }, [location, user?.nearbyJobAlert?.lat, user?.nearbyJobAlert?.lng]);
+
+  const openNearbySettings = useCallback(() => {
+    (navigation as any).navigate('NearbyJobAlert');
+  }, [navigation]);
+
+  const enableNearbyMode = useCallback(async () => {
+    let resolvedLocation = getNearbyBaseLocation();
+    if (!resolvedLocation) {
+      resolvedLocation = getNearbyBaseLocation(await getLocation());
+    }
+
+    if (!resolvedLocation) {
+      toast.error(locationError || 'ต้องตั้งค่าตำแหน่งงานใกล้ฉันก่อนใช้งาน');
+      openNearbySettings();
+      return false;
+    }
+
+    setNearbyMode(true);
+    return true;
+  }, [getLocation, getNearbyBaseLocation, locationError, openNearbySettings, toast]);
 
   // Fetch jobs (infinite scroll + nearby)
   const fetchJobs = useCallback(async (showRefresh = false, loadMore = false) => {
@@ -444,16 +497,21 @@ export default function HomeScreen({ navigation }: Props) {
 
     try {
       let fetchedJobs: JobPost[];
+      const nearbyBaseLocation = getNearbyBaseLocation();
 
-      if (nearbyMode && location) {
+      if (nearbyMode && nearbyBaseLocation) {
         const { getJobsNearby } = await import('../../services/jobService');
-        fetchedJobs = await getJobsNearby(location.latitude, location.longitude, 20);
+        fetchedJobs = await getJobsNearby(nearbyBaseLocation.latitude, nearbyBaseLocation.longitude, nearbyRadiusKm);
         if (filters.postType) {
           fetchedJobs = fetchedJobs.filter(j => j.postType === filters.postType);
         }
         lastDocRef.current = null;
         hasMoreRef.current = false;
         setJobs(fetchedJobs);
+      } else if (nearbyMode) {
+        lastDocRef.current = null;
+        hasMoreRef.current = false;
+        setJobs([]);
       } else {
         const cursor = loadMore ? lastDocRef.current : null;
         const result = await getJobs(filters, cursor);
@@ -483,7 +541,7 @@ export default function HomeScreen({ navigation }: Props) {
       setIsRefreshing(false);
       setIsLoadingMore(false);
     }
-  }, [filters, nearbyMode, location]);
+  }, [filters, getNearbyBaseLocation, nearbyMode, nearbyRadiusKm]);
 
   // Initial load — only for nearbyMode (normal mode uses subscription below)
   useEffect(() => {
@@ -583,6 +641,11 @@ export default function HomeScreen({ navigation }: Props) {
 
   // Real-time jobs subscription
   useEffect(() => {
+    if (nearbyMode) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     
     // Subscribe to jobs updates
@@ -662,7 +725,7 @@ export default function HomeScreen({ navigation }: Props) {
     });
 
     return () => unsubscribe();
-  }, [filters]);
+  }, [filters, nearbyMode]);
 
   // Debounced search
   const debouncedSearch = useMemo(
@@ -709,9 +772,9 @@ export default function HomeScreen({ navigation }: Props) {
       try {
         const isNowFavorite = await toggleFavorite(user.uid, job.id);
         if (isNowFavorite) {
-          toast.success(`เพิ่ม "${job.title}" ไปยังรายการโปรดแล้ว`, '❤️ บันทึกแล้ว');
+          toast.success(`เพิ่ม "${job.title}" ไปยังรายการโปรดแล้ว`, 'บันทึกแล้ว');
         } else {
-          toast.info(`ลบ "${job.title}" ออกจากรายการโปรดแล้ว`, '💔 ลบออกแล้ว');
+          toast.info(`ลบ "${job.title}" ออกจากรายการโปรดแล้ว`, 'ลบออกแล้ว');
         }
       } catch (error) {
         toast.error('ไม่สามารถบันทึกงานได้');
@@ -720,13 +783,20 @@ export default function HomeScreen({ navigation }: Props) {
   };
 
   // Apply filters
-  const applyFilters = () => {
+  const applyFilters = async (nextNearbyMode = nearbyMode) => {
+    if (nextNearbyMode) {
+      const enabled = await enableNearbyMode();
+      if (!enabled) return;
+    } else {
+      setNearbyMode(false);
+    }
+
     setShowFilters(false);
-    fetchJobs();
   };
 
   // Clear filters
   const clearFilters = () => {
+    setNearbyMode(false);
     setFilters({
       province: '',
       district: '',
@@ -774,6 +844,20 @@ export default function HomeScreen({ navigation }: Props) {
     });
   }, [jobs, location, user?.nearbyJobAlert?.lat, user?.nearbyJobAlert?.lng]);
 
+  const urgentJobs = useMemo(() => {
+    return jobsWithDistance.filter(job => job.status === 'urgent').slice(0, 5);
+  }, [jobsWithDistance]);
+
+  const nearbyInfoMessage = useMemo(() => {
+    if (hasNearbyAlertSetup) {
+      return `ค้นหางานภายในรัศมี ${nearbyRadiusKm} กม. และเรียงจากใกล้ที่สุด`;
+    }
+    if (locationLoading) {
+      return 'กำลังตรวจสอบตำแหน่งของคุณ...';
+    }
+    return 'ต้องเปิดสิทธิ์ตำแหน่งและตั้งค่ารัศมีที่หน้า งานใกล้ฉัน ก่อนใช้งาน';
+  }, [hasNearbyAlertSetup, locationLoading, nearbyRadiusKm]);
+
   // Render job item
   const renderJobItem = ({ item }: { item: JobPost }) => (
     <JobCard
@@ -800,6 +884,18 @@ export default function HomeScreen({ navigation }: Props) {
 
     return (
     <View style={styles.listHeader}>
+      {user && user.onboardingCompleted && (
+        <FirstVisitTip
+          storageKey={`first_tip_home_${user.uid}`}
+          icon="compass-outline"
+          title="หน้าแรกคือศูนย์รวมการค้นหางานของคุณ"
+          description="ใช้ช่องค้นหา ตัวกรอง และโหมดงานใกล้ฉันเพื่อเจองานที่ตรงเร็วขึ้น ถ้ายังใหม่กับแอป กดดูคู่มือเพื่อเห็นภาพรวมทั้งหมดได้"
+          actionLabel="ดูคู่มือ"
+          onAction={() => (navigation as any).navigate('OnboardingSurvey')}
+          containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: 10 }}
+        />
+      )}
+
       {/* Onboarding Banner — แสดงตอนเข้าแอปครั้งแรก */}
       {user && !user.onboardingCompleted && (
         <TouchableOpacity
@@ -817,7 +913,7 @@ export default function HomeScreen({ navigation }: Props) {
                 <Ionicons name="sparkles" size={16} color="#FFF" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.onboardingBannerTag}>เริ่มต้นใช้งาน</Text>
+                <Text style={styles.onboardingBannerTag}>คู่มือเริ่มต้นใช้งาน</Text>
                 <Text style={styles.onboardingBannerTitle}>{onboardingTitle}</Text>
                 <Text style={styles.onboardingBannerSub}>{onboardingSub}</Text>
               </View>
@@ -842,7 +938,7 @@ export default function HomeScreen({ navigation }: Props) {
       {user && !user.nearbyJobAlert?.enabled && (
         <TouchableOpacity
           style={styles.nearbyBanner}
-          onPress={() => (navigation as any).navigate('NearbyJobAlert')}
+          onPress={openNearbySettings}
           activeOpacity={0.85}
         >
           <View style={styles.nearbyBannerLeft}>
@@ -852,13 +948,13 @@ export default function HomeScreen({ navigation }: Props) {
             <View style={{ flex: 1 }}>
               <Text style={styles.nearbyBannerTitle}>งานใกล้ฉัน</Text>
               <Text style={styles.nearbyBannerSub}>
-                เปิดรับแจ้งเตือนเมื่อมีงานในรัศมีของคุณ
+                ตั้งค่าตำแหน่งและรัศมี เพื่อให้หน้าแรกเรียงงานใกล้ตัวสุดก่อน
               </Text>
             </View>
           </View>
           <View style={styles.nearbyBannerCTA}>
             <Text style={styles.nearbyBannerCTAText}>ตั้งค่า</Text>
-            <Ionicons name="chevron-forward" size={14} color="#0EA5E9" />
+            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
           </View>
         </TouchableOpacity>
       )}
@@ -884,34 +980,33 @@ export default function HomeScreen({ navigation }: Props) {
           onPress={() => setFilters({ ...filters, urgentOnly: false, staffType: undefined, locationType: undefined, sortBy: 'latest' })}
         />
         <Chip
-          label="🔥 ด่วน"
+          label="ด่วน"
           selected={filters.urgentOnly}
           onPress={() => setFilters({ ...filters, urgentOnly: !filters.urgentOnly })}
         />
         <Chip
-          label="✓ ยืนยันตัวตน"
+          label="ยืนยันตัวตน"
           selected={filters.verifiedOnly}
           onPress={() => setFilters({ ...filters, verifiedOnly: !filters.verifiedOnly })}
         />
         <Chip
-          label="📍 ใกล้ฉัน"
+          label="ใกล้ฉัน"
           selected={nearbyMode}
           onPress={async () => {
             if (!nearbyMode) {
-              await getLocation();
-              setNearbyMode(true);
+              await enableNearbyMode();
             } else {
               setNearbyMode(false);
             }
           }}
         />
         <Chip
-          label="🏠 ดูแลที่บ้าน"
+          label="ดูแลที่บ้าน"
           selected={filters.locationType === 'HOME'}
           onPress={() => setFilters({ ...filters, locationType: filters.locationType === 'HOME' ? undefined : 'HOME' })}
         />
         <Chip
-          label="🏥 รพ."
+          label="รพ."
           selected={filters.locationType === 'HOSPITAL'}
           onPress={() => setFilters({ ...filters, locationType: filters.locationType === 'HOSPITAL' ? undefined : 'HOSPITAL' })}
         />
@@ -932,6 +1027,30 @@ export default function HomeScreen({ navigation }: Props) {
         />
       </ScrollView>
 
+      {!hasNearbyAlertSetup && (
+        <TouchableOpacity
+          style={styles.nearbyHelperCard}
+          onPress={openNearbySettings}
+          activeOpacity={0.85}
+        >
+          <View style={styles.nearbyHelperIconWrap}>
+            <Ionicons
+              name="location-outline"
+              size={18}
+              color="#B45309"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nearbyHelperTitle}>ตั้งค่างานใกล้ฉันก่อนใช้งาน</Text>
+            <Text style={styles.nearbyHelperText}>{nearbyInfoMessage}</Text>
+          </View>
+          <View style={styles.nearbyHelperCTA}>
+            <Text style={styles.nearbyHelperCTAText}>ตั้งค่า</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* Results count */}
       <View style={styles.resultsRow}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -942,10 +1061,13 @@ export default function HomeScreen({ navigation }: Props) {
             style={{ marginRight: 4 }}
           />
           <Text style={styles.resultsText}>
-            พบ <Text style={styles.resultsCount}>{jobs.length}</Text>{' '}
+            พบ <Text style={styles.resultsCount}>{jobsWithDistance.length}</Text>{' '}
             {CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.label ?? 'งาน'}
           </Text>
         </View>
+        {nearbyMode && (
+          <Text style={styles.nearbySortLabel}>ใกล้สุดก่อน • {nearbyRadiusKm} กม.</Text>
+        )}
         {activeFilterCount > 0 && (
           <TouchableOpacity onPress={clearFilters}>
             <Text style={styles.clearFilters}>ล้างตัวกรอง</Text>
@@ -957,28 +1079,28 @@ export default function HomeScreen({ navigation }: Props) {
   }; // end renderHeader
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: '#0EA5E9' }]} edges={['top']}>
-      <StatusBar backgroundColor="#0EA5E9" barStyle="light-content" translucent={false} />
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: '#0EA5E9' }]}>
+      <View style={[styles.header, { backgroundColor: headerBackground }]}> 
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.greeting}>
+            <Text style={[styles.greeting, { color: headerTextColor }]}>
               {user ? `สวัสดี, ${user.displayName?.split(' ')[0] || 'คุณ'}` : 'บอร์ดหาคนแทน'}
             </Text>
-            <Text style={styles.headerSubtitle}>
+            <Text style={[styles.headerSubtitle, { color: headerMutedTextColor }]}>
               {user ? 'หางานหรือหาคนแทน' : 'เข้าสู่ระบบเพื่อประกาศ'}
             </Text>
           </View>
           <View style={styles.headerActions}>
             {/* Notification Icon */}
             <TouchableOpacity 
-              style={styles.notificationButton}
+              style={[styles.notificationButton, { backgroundColor: headerButtonBackground }]}
               onPress={() => (navigation as any).navigate('Notifications')}
             >
-              <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+              <Ionicons name="notifications-outline" size={24} color={headerTextColor} />
               {notificationCount > 0 && (
-                <View style={styles.notificationBadge}>
+                <View style={[styles.notificationBadge, { borderColor: headerBackground }]}> 
                   <Text style={styles.notificationBadgeText}>
                     {notificationCount > 9 ? '9+' : notificationCount}
                   </Text>
@@ -988,7 +1110,7 @@ export default function HomeScreen({ navigation }: Props) {
             
             {/* Profile */}
             <TouchableOpacity 
-              style={styles.profileButton}
+              style={[styles.profileButton, { borderColor: isDark ? colors.border : colors.white }]}
               onPress={() => (navigation as any).navigate('Profile')}
             >
               <Avatar 
@@ -1002,26 +1124,26 @@ export default function HomeScreen({ navigation }: Props) {
 
         {/* Search Bar */}
         <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Ionicons name="search-outline" size={20} color={'#94A3B8'} style={styles.searchIcon} />
+          <View style={[styles.searchBar, { backgroundColor: colors.surface }]}> 
+            <Ionicons name="search-outline" size={20} color={colors.textMuted} style={styles.searchIcon} />
             <TextInput
-              style={[styles.searchInput, { color: '#0F172A' }]}
+              style={[styles.searchInput, { color: colors.text }]}
               placeholder="ค้นหาเวร, แผนก, สถานที่..."
-              placeholderTextColor={'#94A3B8'}
+              placeholderTextColor={colors.textMuted}
               value={searchQuery}
               onChangeText={handleSearch}
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => handleSearch('')}>
-                <Ionicons name="close-circle" size={20} color={'#94A3B8'} />
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
               </TouchableOpacity>
             )}
           </View>
           <TouchableOpacity 
-            style={[styles.filterButton, activeFilterCount > 0 && styles.filterButtonActive]}
+            style={[styles.filterButton, { backgroundColor: activeFilterCount > 0 ? colors.primary : headerButtonBackground }]}
             onPress={() => setShowFilters(true)}
           >
-            <Ionicons name="options-outline" size={22} color={activeFilterCount > 0 ? '#FFFFFF' : '#0EA5E9'} />
+            <Ionicons name="options-outline" size={22} color={activeFilterCount > 0 ? colors.white : headerTextColor} />
             {activeFilterCount > 0 && (
               <View style={styles.filterBadge}>
                 <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
@@ -1034,7 +1156,7 @@ export default function HomeScreen({ navigation }: Props) {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={{ backgroundColor: '#0EA5E9' }}
+          style={{ backgroundColor: headerBackground }}
           contentContainerStyle={styles.categoryTabs}
         >
           {CATEGORY_TABS.map((tab) => {
@@ -1044,7 +1166,7 @@ export default function HomeScreen({ navigation }: Props) {
                 key={tab.key}
                 style={[
                   styles.categoryTab,
-                  isActive && { backgroundColor: '#FFFFFF' },
+                  isActive && { backgroundColor: colors.surface },
                 ]}
                 onPress={() =>
                   setFilters((prev) => ({
@@ -1057,13 +1179,14 @@ export default function HomeScreen({ navigation }: Props) {
                 <Ionicons
                   name={tab.icon}
                   size={16}
-                  color={isActive ? tab.color : 'rgba(255,255,255,0.9)'}
+                  color={isActive ? tab.color : headerTextColor}
                   style={{ marginRight: 6 }}
                 />
                 <Text
                   style={[
                     styles.categoryTabLabel,
-                    isActive && { color: tab.color, fontWeight: '700' as const },
+                    { color: isActive ? tab.color : headerTextColor },
+                    isActive && { fontWeight: '700' as const },
                   ]}
                 >
                   {tab.label}
@@ -1075,7 +1198,7 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
 
       {/* Job List */}
-      <View style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+  <View style={{ flex: 1, backgroundColor: colors.background }}>
       {isLoading ? (
         <Loading text="กำลังโหลดงาน..." />
       ) : (
@@ -1087,18 +1210,18 @@ export default function HomeScreen({ navigation }: Props) {
           ListEmptyComponent={
             <EmptyState
               icon="😢"
-              title="ไม่พบเวรที่ตรงกับเงื่อนไข"
-              description="ลองเปลี่ยนตัวกรองหรือคำค้นหาดูนะ"
-              actionText="ล้างตัวกรอง"
-              onAction={clearFilters}
+              title={nearbyMode ? `ยังไม่พบงานในรัศมี ${nearbyRadiusKm} กม.` : 'ไม่พบเวรที่ตรงกับเงื่อนไข'}
+              description={nearbyMode ? 'ลองขยายรัศมีหรืออัปเดตตำแหน่งที่หน้า งานใกล้ฉัน' : 'ลองเปลี่ยนตัวกรองหรือคำค้นหาดูนะ'}
+              actionText={nearbyMode ? 'ตั้งค่างานใกล้ฉัน' : 'ล้างตัวกรอง'}
+              onAction={nearbyMode ? openNearbySettings : clearFilters}
             />
           }
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => fetchJobs(true)}
-              colors={['#0EA5E9']}
-              tintColor={'#0EA5E9'}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
             />
           }
           contentContainerStyle={styles.listContent}
@@ -1108,12 +1231,12 @@ export default function HomeScreen({ navigation }: Props) {
           ListFooterComponent={
             isLoadingMore ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                <ActivityIndicator size="small" color="#0EA5E9" />
-                <Text style={{ color: '#94A3B8', fontSize: 12, marginTop: 6 }}>โหลดเพิ่มเติม...</Text>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 6 }}>โหลดเพิ่มเติม...</Text>
               </View>
             ) : jobs.length > 0 && !hasMoreRef.current ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                <Text style={{ color: '#CBD5E1', fontSize: 12 }}>— แสดงทั้งหมด {jobs.length} รายการ —</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>— แสดงทั้งหมด {jobsWithDistance.length} รายการ —</Text>
               </View>
             ) : null
           }
@@ -1142,12 +1265,12 @@ export default function HomeScreen({ navigation }: Props) {
       >
         <View style={styles.promoWrap}>
           {/* Icon */}
-          <View style={styles.promoIconCircle}>
-            <Ionicons name="location" size={44} color="#0EA5E9" />
+          <View style={[styles.promoIconCircle, { backgroundColor: colors.primaryBackground }]}> 
+            <Ionicons name="location" size={44} color={colors.primary} />
           </View>
 
-          <Text style={styles.promoTitle}>รู้ก่อนใคร! งานใกล้คุณ</Text>
-          <Text style={styles.promoDesc}>
+          <Text style={[styles.promoTitle, { color: colors.text }]}>รู้ก่อนใคร! งานใกล้คุณ</Text>
+          <Text style={[styles.promoDesc, { color: colors.textSecondary }]}>
             เมื่อมีคนโพสต์งานในรัศมีที่คุณกำหนด{`\n`}
             แอปจะส่ง Push Notification ให้คุณทันที
           </Text>
@@ -1159,20 +1282,20 @@ export default function HomeScreen({ navigation }: Props) {
             { icon: 'location-outline', text: 'ตั้งตำแหน่งจาก GPS ของมือถือ' },
           ].map((f) => (
             <View key={f.icon} style={styles.promoFeatureRow}>
-              <View style={styles.promoFeatureDot}>
-                <Ionicons name={f.icon as any} size={15} color="#0EA5E9" />
+              <View style={[styles.promoFeatureDot, { backgroundColor: colors.primaryBackground }]}> 
+                <Ionicons name={f.icon as any} size={15} color={colors.primary} />
               </View>
-              <Text style={styles.promoFeatureText}>{f.text}</Text>
+              <Text style={[styles.promoFeatureText, { color: colors.text }]}>{f.text}</Text>
             </View>
           ))}
 
           {/* CTA */}
           <TouchableOpacity
-            style={styles.promoCTA}
+            style={[styles.promoCTA, { backgroundColor: colors.primary }]}
             onPress={() => dismissNearbyPromo(true)}
             activeOpacity={0.85}
           >
-            <Ionicons name="location" size={18} color="#FFF" />
+            <Ionicons name="location" size={18} color={colors.white} />
             <Text style={styles.promoCTAText}>เปิดการแจ้งเตือนงานใกล้ฉัน</Text>
           </TouchableOpacity>
 
@@ -1180,7 +1303,7 @@ export default function HomeScreen({ navigation }: Props) {
             style={styles.promoDismiss}
             onPress={() => dismissNearbyPromo(false)}
           >
-            <Text style={styles.promoDismissText}>ไว้ทีหลัง</Text>
+            <Text style={[styles.promoDismissText, { color: colors.textSecondary }]}>ไว้ทีหลัง</Text>
           </TouchableOpacity>
         </View>
       </ModalContainer>
@@ -1189,10 +1312,10 @@ export default function HomeScreen({ navigation }: Props) {
       <ModalContainer
         visible={showExpiryPopup}
         onClose={() => setShowExpiryPopup(false)}
-        title="⏰ ประกาศใกล้หมดอายุ"
+        title="ประกาศใกล้หมดอายุ"
       >
         <View style={{ padding: SPACING.md }}>
-          <Text style={{ fontSize: FONT_SIZES.md, color: '#64748B', marginBottom: SPACING.md, textAlign: 'center' }}>
+          <Text style={{ fontSize: FONT_SIZES.md, color: colors.textSecondary, marginBottom: SPACING.md, textAlign: 'center' }}>
             คุณมี {expiringPosts.length} ประกาศที่ใกล้หมดอายุ
           </Text>
           
@@ -1203,14 +1326,14 @@ export default function HomeScreen({ navigation }: Props) {
             
             return (
               <View key={post.id} style={{ 
-                backgroundColor: daysLeft <= 1 ? '#FFEBEE' : '#FFF3E0', 
+                backgroundColor: daysLeft <= 1 ? colors.errorLight : colors.warningLight, 
                 padding: SPACING.md, 
                 borderRadius: BORDER_RADIUS.md,
                 marginBottom: SPACING.sm,
                 borderLeftWidth: 4,
                 borderLeftColor: colors.error,
               }}>
-                <Text style={{ fontWeight: '600', color: '#0F172A' }} numberOfLines={1}>
+                <Text style={{ fontWeight: '600', color: colors.text }} numberOfLines={1}>
                   {post.title}
                 </Text>
                 <Text style={{ fontSize: FONT_SIZES.sm, color: colors.error, marginTop: 4 }}>
@@ -1221,12 +1344,12 @@ export default function HomeScreen({ navigation }: Props) {
           })}
           
           <View style={{ 
-            backgroundColor: '#E3F2FD', 
+            backgroundColor: colors.infoLight, 
             padding: SPACING.md, 
             borderRadius: BORDER_RADIUS.md,
             marginTop: SPACING.sm,
           }}>
-            <Text style={{ fontSize: FONT_SIZES.sm, color: '#0EA5E9', textAlign: 'center' }}>
+            <Text style={{ fontSize: FONT_SIZES.sm, color: colors.primary, textAlign: 'center' }}>
               💡 ต่ออายุประกาศได้ในราคา 19 บาท/วัน
             </Text>
           </View>
@@ -1262,7 +1385,7 @@ export default function HomeScreen({ navigation }: Props) {
           {
             icon: 'navigate-outline',
             label: 'งานใกล้ฉัน',
-            onPress: () => (navigation as any).navigate('NearbyJobAlert'),
+            onPress: openNearbySettings,
             color: '#14B8A6',
           },
           {
@@ -1291,13 +1414,14 @@ interface FilterModalProps {
   onClose: () => void;
   filters: JobFilters;
   setFilters: React.Dispatch<React.SetStateAction<JobFilters>>;
-  onApply: () => void;
   onClear: () => void;
   nearbyMode: boolean;
   setNearbyMode: (val: boolean) => void;
+  onApply: (nextNearbyMode?: boolean) => void | Promise<void>;
 }
 
 function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, nearbyMode, setNearbyMode }: FilterModalProps) {
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [provinceSearch, setProvinceSearch] = useState('');
   const [showAllProvinces, setShowAllProvinces] = useState(false);
@@ -1305,16 +1429,21 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
   const [minRateText, setMinRateText] = useState(filters.minRate?.toString() ?? '');
   const [maxRateText, setMaxRateText] = useState(filters.maxRate?.toString() ?? '');
 
+  useEffect(() => {
+    if (!visible) return;
+    setNearbyPreset(!!nearbyMode);
+  }, [visible, nearbyMode]);
+
   const filteredProvinces = provinceSearch
     ? ALL_PROVINCES.filter(p => p.toLowerCase().includes(provinceSearch.toLowerCase()))
     : (showAllProvinces ? ALL_PROVINCES : POPULAR_PROVINCES);
 
-  const SectionHeader = ({ icon, label, iconColor = '#0EA5E9' }: { icon: string; label: string; iconColor?: string }) => (
+  const SectionHeader = ({ icon, label, iconColor = colors.primary }: { icon: string; label: string; iconColor?: string }) => (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
       <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: iconColor + '18', alignItems: 'center', justifyContent: 'center' }}>
         <Ionicons name={icon as any} size={15} color={iconColor} />
       </View>
-      <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>{label}</Text>
+      <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>{label}</Text>
     </View>
   );
 
@@ -1326,7 +1455,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
       fullScreen={true}
     >
       <ScrollView
-        style={[styles.filterContent, { backgroundColor: '#F8FAFC' }]}
+        style={[styles.filterContent, { backgroundColor: colors.background }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -1336,34 +1465,34 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
             activeOpacity={0.85}
             onPress={() => setNearbyPreset(!nearbyPreset)}
             style={{
-              backgroundColor: nearbyPreset ? '#E0F2FE' : '#fff',
+              backgroundColor: nearbyPreset ? colors.primaryBackground : colors.surface,
               borderRadius: 16,
               padding: 16,
               flexDirection: 'row',
               alignItems: 'center',
               borderWidth: nearbyPreset ? 2 : 1,
-              borderColor: nearbyPreset ? '#0EA5E9' : '#E2E8F0',
-              shadowColor: '#0EA5E9',
+              borderColor: nearbyPreset ? colors.primary : colors.border,
+              shadowColor: colors.primary,
               shadowOpacity: nearbyPreset ? 0.12 : 0,
               shadowRadius: 8,
               elevation: nearbyPreset ? 3 : 0,
             }}
           >
-            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: nearbyPreset ? '#0EA5E9' : '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
-              <Ionicons name="location" size={22} color={nearbyPreset ? '#fff' : '#64748B'} />
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: nearbyPreset ? colors.primary : colors.backgroundSecondary, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+              <Ionicons name="location" size={22} color={nearbyPreset ? colors.white : colors.textSecondary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: nearbyPreset ? '#0EA5E9' : '#0F172A' }}>ใกล้ฉัน</Text>
-              <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>งานใกล้ตำแหน่งของคุณมากที่สุด</Text>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: nearbyPreset ? colors.primary : colors.text }}>ใกล้ฉัน</Text>
+              <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>งานใกล้ตำแหน่งของคุณมากที่สุด</Text>
             </View>
             <View style={{
               width: 28, height: 16, borderRadius: 8,
-              backgroundColor: nearbyPreset ? '#0EA5E9' : '#CBD5E1',
+              backgroundColor: nearbyPreset ? colors.primary : colors.textLight,
               justifyContent: 'center',
               paddingHorizontal: 2,
             }}>
               <View style={{
-                width: 12, height: 12, borderRadius: 6, backgroundColor: '#fff',
+                width: 12, height: 12, borderRadius: 6, backgroundColor: colors.white,
                 alignSelf: nearbyPreset ? 'flex-end' : 'flex-start',
               }} />
             </View>
@@ -1372,7 +1501,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
 
         {/* Staff Type */}
         <View style={[styles.filterCard, { marginBottom: 14 }]}>
-          <SectionHeader icon="person-outline" label="ประเภทบุคลากร" iconColor="#0EA5E9" />
+          <SectionHeader icon="person-outline" label="ประเภทบุคลากร" iconColor={colors.primary} />
           <View style={styles.filterOptions}>
             <Chip label="ทั้งหมด" selected={!filters.staffType}
               onPress={() => setFilters({ ...filters, staffType: undefined })} style={styles.optionChip} />
@@ -1406,9 +1535,9 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
         <View style={[styles.filterCard, { marginBottom: 14 }]}>
           <SectionHeader icon="map-outline" label="จังหวัด" iconColor="#10B981" />
           <TextInput
-            style={styles.provinceSearchInput}
+            style={[styles.provinceSearchInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
             placeholder="ค้นหาจังหวัด..."
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={colors.textMuted}
             value={provinceSearch}
             onChangeText={setProvinceSearch}
           />
@@ -1424,8 +1553,8 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
           </View>
           {!provinceSearch && (
             <TouchableOpacity style={styles.showMoreButton} onPress={() => setShowAllProvinces(!showAllProvinces)}>
-              <Text style={styles.showMoreText}>{showAllProvinces ? 'แสดงน้อยลง' : 'ดูทั้งหมด 77 จังหวัด'}</Text>
-              <Ionicons name={showAllProvinces ? 'chevron-up' : 'chevron-down'} size={16} color="#0EA5E9" />
+              <Text style={[styles.showMoreText, { color: colors.primary }]}>{showAllProvinces ? 'แสดงน้อยลง' : 'ดูทั้งหมด 77 จังหวัด'}</Text>
+              <Ionicons name={showAllProvinces ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
             </TouchableOpacity>
           )}
         </View>
@@ -1457,9 +1586,9 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>ขั้นต่ำ</Text>
               <TextInput
-                style={[styles.provinceSearchInput, { marginBottom: 0 }]}
+                style={[styles.provinceSearchInput, { marginBottom: 0, borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholder="เช่น 500"
-                placeholderTextColor="#CBD5E1"
+                placeholderTextColor={colors.textMuted}
                 keyboardType="numeric"
                 value={minRateText}
                 onChangeText={(t) => {
@@ -1468,13 +1597,13 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
                 }}
               />
             </View>
-            <Text style={{ color: '#94A3B8', marginTop: 16 }}>—</Text>
+            <Text style={{ color: colors.textMuted, marginTop: 16 }}>—</Text>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>สูงสุด</Text>
               <TextInput
-                style={[styles.provinceSearchInput, { marginBottom: 0 }]}
+                style={[styles.provinceSearchInput, { marginBottom: 0, borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholder="เช่น 3000"
-                placeholderTextColor="#CBD5E1"
+                placeholderTextColor={colors.textMuted}
                 keyboardType="numeric"
                 value={maxRateText}
                 onChangeText={(t) => {
@@ -1496,11 +1625,11 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
                 }}
                 style={{
                   paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
-                  backgroundColor: filters.minRate === rate && !filters.maxRate ? '#F59E0B' : '#FEF3C7',
-                  borderWidth: 1, borderColor: '#FDE68A',
+                  backgroundColor: filters.minRate === rate && !filters.maxRate ? colors.warning : colors.warningLight,
+                  borderWidth: 1, borderColor: colors.warning,
                 }}
               >
-                <Text style={{ fontSize: 11, fontWeight: '600', color: filters.minRate === rate && !filters.maxRate ? '#fff' : '#92400E' }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: filters.minRate === rate && !filters.maxRate ? colors.white : colors.warning }}>
                   {rate.toLocaleString()}+
                 </Text>
               </TouchableOpacity>
@@ -1537,10 +1666,10 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
       {/* Actions */}
       <View style={[styles.filterActions, {
         paddingBottom: Math.max(insets.bottom, 16) + SPACING.md,
-        backgroundColor: '#fff',
+        backgroundColor: colors.surface,
         borderTopWidth: 1,
-        borderTopColor: '#F1F5F9',
-        shadowColor: '#000',
+        borderTopColor: colors.border,
+        shadowColor: isDark ? '#000000' : '#000000',
         shadowOpacity: 0.06,
         shadowRadius: 12,
         shadowOffset: { width: 0, height: -4 },
@@ -1552,7 +1681,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
           ล้างตัวกรอง
         </Button>
         <Button
-          onPress={() => { setNearbyMode(nearbyPreset); onApply(); }}
+          onPress={() => { onApply(nearbyPreset); }}
           style={{ flex: 2, borderRadius: 14, height: 50 }}>
           ค้นหา
         </Button>
@@ -1918,6 +2047,59 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#0369A1',
     marginTop: 2,
+  },
+  nearbyHelperCard: {
+    marginTop: 12,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  nearbyHelperCardActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BAE6FD',
+  },
+  nearbyHelperIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nearbyHelperTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  nearbyHelperText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#64748B',
+  },
+  nearbyHelperCTA: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: 8,
+  },
+  nearbyHelperCTAText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0EA5E9',
+  },
+  nearbySortLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0369A1',
   },
   nearbyBannerCTA: {
     flexDirection: 'row',

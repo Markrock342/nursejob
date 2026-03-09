@@ -52,6 +52,8 @@ export default function VerificationScreen({ navigation }: Props) {
   const [pendingRequest, setPendingRequest] = useState<VerificationRequest | null>(null);
   
   // Form state
+  const [firstName, setFirstName] = useState((user as any)?.firstName || '');
+  const [lastName, setLastName] = useState((user as any)?.lastName || '');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseType, setLicenseType] = useState<string>('nurse');
   const [licenseExpiry, setLicenseExpiry] = useState(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000));
@@ -71,6 +73,15 @@ export default function VerificationScreen({ navigation }: Props) {
       loadVerificationStatus();
     }
   }, [user?.uid, isInitialized]);
+
+  useEffect(() => {
+    if ((user as any)?.firstName && !firstName) {
+      setFirstName((user as any).firstName);
+    }
+    if ((user as any)?.lastName && !lastName) {
+      setLastName((user as any).lastName);
+    }
+  }, [user, firstName, lastName]);
 
   const loadVerificationStatus = async () => {
     if (!user?.uid) return;
@@ -155,6 +166,14 @@ export default function VerificationScreen({ navigation }: Props) {
     if (!user) return;
     
     // Validation
+    if (!firstName.trim()) {
+      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณากรอกชื่อจริง') } as AlertState);
+      return;
+    }
+    if (!lastName.trim()) {
+      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณากรอกนามสกุล') } as AlertState);
+      return;
+    }
     if (!licenseNumber.trim()) {
       setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณากรอกเลขที่ใบอนุญาต') } as AlertState);
       return;
@@ -183,6 +202,8 @@ export default function VerificationScreen({ navigation }: Props) {
       const verificationPayload: Parameters<typeof submitVerificationRequest>[0] = {
         userId: user.uid,
         userName: user.displayName || 'ไม่ระบุชื่อ',
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         userEmail: user.email || '',
         licenseNumber: licenseNumber.trim(),
         licenseType: licenseType as any,
@@ -213,6 +234,37 @@ export default function VerificationScreen({ navigation }: Props) {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>กำลังโหลด...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (user?.role !== 'nurse') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <View style={styles.pendingContainer}>
+          <View style={styles.pendingBadge}>
+            <Ionicons name="lock-closed-outline" size={80} color={colors.textSecondary} />
+          </View>
+          <Text style={styles.pendingTitle}>ฟีเจอร์นี้สำหรับพยาบาลเท่านั้น</Text>
+          <Text style={styles.pendingSubtitle}>
+            การยื่นใบประกอบวิชาชีพเพื่อยืนยันตัวตน ใช้สำหรับบัญชี role พยาบาลเท่านั้น
+          </Text>
+
+          <Button
+            title="กลับ"
+            onPress={() => navigation.goBack()}
+            variant="outline"
+            style={{ marginTop: SPACING.lg }}
+          />
         </View>
       </SafeAreaView>
     );
@@ -296,6 +348,10 @@ export default function VerificationScreen({ navigation }: Props) {
           <Card style={styles.pendingCard}>
             <Text style={styles.pendingCardTitle}>รายละเอียดคำขอ</Text>
             <View style={styles.licenseRow}>
+              <Text style={styles.licenseLabel}>ชื่อ-นามสกุล:</Text>
+              <Text style={styles.licenseValue}>{pendingRequest.firstName} {pendingRequest.lastName}</Text>
+            </View>
+            <View style={styles.licenseRow}>
               <Text style={styles.licenseLabel}>เลขที่ใบอนุญาต:</Text>
               <Text style={styles.licenseValue}>{pendingRequest.licenseNumber}</Text>
             </View>
@@ -343,6 +399,24 @@ export default function VerificationScreen({ navigation }: Props) {
               </Text>
             </View>
           </View>
+        </Card>
+
+        <Card style={styles.section}>
+          <Text style={styles.sectionTitle}>ข้อมูลผู้ยื่นคำขอ</Text>
+
+          <Input
+            label="ชื่อจริง *"
+            placeholder="กรอกชื่อจริง"
+            value={firstName}
+            onChangeText={setFirstName}
+          />
+
+          <Input
+            label="นามสกุล *"
+            placeholder="กรอกนามสกุล"
+            value={lastName}
+            onChangeText={setLastName}
+          />
         </Card>
 
         {/* License Number */}
@@ -431,17 +505,17 @@ export default function VerificationScreen({ navigation }: Props) {
         </Card>
 
         {/* Privacy Notice */}
-              และใช้เพื่อการตรวจสอบเท่านั้น
         <Card style={{...styles.section, ...styles.privacyCard}}>
           <View style={styles.privacyContent}>
             <Ionicons name="lock-closed-outline" size={24} color={colors.primary} />
             <Text style={styles.privacyText}>
               ข้อมูลและเอกสารของคุณจะถูกเก็บรักษาอย่างปลอดภัย
-        {/* Submit Button */}
               และใช้เพื่อการตรวจสอบเท่านั้น
             </Text>
           </View>
         </Card>
+
+        {/* Submit Button */}
         <Button
           title={isSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอยืนยัน'}
           onPress={handleSubmit}

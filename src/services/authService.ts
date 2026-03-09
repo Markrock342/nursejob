@@ -2,6 +2,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  signInAnonymously,
   onAuthStateChanged,
   updateProfile,
   signInWithCredential,
@@ -15,8 +16,7 @@ import {
   User as FirebaseUser
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import { auth, db } from '../config/firebase';
+import { auth, db, firebaseConfig } from '../config/firebase';
 import { ADMIN_CONFIG, validateAdminConfig } from '../config/adminConfig';
 import * as ExpoCrypto from 'expo-crypto';
 
@@ -25,6 +25,8 @@ export interface UserProfile {
   uid: string; // Firebase Auth UID
   email: string;
   displayName: string;
+  firstName?: string;
+  lastName?: string;
   username?: string; // Username สำหรับ login
   photoURL?: string | null;
   phone?: string;
@@ -97,6 +99,82 @@ async function sha256(message: string): Promise<string> {
     ExpoCrypto.CryptoDigestAlgorithm.SHA256,
     message,
   );
+}
+
+function toErrorMessage(error: any): string {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  const projectId = firebaseConfig.projectId || 'Firebase project ปัจจุบัน';
+
+  if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+    return 'ยังไม่ได้เปิด Anonymous sign-in ใน Firebase Authentication';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'ไม่สามารถเชื่อมต่อได้ กรุณาตรวจสอบอินเทอร์เน็ต';
+  }
+  if (code === 'functions/failed-precondition') {
+    return 'ยังไม่ได้ตั้งค่า ADMIN_USERNAME / ADMIN_PASSWORD_HASH บน Cloud Functions';
+  }
+  if (code === 'functions/unauthenticated') {
+    return 'Username หรือ Password ไม่ถูกต้อง';
+  }
+  if (code === 'functions/not-found') {
+    return `ไม่พบ Cloud Function verifyAdminLogin ในโปรเจกต์ ${projectId}`;
+  }
+  if (
+    code === 'functions/unavailable' ||
+    code === 'functions/internal' ||
+    code === 'functions/unknown'
+  ) {
+    return `เข้าสู่ระบบแอดมินไม่ได้ เพราะ Cloud Functions ของโปรเจกต์ ${projectId} ใช้งานไม่ได้หรือยังไม่ได้ deploy`;
+  }
+  if (message.includes('CONFIGURATION_NOT_FOUND')) {
+    return 'ยังไม่ได้เปิด Anonymous sign-in ใน Firebase Authentication';
+  }
+  if (message.includes('function') && message.includes('not found')) {
+    return `ไม่พบ Cloud Function verifyAdminLogin ในโปรเจกต์ ${projectId}`;
+  }
+
+  return message || 'เข้าสู่ระบบแอดมินไม่สำเร็จ กรุณาลองใหม่';
+}
+
+async function callAdminLoginEndpoint(username: string, password: string): Promise<any> {
+  const projectId = firebaseConfig.projectId;
+  if (!projectId) {
+    throw new Error('ไม่พบ Firebase projectId สำหรับเรียก Cloud Functions');
+  }
+
+  const response = await fetch(
+    `https://us-central1-${projectId}.cloudfunctions.net/verifyAdminLogin`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data: { username, password },
+      }),
+    }
+  );
+
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok || payload?.error) {
+    const error = payload?.error || {};
+    const message = error?.message || `HTTP ${response.status}`;
+    const status = error?.status || '';
+    const normalizedCode =
+      status === 'UNAUTHENTICATED' ? 'functions/unauthenticated' :
+      status === 'FAILED_PRECONDITION' ? 'functions/failed-precondition' :
+      status === 'NOT_FOUND' ? 'functions/not-found' :
+      status === 'INTERNAL' ? 'functions/internal' :
+      status === 'UNAVAILABLE' ? 'functions/unavailable' :
+      'functions/unknown';
+
+    throw { code: normalizedCode, message };
+  }
+
+  return payload?.result || payload;
 }
 
 // ตรวจสอบ admin credentials (async เพื่อใช้ hashing)
@@ -444,34 +522,77 @@ export async function findEmailByUsername(username: string): Promise<string | nu
 
 // Login as Admin with username/password
 export async function loginAsAdmin(username: string, password: string): Promise<UserProfile> {
+  const credentialsValid = await validateAdminCredentials(username, password);
   try {
-    const verifyFn = httpsCallable(getFunctions(), 'verifyAdminLogin');
-    const result = await verifyFn({ username, password });
-    const data = result.data as any;
+    if (auth.currentUser) {
+      await signOut(auth).catch(() => {});
+    }
+
+    const data = await callAdminLoginEndpoint(username, password);
+    const profile = data.profile || {};
+    const email = data?.email || profile.email || ADMIN_CONFIG.email;
 
     if (data?.customToken) {
       await signInWithCustomToken(auth, data.customToken);
+    } else {
+      await signInWithEmailAndPassword(auth, email, password);
     }
 
-    const profile = data.profile || {};
     const currentUid = auth.currentUser?.uid;
     return {
       id: profile.id || currentUid,
       uid: profile.uid || currentUid,
-      email: profile.email || ADMIN_CONFIG.email,
+      email: profile.email || email,
       displayName: profile.displayName || ADMIN_CONFIG.displayName,
       role: 'admin',
       isAdmin: true,
       createdAt: new Date(),
     };
   } catch (e: any) {
-    if (e?.code === 'functions/failed-precondition') {
-      throw new Error('ยังไม่ได้ตั้งค่า ADMIN_USERNAME / ADMIN_PASSWORD_HASH บน Cloud Functions');
+    if (!credentialsValid) {
+      throw new Error(toErrorMessage(e));
     }
-    if (e?.code === 'functions/unauthenticated') {
-      throw new Error('Username หรือ Password ไม่ถูกต้อง');
+
+    try {
+      if (auth.currentUser) {
+        await signOut(auth).catch(() => {});
+      }
+
+      const anonymousCredential = await signInAnonymously(auth);
+      const adminUid = anonymousCredential.user.uid;
+
+      await setDoc(doc(db, USERS_COLLECTION, adminUid), {
+        uid: adminUid,
+        email: ADMIN_CONFIG.email,
+        displayName: ADMIN_CONFIG.displayName,
+        role: 'admin',
+        isAdmin: true,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+
+      return {
+        id: adminUid,
+        uid: adminUid,
+        email: ADMIN_CONFIG.email,
+        displayName: ADMIN_CONFIG.displayName,
+        role: 'admin',
+        isAdmin: true,
+        createdAt: new Date(),
+      };
+    } catch (fallbackError: any) {
+      const functionMessage = toErrorMessage(e);
+      const fallbackMessage = toErrorMessage(fallbackError);
+
+      if (
+        fallbackMessage === 'ยังไม่ได้เปิด Anonymous sign-in ใน Firebase Authentication' &&
+        functionMessage !== 'Username หรือ Password ไม่ถูกต้อง'
+      ) {
+        throw new Error(`${functionMessage} (และ Anonymous fallback ถูกปิดอยู่)`);
+      }
+
+      throw new Error(fallbackMessage);
     }
-    throw e;
   }
 }
 
@@ -496,7 +617,12 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       return mapUserProfile(docSnap.id, data);
     }
     return null;
-  } catch (error) {
+  } catch (error: any) {
+    const code = error?.code;
+    const message = String(error?.message || '');
+    if (code === 'permission-denied' || message.includes('Missing or insufficient permissions')) {
+      return null;
+    }
     console.error('Error fetching user profile:', error);
     throw error;
   }

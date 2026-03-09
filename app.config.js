@@ -1,6 +1,7 @@
 // app.config.js — replaces app.json for EAS builds
 // Reads .env values and embeds them into extra + configures all native plugins
 require('dotenv').config();
+const fs = require('fs');
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
   || 'AIzaSyAJVBDwB2sl0XJc3FTvLi_l7lsOGgHBfwc';
@@ -14,6 +15,9 @@ const FIREBASE = {
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID|| '427547114323',
   appId:             process.env.EXPO_PUBLIC_FIREBASE_APP_ID             || '1:427547114323:android:a89c6f0e5659ae8a19bfa6',
 };
+
+const IOS_GOOGLE_SERVICES_FILE = './GoogleService-Info.plist';
+const HAS_IOS_GOOGLE_SERVICES_FILE = fs.existsSync(IOS_GOOGLE_SERVICES_FILE);
 
 module.exports = {
   expo: {
@@ -33,6 +37,9 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.nursego.app',
+      ...(HAS_IOS_GOOGLE_SERVICES_FILE
+        ? { googleServicesFile: IOS_GOOGLE_SERVICES_FILE }
+        : {}),
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSLocationWhenInUseUsageDescription: 'NurseGo ต้องการตำแหน่งเพื่อหางานใกล้คุณ',

@@ -17,6 +17,114 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
 import { Message, Conversation } from '../types';
 import { assertAuthUser, isAuthUser } from './security/authGuards';
+import { getJobById } from './jobService';
+
+export interface ConversationChatAvailability {
+  isLocked: boolean;
+  reason?: string;
+  jobId?: string;
+  jobTitle?: string;
+  jobStatus?: string;
+}
+
+async function getConversationDocOrThrow(conversationId: string) {
+  const conversationRef = doc(db, 'conversations', conversationId);
+  const conversationDoc = await getDoc(conversationRef);
+  if (!conversationDoc.exists()) {
+    throw new Error('ไม่พบการสนทนา');
+  }
+  return { conversationRef, conversationDoc };
+}
+
+function isJobChatLocked(job: any): string | null {
+  if (!job) return 'งานนี้ถูกลบหรือปิดไปแล้ว';
+  const expired = Boolean(job.expiresAt && new Date(job.expiresAt as any) < new Date());
+  if (job.status === 'closed') return 'แชทนี้ถูกปิดเพราะงานปิดรับแล้ว';
+  if (job.status === 'deleted') return 'แชทนี้ถูกปิดเพราะงานถูกลบแล้ว';
+  if (job.status === 'expired' || expired) return 'แชทนี้ถูกปิดเพราะงานหมดอายุแล้ว';
+  return null;
+}
+
+async function assertConversationCanSend(conversationId: string) {
+  const { conversationDoc } = await getConversationDocOrThrow(conversationId);
+  const data = conversationDoc.data();
+  if (!data.jobId) return;
+  const job = await getJobById(data.jobId);
+  const lockReason = isJobChatLocked(job);
+  if (lockReason) {
+    throw new Error(lockReason);
+  }
+}
+
+export async function getConversationChatAvailability(
+  conversationId: string
+): Promise<ConversationChatAvailability> {
+  try {
+    const { conversationDoc } = await getConversationDocOrThrow(conversationId);
+    const data = conversationDoc.data();
+    if (!data.jobId) {
+      return { isLocked: false };
+    }
+    const job = await getJobById(data.jobId);
+    const reason = isJobChatLocked(job);
+    return {
+      isLocked: Boolean(reason),
+      reason: reason || undefined,
+      jobId: data.jobId,
+      jobTitle: job?.title || data.jobTitle,
+      jobStatus: job?.status,
+    };
+  } catch (error: any) {
+    return {
+      isLocked: true,
+      reason: error?.message || 'ไม่สามารถตรวจสอบสถานะแชทได้',
+    };
+  }
+}
+
+async function enrichConversationParticipants(conversations: Conversation[]): Promise<Conversation[]> {
+  const userIds = [...new Set(
+    conversations.flatMap((conversation) =>
+      (conversation.participantDetails || [])
+        .filter((participant) => !participant.photoURL || !participant.displayName)
+        .map((participant) => participant.id)
+    )
+  )];
+
+  if (userIds.length === 0) return conversations;
+
+  const profileEntries = await Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (!userDoc.exists()) return [userId, null] as const;
+        const data = userDoc.data();
+        return [userId, {
+          displayName: data.displayName,
+          photoURL: data.photoURL,
+        }] as const;
+      } catch {
+        return [userId, null] as const;
+      }
+    })
+  );
+
+  const profileMap = new Map(profileEntries);
+
+  return conversations.map((conversation) => ({
+    ...conversation,
+    participantDetails: conversation.participantDetails?.map((participant) => {
+      const profile = profileMap.get(participant.id);
+      if (!profile) return participant;
+
+      return {
+        ...participant,
+        displayName: participant.displayName || participant.name || profile.displayName,
+        photoURL: participant.photoURL || profile.photoURL,
+      };
+    }),
+  }));
+}
 
 // Create or get existing conversation
 export const getOrCreateConversation = async (
@@ -30,6 +138,14 @@ export const getOrCreateConversation = async (
 ): Promise<string> => {
   assertAuthUser(userId, 'เซสชันไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
   try {
+    if (jobId) {
+      const job = await getJobById(jobId);
+      const lockReason = isJobChatLocked(job);
+      if (lockReason) {
+        throw new Error(lockReason);
+      }
+    }
+
     // Check if conversation already exists
     const conversationsRef = collection(db, 'conversations');
     const q = query(
@@ -84,6 +200,7 @@ export const sendMessage = async (
 ): Promise<void> => {
   try {
     assertAuthUser(senderId, 'ไม่สามารถส่งข้อความแทนผู้ใช้อื่นได้');
+    await assertConversationCanSend(conversationId);
 
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
     
@@ -199,7 +316,9 @@ export const subscribeToConversations = (
       return dateB - dateA; // descending
     });
     
-    callback(conversations);
+    enrichConversationParticipants(conversations)
+      .then(callback)
+      .catch(() => callback(conversations));
   }, (error: any) => {
     if (error?.code === 'permission-denied') {
       // Silently ignore — triggered when auth token not yet active (cached user race)
@@ -452,6 +571,7 @@ export const sendImage = async (
 ): Promise<void> => {
   try {
     assertAuthUser(senderId, 'ไม่สามารถส่งรูปแทนผู้ใช้อื่นได้');
+    await assertConversationCanSend(conversationId);
 
     // Convert URI to blob
     const response = await fetch(imageUri);
@@ -508,6 +628,7 @@ export const sendDocument = async (
 ): Promise<void> => {
   try {
     assertAuthUser(senderId, 'ไม่สามารถส่งไฟล์แทนผู้ใช้อื่นได้');
+    await assertConversationCanSend(conversationId);
 
     // Convert URI to blob
     const response = await fetch(documentUri);
@@ -564,6 +685,7 @@ export const sendSavedDocument = async (
   documentType: string
 ): Promise<void> => {
   try {
+    await assertConversationCanSend(conversationId);
     // Send message with saved document link
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
     await addDoc(messagesRef, {

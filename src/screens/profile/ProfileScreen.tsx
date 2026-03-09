@@ -12,13 +12,14 @@ import {
   TextInput,
   RefreshControl,
   Platform,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { KittenButton as Button, Avatar, Card, Loading, ModalContainer, Input, Badge, Divider, ConfirmModal, SuccessModal, ErrorModal, ProfileProgressBar } from '../../components/common';
+import { KittenButton as Button, Avatar, Card, Loading, ModalContainer, Input, Badge, Divider, ConfirmModal, SuccessModal, ErrorModal, ProfileProgressBar, Chip, FirstVisitTip } from '../../components/common';
 import { sendOTP, verifyOTP } from '../../services/otpService';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, POSITIONS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -27,10 +28,27 @@ import { getUserShiftContacts, deleteShiftContact, syncPosterSnapshotToMyPosts }
 import { getUserSubscription } from '../../services/subscriptionService';
 import { getFavoritesCount } from '../../services/favoritesService';
 import { getUnreadNotificationsCount } from '../../services/notificationsService';
+import { getApplicationStats } from '../../services/applicantsService';
 import { getUserVerificationStatus, UserVerificationStatus } from '../../services/verificationService';
 import { uploadProfilePhoto } from '../../services/storageService';
+import { getTargetRating } from '../../services/reviewsService';
+import { STAFF_TYPES } from '../../constants/jobOptions';
 import { ShiftContact, MainTabParamList, RootStackParamList } from '../../types';
 import { formatDate, formatRelativeTime } from '../../utils/helpers';
+import { getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, hasPremiumTag } from '../../utils/verificationTag';
+import {
+  ORG_TYPE_OPTIONS,
+  getCareTypeThaiLabel,
+  getHiringUrgencyThaiLabel,
+  getOrgTypeThaiLabel,
+  getStaffTypeThaiLabel,
+  getThaiLabels,
+  getWorkStyleThaiLabel,
+  HOSPITAL_URGENCY_OPTIONS,
+  NURSE_WORK_STYLE_OPTIONS,
+  OrgType,
+  USER_CARE_TYPE_OPTIONS,
+} from '../../utils/profileLabels';
 
 // ============================================
 // Types
@@ -39,6 +57,21 @@ type ProfileScreenNavigationProp = NativeStackNavigationProp<MainTabParamList, '
 
 interface Props {
   navigation: ProfileScreenNavigationProp;
+}
+
+interface EditProfileForm {
+  displayName: string;
+  phone: string;
+  staffType: string;
+  orgType: OrgType | '';
+  interestedStaffTypes: string[];
+  licenseNumber: string;
+  experience: string;
+  workStyle: string[];
+  careNeeds: string[];
+  hiringUrgency: string;
+  bio: string;
+  province: string;
 }
 
 // ============================================
@@ -71,6 +104,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [modalMessage, setModalMessage] = useState('');
   const [favoritesCount, setFavoritesCount] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [applicantsInterestedCount, setApplicantsInterestedCount] = useState(0);
   // OTP states
   const [otpValue, setOtpValue] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
@@ -81,11 +115,18 @@ export default function ProfileScreen({ navigation }: Props) {
   const [otpResendCountdown, setOtpResendCountdown] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<UserVerificationStatus | null>(null);
   const [userPlan, setUserPlan] = useState<import('../../types').SubscriptionPlan>('free');
-  const [editForm, setEditForm] = useState({
+  const [reviewSummary, setReviewSummary] = useState<{ averageRating: number; totalReviews: number } | null>(null);
+  const [editForm, setEditForm] = useState<EditProfileForm>({
     displayName: '',
     phone: '',
+    staffType: '',
+    orgType: '',
+    interestedStaffTypes: [],
     licenseNumber: '',
     experience: '',
+    workStyle: [],
+    careNeeds: [],
+    hiringUrgency: '',
     bio: '',
     province: '',
   });
@@ -94,6 +135,17 @@ export default function ProfileScreen({ navigation }: Props) {
   const isHospital = user?.role === 'hospital';
   const focusSyncInProgressRef = useRef(false);
   const posterSnapshotSyncDoneRef = useRef(false);
+  const headerBackground = isDark ? colors.surface : colors.primary;
+  const headerTitleColor = isDark ? colors.text : colors.white;
+  const profileStatusBarStyle = isDark ? 'light-content' : 'light-content';
+  const profileHeroBackground = isDark ? colors.backgroundSecondary : colors.primaryBackground;
+  const elevatedSurface = isDark ? colors.card : colors.surface;
+  const menuItemBackground = isDark ? colors.surface : colors.surface;
+  const shopTone = { background: colors.accentLight, text: colors.accentDark, badge: colors.accent };
+  const adminTone = { background: colors.infoLight, text: colors.info };
+  const warningTone = { background: colors.warningLight, border: colors.warning, text: colors.warning };
+  const accentTone = { background: colors.accentLight, border: colors.accent, text: colors.accentDark };
+  const successTone = { background: colors.successLight, text: colors.success };
 
   // Load data when screen is focused
   useFocusEffect(
@@ -133,16 +185,20 @@ export default function ProfileScreen({ navigation }: Props) {
     
     setIsLoading(true);
     try {
-      const [shiftsData, favCount, notifCount, verifyStatus] = await Promise.all([
+      const [shiftsData, favCount, notifCount, verifyStatus, applicantStats] = await Promise.all([
         getUserShiftContacts(user.uid),
         getFavoritesCount(user.uid),
         getUnreadNotificationsCount(user.uid),
         getUserVerificationStatus(user.uid),
+        user.role === 'hospital' ? getApplicationStats(user.uid) : Promise.resolve(null),
       ]);
       setContacts(shiftsData);
       setFavoritesCount(favCount);
       setUnreadNotifications(notifCount);
+      setApplicantsInterestedCount(applicantStats?.interested || 0);
       setVerificationStatus(verifyStatus);
+      const ratingInfo = await getTargetRating(user.uid, 'user');
+      setReviewSummary({ averageRating: ratingInfo.averageRating, totalReviews: ratingInfo.totalReviews });
       try {
         const sub = await getUserSubscription(user.uid);
         setUserPlan(sub?.plan ?? 'free');
@@ -168,8 +224,14 @@ export default function ProfileScreen({ navigation }: Props) {
       setEditForm({
         displayName: user.displayName || '',
         phone: user.phone || '',
+        staffType: user.staffType || '',
+        orgType: (user.orgType as OrgType | undefined) || '',
+        interestedStaffTypes: user.interestedStaffTypes || [],
         licenseNumber: user.licenseNumber || '',
         experience: user.experience?.toString() || '',
+        workStyle: user.workStyle || [],
+        careNeeds: user.careNeeds || user.careTypes || [],
+        hiringUrgency: user.hiringUrgency || '',
         bio: user.bio || '',
         province: (user as any).location?.province || (user as any).preferredProvince || '',
       });
@@ -207,10 +269,10 @@ export default function ProfileScreen({ navigation }: Props) {
   // Get status config for contact history
   const getContactStatusConfig = (status: string) => {
     switch (status) {
-      case 'confirmed': return { label: 'ยืนยันแล้ว', color: '#10B981', bg: '#ECFDF5', icon: 'checkmark-circle' as const };
-      case 'cancelled': return { label: 'ยกเลิก', color: '#EF4444', bg: '#FEF2F2', icon: 'close-circle' as const };
-      case 'expired': return { label: 'โพสต์ถูกลบ', color: '#94A3B8', bg: '#F1F5F9', icon: 'archive-outline' as const };
-      default: return { label: 'สนใจ', color: '#F59E0B', bg: '#FFFBEB', icon: 'star-outline' as const };
+      case 'confirmed': return { label: 'ยืนยันแล้ว', color: colors.success, bg: colors.successLight, icon: 'checkmark-circle' as const };
+      case 'cancelled': return { label: 'ยกเลิก', color: colors.error, bg: colors.errorLight, icon: 'close-circle' as const };
+      case 'expired': return { label: 'โพสต์ถูกลบ', color: colors.textMuted, bg: colors.borderLight, icon: 'archive-outline' as const };
+      default: return { label: 'สนใจ', color: colors.warning, bg: colors.warningLight, icon: 'star-outline' as const };
     }
   };
 
@@ -334,6 +396,15 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
+  const toggleEditArrayValue = (field: 'interestedStaffTypes' | 'workStyle' | 'careNeeds', value: string) => {
+    setEditForm((prev) => ({
+      ...prev,
+      [field]: prev[field].includes(value)
+        ? prev[field].filter((item) => item !== value)
+        : [...prev[field], value],
+    }));
+  };
+
   // Handle save profile
   const handleSaveProfile = async () => {
     const phoneChanged = editForm.phone.trim() !== (user?.phone || '').trim();
@@ -348,11 +419,40 @@ export default function ProfileScreen({ navigation }: Props) {
     try {
       const updates: any = {
         displayName: editForm.displayName,
-        experience: parseInt(editForm.experience) || 0,
         bio: editForm.bio,
         location: { province: editForm.province.trim(), district: (user as any)?.location?.district || '' },
         preferredProvince: editForm.province.trim(),
       };
+
+      if (user?.role === 'nurse') {
+        updates.staffType = editForm.staffType || null;
+        updates.staffTypes = editForm.staffType ? [editForm.staffType] : [];
+        updates.experience = parseInt(editForm.experience) || 0;
+        updates.workStyle = editForm.workStyle;
+        updates.orgType = null;
+        updates.interestedStaffTypes = [];
+        updates.careNeeds = [];
+        updates.careTypes = [];
+        updates.hiringUrgency = null;
+      } else if (user?.role === 'hospital') {
+        updates.staffType = null;
+        updates.staffTypes = [];
+        updates.orgType = editForm.orgType || null;
+        updates.interestedStaffTypes = editForm.interestedStaffTypes;
+        updates.hiringUrgency = editForm.hiringUrgency || null;
+        updates.workStyle = [];
+        updates.careNeeds = [];
+        updates.careTypes = [];
+      } else {
+        updates.staffType = null;
+        updates.staffTypes = [];
+        updates.orgType = null;
+        updates.interestedStaffTypes = editForm.interestedStaffTypes;
+        updates.careNeeds = editForm.careNeeds;
+        updates.careTypes = editForm.careNeeds;
+        updates.workStyle = [];
+        updates.hiringUrgency = null;
+      }
 
       // Only update phone if verified (or unchanged)
       if (!phoneChanged || phoneStep === 'verified') {
@@ -388,6 +488,10 @@ export default function ProfileScreen({ navigation }: Props) {
   // Legacy OTP confirm (kept for backward compat)
   const handleConfirmOTP = handleVerifyOTP;
 
+  const workStyleLabels = getThaiLabels((user as any)?.workStyle || [], getWorkStyleThaiLabel);
+  const interestedStaffTypeLabels = getThaiLabels((user as any)?.interestedStaffTypes || [], getStaffTypeThaiLabel);
+  const careNeedLabels = getThaiLabels((user as any)?.careNeeds || (user as any)?.careTypes || [], getCareTypeThaiLabel);
+
   // Get status badge
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -412,8 +516,8 @@ export default function ProfileScreen({ navigation }: Props) {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.guestContainer}>
           <Ionicons name="person-circle-outline" size={80} color={colors.border} />
-          <Text style={styles.guestTitle}>ยังไม่ได้เข้าสู่ระบบ</Text>
-          <Text style={styles.guestDescription}>
+          <Text style={[styles.guestTitle, { color: colors.text }]}>ยังไม่ได้เข้าสู่ระบบ</Text>
+          <Text style={[styles.guestDescription, { color: colors.textSecondary }]}>
             เข้าสู่ระบบเพื่อจัดการโปรไฟล์และดูประวัติการสมัครงาน
           </Text>
           <Button
@@ -429,8 +533,14 @@ export default function ProfileScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar
+        barStyle={profileStatusBarStyle}
+        backgroundColor={headerBackground}
+        translucent={false}
+      />
       <ScrollView
+        style={{ backgroundColor: colors.background }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -440,44 +550,55 @@ export default function ProfileScreen({ navigation }: Props) {
           />
         }
       >
+        {user?.uid && user.onboardingCompleted && (
+          <FirstVisitTip
+            storageKey={`first_tip_profile_${user.uid}`}
+            icon="person-circle-outline"
+            title="โปรไฟล์ที่ครบช่วยให้ตัดสินใจง่ายขึ้น"
+            description="หน้านี้ใช้จัดการข้อมูลส่วนตัว รีวิว การยืนยันตัวตน รายการโปรด และประกาศของคุณ ถ้าอยากใช้งานได้คุ้มสุด ให้เริ่มจากเติมโปรไฟล์และเช็กสถานะการยืนยันตัวตน"
+            actionLabel="ดูคู่มือ"
+            onAction={() => nav.navigate('OnboardingSurvey')}
+            containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: 2 }}
+          />
+        )}
+
         {/* Header */}
-        <View style={[styles.header, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 8, backgroundColor: colors.primary }]}> 
-          <Text style={[styles.headerTitle, { fontWeight: 'bold', fontSize: 22, color: '#fff' }]}>โปรไฟล์</Text>
+        <View style={[styles.header, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 8, backgroundColor: headerBackground }]}> 
+          <Text style={[styles.headerTitle, { fontWeight: 'bold', fontSize: 22, color: headerTitleColor }]}>โปรไฟล์</Text>
           <Button
             onPress={handleLogout}
             variant="danger"
             size="small"
             style={{ paddingHorizontal: 14, paddingVertical: 6 }}
           >
-            <Ionicons name="log-out-outline" size={18} color="#fff" style={{ marginRight: 4 }} />
-            <Text style={{ color: '#fff', fontWeight: '600' }}>ออกจากระบบ</Text>
+            <Ionicons name="log-out-outline" size={18} color={colors.white} style={{ marginRight: 4 }} />
+            <Text style={{ color: colors.white, fontWeight: '600' }}>ออกจากระบบ</Text>
           </Button>
         </View>
 
         {/* Profile Card Modern */}
         <Card style={{ alignItems: 'center', borderRadius: 20, margin: 0, marginBottom: 18, padding: 0, overflow: 'hidden', backgroundColor: colors.surface }}>
-          <View style={{ width: '100%', alignItems: 'center', padding: 24, backgroundColor: colors.primary + '10' }}>
+          <View style={{ width: '100%', alignItems: 'center', padding: 24, backgroundColor: profileHeroBackground }}>
             <TouchableOpacity onPress={handleChangePhoto} disabled={isUploadingPhoto} style={{ marginBottom: 10 }}>
               <Avatar uri={user?.photoURL} name={user?.displayName || 'User'} size={96} />
               <View style={{ position: 'absolute', bottom: 0, right: 0, backgroundColor: colors.primary, borderRadius: 16, padding: 4 }}>
-                <Ionicons name={isUploadingPhoto ? 'cloud-upload-outline' : 'camera-outline'} size={18} color="#fff" />
+                <Ionicons name={isUploadingPhoto ? 'cloud-upload-outline' : 'camera-outline'} size={18} color={colors.white} />
               </View>
             </TouchableOpacity>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text style={{ fontWeight: 'bold', fontSize: 20, color: colors.text, marginBottom: 2 }}>{user?.displayName}</Text>
-              {userPlan !== 'free' && (
-                <View style={{ marginLeft: 8, backgroundColor: COLORS.premium, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
-                  <Text style={{ color: COLORS.black, fontWeight: '700', fontSize: 12 }}>Premium</Text>
+              {hasPremiumTag(userPlan) && (
+                <View style={{ marginLeft: 8, backgroundColor: getPremiumTagColors().backgroundColor, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 }}>
+                  <Text style={{ color: getPremiumTagColors().textColor, fontWeight: '700', fontSize: 12 }}>{getPremiumTagText(userPlan)}</Text>
                 </View>
               )}
             </View>
             <Text style={{ color: colors.textMuted, fontSize: 15 }}>{user?.email}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
-              <Badge
-                text={user?.role === 'hospital' ? 'โรงพยาบาล' : user?.role === 'admin' ? 'แอดมิน' : user?.role === 'nurse' || user?.isVerified ? 'พยาบาล ✓' : 'ผู้ใช้งานทั่วไป'}
-                variant={user?.isVerified ? 'success' : user?.role === 'admin' ? 'info' : 'primary'}
-                style={{ marginRight: 8 }}
-              />
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: getRoleTagColors(user?.role).backgroundColor, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, marginRight: 8 }}>
+                <Ionicons name={getRoleIconName(user?.role)} size={14} color={getRoleTagColors(user?.role).textColor} style={{ marginRight: 4 }} />
+                <Text style={{ color: getRoleTagColors(user?.role).textColor, fontWeight: '700', fontSize: 12 }}>{getRoleLabel(user?.role, (user as any)?.orgType, (user as any)?.staffType)}</Text>
+              </View>
               {user?.isVerified && <Ionicons name="shield-checkmark" size={18} color={colors.success} style={{ marginLeft: 2 }} />}
             </View>
             <Button
@@ -495,6 +616,80 @@ export default function ProfileScreen({ navigation }: Props) {
         {/* Profile Progress Bar */}
         <ProfileProgressBar user={user as any} onPress={() => setShowEditModal(true)} />
 
+        <Card style={{ borderRadius: 16, marginBottom: 18, padding: 0, overflow: 'hidden', backgroundColor: elevatedSurface }}>
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={() => nav.navigate('OnboardingSurvey')}
+            style={{
+              paddingHorizontal: 14,
+              paddingVertical: 11,
+              flexDirection: 'row',
+              alignItems: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 14,
+                backgroundColor: colors.primaryBackground,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 12,
+              }}
+            >
+              <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '800', marginBottom: 1 }}>
+                คู่มือเริ่มต้นใช้งาน
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={2}>
+                {user?.onboardingCompleted
+                  ? 'ดูภาพรวมการใช้ Home, โพสต์, แชท และโปรไฟล์อีกครั้ง'
+                  : 'เริ่มตั้งค่าและดูฟีเจอร์สำคัญตาม role ของคุณ'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.primary} />
+          </TouchableOpacity>
+
+          <View style={{ height: 1, backgroundColor: colors.borderLight, marginLeft: 68 }} />
+
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={() => nav.navigate('MyPosts')}
+            style={{
+              paddingHorizontal: 14,
+              paddingVertical: 11,
+              flexDirection: 'row',
+              alignItems: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 14,
+                backgroundColor: colors.primaryBackground,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 12,
+              }}
+            >
+              <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '800', marginBottom: 1 }}>
+                ประกาศของฉัน
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                จัดการโพสต์และดูสถานะประกาศของคุณ
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.primary} />
+          </TouchableOpacity>
+        </Card>
+
         {/* Profile Info Modern */}
         <Card style={{ borderRadius: 16, marginBottom: 18 }}>
           <Text style={[styles.sectionTitle, { marginBottom: 10 }]}>ข้อมูลส่วนตัว</Text>
@@ -506,20 +701,79 @@ export default function ProfileScreen({ navigation }: Props) {
                 <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{user?.phone || 'ยังไม่ระบุ'}</Text>
               </View>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Ionicons name="medkit-outline" size={20} color={colors.primary} />
-              <View>
-                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>เลขใบประกอบวิชาชีพ</Text>
-                <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{user?.licenseNumber || 'ยังไม่ระบุ'}</Text>
-              </View>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
-              <View>
-                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>ประสบการณ์</Text>
-                <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{user?.experience ? `${user.experience} ปี` : 'ยังไม่ระบุ'}</Text>
-              </View>
-            </View>
+            {user?.role === 'nurse' ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="medkit-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>วิชาชีพหลัก</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{getStaffTypeThaiLabel((user as any)?.staffType)}</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="ribbon-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>เลขใบประกอบวิชาชีพ</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{user?.licenseNumber || 'ยังไม่ระบุ'}</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>ประสบการณ์</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{user?.experience ? `${user.experience} ปี` : 'ยังไม่ระบุ'}</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+                  <Ionicons name="options-outline" size={20} color={colors.primary} style={{ marginTop: 2 }} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>รูปแบบงานที่สนใจ</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{workStyleLabels.length > 0 ? workStyleLabels.join(', ') : 'ยังไม่ระบุ'}</Text>
+                  </View>
+                </View>
+              </>
+            ) : user?.role === 'hospital' ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="business-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>ประเภทองค์กร</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{getOrgTypeThaiLabel((user as any)?.orgType)}</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="people-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>บุคลากรที่กำลังมองหา</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{interestedStaffTypeLabels.length > 0 ? interestedStaffTypeLabels.join(', ') : 'ยังไม่ระบุ'}</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="flash-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>ความเร่งด่วน</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{getHiringUrgencyThaiLabel((user as any)?.hiringUrgency)}</Text>
+                  </View>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="people-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>บุคลากรที่ต้องการติดต่อ</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{interestedStaffTypeLabels.length > 0 ? interestedStaffTypeLabels.join(', ') : 'ยังไม่ระบุ'}</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="heart-outline" size={20} color={colors.primary} />
+                  <View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>ลักษณะการดูแลที่ต้องการ</Text>
+                    <Text style={{ color: colors.text, fontWeight: '500', fontSize: 15 }}>{careNeedLabels.length > 0 ? careNeedLabels.join(', ') : 'ยังไม่ระบุ'}</Text>
+                  </View>
+                </View>
+              </>
+            )}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Ionicons name="location-outline" size={20} color={colors.primary} />
               <View>
@@ -547,7 +801,7 @@ export default function ProfileScreen({ navigation }: Props) {
               <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>ประวัติการติดต่องาน</Text>
               {contacts.length > 0 && (
                 <View style={{ backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 }}>
-                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{contacts.length}</Text>
+                  <Text style={{ color: colors.white, fontSize: 11, fontWeight: '700' }}>{contacts.length}</Text>
                 </View>
               )}
             </View>
@@ -586,16 +840,16 @@ export default function ProfileScreen({ navigation }: Props) {
                     }}
                     style={[
                       {
-                        backgroundColor: colors.surface,
+                        backgroundColor: elevatedSurface,
                         borderRadius: 14,
                         padding: 14,
                         marginBottom: 8,
                         flexDirection: 'row',
                         alignItems: 'center',
                         borderWidth: 1,
-                        borderColor: contact.status === 'expired' ? '#E2E8F0' : statusConfig.bg,
+                        borderColor: contact.status === 'expired' ? colors.border : statusConfig.bg,
                         opacity: isDeleting ? 0.5 : contact.status === 'expired' ? 0.65 : 1,
-                        shadowColor: '#000',
+                        shadowColor: colors.black,
                         shadowOffset: { width: 0, height: 1 },
                         shadowOpacity: 0.04,
                         shadowRadius: 6,
@@ -661,77 +915,87 @@ export default function ProfileScreen({ navigation }: Props) {
         <Card style={{ borderRadius: 16, marginBottom: 18 }}>
           <Text style={[styles.linksSectionTitle, { marginBottom: 8 }]}>เมนู</Text>
           <View style={{ gap: 2 }}>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Favorites')}>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Favorites')}>
               <Ionicons name="heart-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>งานที่บันทึกไว้</Text>
+              <Text style={[styles.linkText, { color: colors.text }]}>งานที่บันทึกไว้</Text>
               {favoritesCount > 0 && (
                 <View style={[styles.countBadge, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.countText}>{favoritesCount}</Text>
+                  <Text style={[styles.countText, { color: colors.white }]}>{favoritesCount}</Text>
                 </View>
               )}
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Notifications')}>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Notifications')}>
               <Ionicons name="notifications-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>การแจ้งเตือน</Text>
+              <Text style={[styles.linkText, { color: colors.text }]}>การแจ้งเตือน</Text>
               {unreadNotifications > 0 && (
                 <View style={[styles.countBadge, { backgroundColor: colors.danger }]}>
-                  <Text style={styles.countText}>{unreadNotifications}</Text>
+                  <Text style={[styles.countText, { color: colors.white }]}>{unreadNotifications}</Text>
                 </View>
               )}
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Documents')}>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Documents')}>
               <Ionicons name="document-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>เอกสารของฉัน</Text>
+              <Text style={[styles.linkText, { color: colors.text }]}>เอกสารของฉัน</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Verification')}>
-              <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>ยืนยันตัวตนพยาบาล</Text>
-              {verificationStatus?.isVerified ? (
-                <View style={[styles.countBadge, { backgroundColor: colors.success }]}>
-                  <Ionicons name="checkmark" size={14} color="#fff" />
-                </View>
-              ) : verificationStatus?.pendingRequest ? (
-                <View style={[styles.countBadge, { backgroundColor: colors.warning }]}>
-                  <Text style={styles.countText}>รอ</Text>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Reviews', { targetUserId: user?.uid, targetName: user?.displayName, targetRole: user?.role })}>
+              <Ionicons name="star-outline" size={20} color={colors.primary} />
+              <Text style={[styles.linkText, { color: colors.text }]}>รีวิวของฉัน</Text>
+              {reviewSummary?.totalReviews ? (
+                <View style={[styles.countBadge, { backgroundColor: colors.warning }]}> 
+                  <Text style={[styles.countText, { color: colors.textInverse }]}>{reviewSummary.totalReviews}</Text>
                 </View>
               ) : null}
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('MyPosts')}>
-              <Ionicons name="list-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>ประกาศของฉัน</Text>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Verification')}>
+              <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
+              <Text style={[styles.linkText, { color: colors.text }]}>ยืนยันตัวตนพยาบาล</Text>
+              {verificationStatus?.isVerified ? (
+                <View style={[styles.countBadge, { backgroundColor: colors.success }]}>
+                  <Ionicons name="checkmark" size={14} color={colors.white} />
+                </View>
+              ) : verificationStatus?.pendingRequest ? (
+                <View style={[styles.countBadge, { backgroundColor: colors.warning }]}>
+                  <Text style={[styles.countText, { color: colors.textInverse }]}>รอ</Text>
+                </View>
+              ) : null}
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: '#FFF8E1', borderRadius: 10 }]} onPress={() => nav.navigate('Shop')}>
-              <Ionicons name="cart-outline" size={20} color="#FF8F00" />
-              <Text style={[styles.linkText, { color: '#FF8F00' }]}>ร้านค้า / ซื้อบริการ</Text>
-              <View style={{ backgroundColor: '#FFD700', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
-                <Text style={{ fontSize: 10, color: '#000', fontWeight: '600' }}>Premium</Text>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: shopTone.background, borderRadius: 10 }]} onPress={() => nav.navigate('Shop')}>
+              <Ionicons name="cart-outline" size={20} color={shopTone.text} />
+              <Text style={[styles.linkText, { color: shopTone.text }]}>ร้านค้า / ซื้อบริการ</Text>
+              <View style={{ backgroundColor: shopTone.badge, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
+                <Text style={{ fontSize: 10, color: colors.textInverse, fontWeight: '600' }}>Premium</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
             {isHospital && (
-              <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Applicants')}>
+              <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Applicants')}>
                 <Ionicons name="people-outline" size={20} color={colors.primary} />
-                <Text style={styles.linkText}>จัดการผู้สมัคร</Text>
+                <Text style={[styles.linkText, { color: colors.text }]}>จัดการผู้สมัคร</Text>
+                {applicantsInterestedCount > 0 && (
+                  <View style={[styles.countBadge, { backgroundColor: colors.warning }]}> 
+                    <Text style={[styles.countText, { color: colors.textInverse }]}>{applicantsInterestedCount > 9 ? '9+' : applicantsInterestedCount}</Text>
+                  </View>
+                )}
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Settings')}>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Settings')}>
               <Ionicons name="settings-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>ตั้งค่า</Text>
+              <Text style={[styles.linkText, { color: colors.text }]}>ตั้งค่า</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkItem, { gap: 12 }]} onPress={() => nav.navigate('Help')}>
+            <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: menuItemBackground, borderRadius: 10 }]} onPress={() => nav.navigate('Help')}>
               <Ionicons name="help-circle-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>ช่วยเหลือ</Text>
+              <Text style={[styles.linkText, { color: colors.text }]}>ช่วยเหลือ</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
             </TouchableOpacity>
             {isAdmin && (
-              <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: '#F3F4F6', borderRadius: 10 }]} onPress={() => nav.navigate('AdminDashboard')}>
+              <TouchableOpacity style={[styles.linkItem, { gap: 12, backgroundColor: adminTone.background, borderRadius: 10 }]} onPress={() => nav.navigate('AdminDashboard')}>
                 <Ionicons name="shield-outline" size={20} color={colors.info} />
                 <Text style={[styles.linkText, { color: colors.info, fontWeight: 'bold' }]}>แผงควบคุม Admin</Text>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
@@ -809,11 +1073,27 @@ export default function ProfileScreen({ navigation }: Props) {
               </View>
             </View>
 
+            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+              <View style={profileEditStyles.fieldIcon}>
+                <Ionicons name="location-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={profileEditStyles.fieldContent}>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
+                <TextInput
+                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
+                  value={editForm.province}
+                  onChangeText={(t) => setEditForm({ ...editForm, province: t })}
+                  placeholder="เช่น กรุงเทพมหานคร"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+            </View>
+
             {/* Phone changed warning */}
             {editForm.phone.trim() !== (user?.phone || '').trim() && editForm.phone.trim() !== '' && phoneStep === 'idle' && (
-              <View style={[profileEditStyles.infoBanner, { backgroundColor: '#FFF8E1', borderColor: '#F59E0B' }]}>
-                <Ionicons name="warning-outline" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
-                <Text style={{ color: '#92400E', fontSize: 13, flex: 1 }}>
+              <View style={[profileEditStyles.infoBanner, { backgroundColor: warningTone.background, borderColor: warningTone.border }]}> 
+                <Ionicons name="warning-outline" size={16} color={warningTone.text} style={{ marginRight: 8 }} />
+                <Text style={{ color: warningTone.text, fontSize: 13, flex: 1 }}>
                   การเปลี่ยนเบอร์โทรศัพท์ต้องยืนยัน OTP ก่อนที่จะบันทึก
                 </Text>
               </View>
@@ -864,8 +1144,8 @@ export default function ProfileScreen({ navigation }: Props) {
                   style={[profileEditStyles.otpConfirmBtn, { backgroundColor: otpLoading || !otpValue ? colors.border : colors.primary }]}
                 >
                   {otpLoading
-                    ? <Text style={{ color: '#fff', fontWeight: '700' }}>กำลังยืนยัน…</Text>
-                    : <Text style={{ color: '#fff', fontWeight: '700' }}>ยืนยันรหัส OTP</Text>
+                    ? <Text style={{ color: colors.white, fontWeight: '700' }}>กำลังยืนยัน…</Text>
+                    : <Text style={{ color: colors.white, fontWeight: '700' }}>ยืนยันรหัส OTP</Text>
                   }
                 </TouchableOpacity>
 
@@ -885,117 +1165,204 @@ export default function ProfileScreen({ navigation }: Props) {
             )}
           </View>
 
-          {/* ── SECTION: ข้อมูลวิชาชีพ ── */}
+          {/* ── SECTION: Role-specific ── */}
           <View style={profileEditStyles.section}>
             <View style={profileEditStyles.sectionHeader}>
-              <View style={[profileEditStyles.sectionDot, { backgroundColor: '#7C3AED' }]} />
-              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>ข้อมูลวิชาชีพ</Text>
+              <View style={[profileEditStyles.sectionDot, { backgroundColor: colors.accent }]} />
+              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>
+                {user?.role === 'nurse' ? 'ข้อมูลวิชาชีพ' : user?.role === 'hospital' ? 'ข้อมูลองค์กร' : 'ข้อมูลการใช้งาน'}
+              </Text>
             </View>
 
-            {/* เลขใบประกอบวิชาชีพ */}
-            <View style={[profileEditStyles.fieldBox, {
-              backgroundColor: colors.surface,
-              borderColor: editForm.licenseNumber !== (user?.licenseNumber || '') && editForm.licenseNumber !== '' ? '#7C3AED' : colors.border,
-            }]}>
-              <View style={profileEditStyles.fieldIcon}>
-                <Ionicons name="ribbon-outline" size={18} color="#7C3AED" />
-              </View>
-              <View style={profileEditStyles.fieldContent}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>เลขใบประกอบวิชาชีพ</Text>
-                  {(user as any)?.licenseVerificationStatus === 'pending' && (
-                    <View style={{ backgroundColor: '#FFF3CD', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                      <Text style={{ color: '#856404', fontSize: 10, fontWeight: '700' }}>⏳ รอตรวจสอบ</Text>
-                    </View>
-                  )}
-                  {(user as any)?.licenseVerificationStatus === 'approved' && (
-                    <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                      <Text style={{ color: '#065F46', fontSize: 10, fontWeight: '700' }}>✓ ยืนยันแล้ว</Text>
-                    </View>
-                  )}
-                  {(user as any)?.licenseVerificationStatus === 'rejected' && (
-                    <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                      <Text style={{ color: '#B91C1C', fontSize: 10, fontWeight: '700' }}>✗ ไม่ผ่าน</Text>
-                    </View>
-                  )}
+            {user?.role === 'nurse' ? (
+              <>
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>วิชาชีพหลัก</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {STAFF_TYPES.map((staff) => (
+                      <Chip
+                        key={staff.code}
+                        label={staff.shortName}
+                        selected={editForm.staffType === staff.code}
+                        onPress={() => setEditForm((prev) => ({ ...prev, staffType: prev.staffType === staff.code ? '' : staff.code }))}
+                      />
+                    ))}
+                  </View>
                 </View>
-                <TextInput
-                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
-                  value={editForm.licenseNumber}
-                  onChangeText={(t) => setEditForm({ ...editForm, licenseNumber: t })}
-                  placeholder="เลขที่ใบอนุญาต เช่น ผ.12345"
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="characters"
-                />
-              </View>
-            </View>
 
-            {/* Pending license display */}
-            {(user as any)?.pendingLicenseNumber && (user as any)?.licenseVerificationStatus === 'pending' && (
-              <View style={[profileEditStyles.infoBanner, { backgroundColor: '#FFF8E1', borderColor: '#F59E0B' }]}>
-                <Ionicons name="time-outline" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
-                <Text style={{ color: '#92400E', fontSize: 12, flex: 1 }}>
-                  เลขที่รอตรวจสอบ: <Text style={{ fontWeight: '700' }}>{(user as any).pendingLicenseNumber}</Text>
-                  {'\n'}จะแสดงบนโปรไฟล์หลังจากได้รับการอนุมัติ
-                </Text>
-              </View>
+                <View style={[profileEditStyles.fieldBox, {
+                  backgroundColor: colors.surface,
+                  borderColor: editForm.licenseNumber !== (user?.licenseNumber || '') && editForm.licenseNumber !== '' ? colors.accent : colors.border,
+                }]}>
+                  <View style={profileEditStyles.fieldIcon}>
+                    <Ionicons name="ribbon-outline" size={18} color={colors.accent} />
+                  </View>
+                  <View style={profileEditStyles.fieldContent}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>เลขใบประกอบวิชาชีพ</Text>
+                      {(user as any)?.licenseVerificationStatus === 'pending' && (
+                        <View style={{ backgroundColor: warningTone.background, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                          <Text style={{ color: warningTone.text, fontSize: 10, fontWeight: '700' }}>⏳ รอตรวจสอบ</Text>
+                        </View>
+                      )}
+                      {(user as any)?.licenseVerificationStatus === 'approved' && (
+                        <View style={{ backgroundColor: successTone.background, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                          <Text style={{ color: successTone.text, fontSize: 10, fontWeight: '700' }}>✓ ยืนยันแล้ว</Text>
+                        </View>
+                      )}
+                      {(user as any)?.licenseVerificationStatus === 'rejected' && (
+                        <View style={{ backgroundColor: colors.errorLight, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                          <Text style={{ color: colors.error, fontSize: 10, fontWeight: '700' }}>✗ ไม่ผ่าน</Text>
+                        </View>
+                      )}
+                    </View>
+                    <TextInput
+                      style={[profileEditStyles.fieldInput, { color: colors.text }]}
+                      value={editForm.licenseNumber}
+                      onChangeText={(t) => setEditForm({ ...editForm, licenseNumber: t })}
+                      placeholder="เลขที่ใบอนุญาต เช่น ผ.12345"
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="characters"
+                    />
+                  </View>
+                </View>
+
+                {(user as any)?.pendingLicenseNumber && (user as any)?.licenseVerificationStatus === 'pending' && (
+                  <View style={[profileEditStyles.infoBanner, { backgroundColor: warningTone.background, borderColor: warningTone.border }]}> 
+                    <Ionicons name="time-outline" size={16} color={warningTone.text} style={{ marginRight: 8 }} />
+                    <Text style={{ color: warningTone.text, fontSize: 12, flex: 1 }}>
+                      เลขที่รอตรวจสอบ: <Text style={{ fontWeight: '700' }}>{(user as any).pendingLicenseNumber}</Text>
+                      {'\n'}จะแสดงบนโปรไฟล์หลังจากได้รับการอนุมัติ
+                    </Text>
+                  </View>
+                )}
+
+                {editForm.licenseNumber.trim() !== (user?.licenseNumber || '').trim() && editForm.licenseNumber.trim() !== '' && (
+                  <View style={[profileEditStyles.infoBanner, { backgroundColor: accentTone.background, borderColor: accentTone.border }]}> 
+                    <Ionicons name="information-circle-outline" size={16} color={accentTone.text} style={{ marginRight: 8 }} />
+                    <Text style={{ color: accentTone.text, fontSize: 12, flex: 1 }}>
+                      เลขใบประกอบวิชาชีพใหม่จะถูกส่งเพื่อรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์
+                    </Text>
+                  </View>
+                )}
+
+                <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+                  <View style={profileEditStyles.fieldIcon}>
+                    <Ionicons name="briefcase-outline" size={18} color={colors.success} />
+                  </View>
+                  <View style={profileEditStyles.fieldContent}>
+                    <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>ประสบการณ์ทำงาน (ปี)</Text>
+                    <TextInput
+                      style={[profileEditStyles.fieldInput, { color: colors.text }]}
+                      value={editForm.experience}
+                      onChangeText={(t) => setEditForm({ ...editForm, experience: t.replace(/[^0-9]/g, '') })}
+                      placeholder="0"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="number-pad"
+                    />
+                  </View>
+                </View>
+
+                <View style={{ marginBottom: 4 }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>รูปแบบงานที่สนใจ</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {NURSE_WORK_STYLE_OPTIONS.map((option) => (
+                      <Chip
+                        key={option.key}
+                        label={option.label}
+                        selected={editForm.workStyle.includes(option.key)}
+                        onPress={() => toggleEditArrayValue('workStyle', option.key)}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </>
+            ) : user?.role === 'hospital' ? (
+              <>
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>ประเภทองค์กร</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {ORG_TYPE_OPTIONS.map((option) => (
+                      <Chip
+                        key={option.code}
+                        label={option.label}
+                        selected={editForm.orgType === option.code}
+                        onPress={() => setEditForm((prev) => ({ ...prev, orgType: prev.orgType === option.code ? '' : option.code }))}
+                      />
+                    ))}
+                  </View>
+                </View>
+
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>บุคลากรที่กำลังมองหา</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {STAFF_TYPES.map((staff) => (
+                      <Chip
+                        key={staff.code}
+                        label={staff.shortName}
+                        selected={editForm.interestedStaffTypes.includes(staff.code)}
+                        onPress={() => toggleEditArrayValue('interestedStaffTypes', staff.code)}
+                      />
+                    ))}
+                  </View>
+                </View>
+
+                <View style={{ marginBottom: 4 }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>ความเร่งด่วนในการรับสมัคร</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {HOSPITAL_URGENCY_OPTIONS.map((option) => (
+                      <Chip
+                        key={option.key}
+                        label={option.label}
+                        selected={editForm.hiringUrgency === option.key}
+                        onPress={() => setEditForm((prev) => ({ ...prev, hiringUrgency: prev.hiringUrgency === option.key ? '' : option.key }))}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>บุคลากรที่ต้องการติดต่อ</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {STAFF_TYPES.map((staff) => (
+                      <Chip
+                        key={staff.code}
+                        label={staff.shortName}
+                        selected={editForm.interestedStaffTypes.includes(staff.code)}
+                        onPress={() => toggleEditArrayValue('interestedStaffTypes', staff.code)}
+                      />
+                    ))}
+                  </View>
+                </View>
+
+                <View style={{ marginBottom: 4 }}>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>ลักษณะการดูแลที่ต้องการ</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {USER_CARE_TYPE_OPTIONS.map((option) => (
+                      <Chip
+                        key={option.key}
+                        label={option.label}
+                        selected={editForm.careNeeds.includes(option.key)}
+                        onPress={() => toggleEditArrayValue('careNeeds', option.key)}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </>
             )}
-
-            {/* License changed info banner */}
-            {editForm.licenseNumber.trim() !== (user?.licenseNumber || '').trim() && editForm.licenseNumber.trim() !== '' && (
-              <View style={[profileEditStyles.infoBanner, { backgroundColor: '#EDE9FE', borderColor: '#7C3AED' }]}>
-                <Ionicons name="information-circle-outline" size={16} color="#7C3AED" style={{ marginRight: 8 }} />
-                <Text style={{ color: '#4C1D95', fontSize: 12, flex: 1 }}>
-                  เลขใบประกอบวิชาชีพใหม่จะถูกส่งเพื่อรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์
-                </Text>
-              </View>
-            )}
-
-            {/* ประสบการณ์ */}
-            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={profileEditStyles.fieldIcon}>
-                <Ionicons name="briefcase-outline" size={18} color="#059669" />
-              </View>
-              <View style={profileEditStyles.fieldContent}>
-                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>ประสบการณ์ทำงาน (ปี)</Text>
-                <TextInput
-                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
-                  value={editForm.experience}
-                  onChangeText={(t) => setEditForm({ ...editForm, experience: t.replace(/[^0-9]/g, '') })}
-                  placeholder="0"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="number-pad"
-                />
-              </View>
-            </View>
-
-            {/* จังหวัด */}
-            <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={profileEditStyles.fieldIcon}>
-                <Ionicons name="location-outline" size={18} color="#0EA5E9" />
-              </View>
-              <View style={profileEditStyles.fieldContent}>
-                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
-                <TextInput
-                  style={[profileEditStyles.fieldInput, { color: colors.text }]}
-                  value={editForm.province}
-                  onChangeText={(t) => setEditForm({ ...editForm, province: t })}
-                  placeholder="เช่น กรุงเทพมหานคร"
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-            </View>
           </View>
 
           {/* ── SECTION: เกี่ยวกับฉัน ── */}
           <View style={profileEditStyles.section}>
             <View style={profileEditStyles.sectionHeader}>
-              <View style={[profileEditStyles.sectionDot, { backgroundColor: '#0EA5E9' }]} />
+              <View style={[profileEditStyles.sectionDot, { backgroundColor: colors.primary }]} />
               <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>เกี่ยวกับฉัน</Text>
             </View>
             <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border, alignItems: 'flex-start', minHeight: 100 }]}>
               <View style={[profileEditStyles.fieldIcon, { marginTop: 10 }]}>
-                <Ionicons name="chatbubble-ellipses-outline" size={18} color="#0EA5E9" />
+                <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
               </View>
               <View style={[profileEditStyles.fieldContent, { paddingTop: 10 }]}>
                 <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 4 }]}>บรรยายตัวเอง</Text>
@@ -1032,12 +1399,12 @@ export default function ProfileScreen({ navigation }: Props) {
             }]}
           >
             {isAuthLoading
-              ? <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>กำลังบันทึก…</Text>
+              ? <Text style={{ color: colors.white, fontWeight: '700', fontSize: 16 }}>กำลังบันทึก…</Text>
               : phoneStep === 'verify' || phoneStep === 'sending'
                 ? <Text style={{ color: colors.textMuted, fontWeight: '600', fontSize: 14 }}>ยืนยัน OTP ก่อนบันทึก</Text>
                 : editForm.phone.trim() !== (user?.phone || '').trim() && editForm.phone.trim() !== '' && phoneStep === 'idle'
-                  ? <><Ionicons name="shield-outline" size={16} color="#fff" style={{ marginRight: 6 }} /><Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>ขอ OTP & บันทึก</Text></>
-                  : <><Ionicons name="checkmark-circle-outline" size={16} color="#fff" style={{ marginRight: 6 }} /><Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>บันทึกข้อมูล</Text></>
+                  ? <><Ionicons name="shield-outline" size={16} color={colors.white} style={{ marginRight: 6 }} /><Text style={{ color: colors.white, fontWeight: '700', fontSize: 15 }}>ขอ OTP & บันทึก</Text></>
+                  : <><Ionicons name="checkmark-circle-outline" size={16} color={colors.white} style={{ marginRight: 6 }} /><Text style={{ color: colors.white, fontWeight: '700', fontSize: 15 }}>บันทึกข้อมูล</Text></>
             }
           </TouchableOpacity>
         </View>

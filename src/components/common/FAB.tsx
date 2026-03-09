@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZES } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 
 interface FABAction {
   icon: string;
@@ -42,6 +43,7 @@ export default function FAB({
   style,
   badge = null,
 }: FABProps) {
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
   const anim = useRef(new Animated.Value(0)).current;
@@ -155,15 +157,19 @@ export default function FAB({
                 android_ripple={{ color: 'rgba(0,0,0,0.08)' }}
                 style={({ pressed }) => [
                   styles.actionPill,
+                  {
+                    backgroundColor: colors.surface,
+                    shadowColor: isDark ? '#000000' : '#0F172A',
+                  },
                   { opacity: pressed ? 0.85 : 1 },
                 ]}
               >
                 {/* Icon circle */}
-                <View style={[styles.actionIconCircle, { backgroundColor: a.color || COLORS.primary }]}>
-                  <Ionicons name={a.icon as any} size={20} color="#fff" />
+                <View style={[styles.actionIconCircle, { backgroundColor: a.color || colors.primary }]}> 
+                  <Ionicons name={a.icon as any} size={20} color={colors.white} />
                 </View>
                 {/* Label */}
-                <Text style={styles.actionLabel}>{a.label}</Text>
+                <Text style={[styles.actionLabel, { color: colors.text }]}>{a.label}</Text>
               </Pressable>
             </Animated.View>
           );
@@ -176,11 +182,11 @@ export default function FAB({
             onPressIn={() => Animated.spring(pressScale, { toValue: 0.91, useNativeDriver: true }).start()}
             onPressOut={() => Animated.spring(pressScale, { toValue: 1,    useNativeDriver: true }).start()}
             android_ripple={{ color: 'rgba(255,255,255,0.18)', borderless: true }}
-            style={[styles.fab, { width: size, height: size, borderRadius: size / 2, backgroundColor: COLORS.primary }]}
+            style={[styles.fab, { width: size, height: size, borderRadius: size / 2, backgroundColor: colors.primary, shadowColor: colors.primary }]}
             accessibilityLabel="Floating action button"
           >
             <Animated.View style={{ transform: [{ rotate }] }}>
-              <Ionicons name={(mainIcon || icon) as any} size={Math.round(size * 0.42)} color="#fff" />
+              <Ionicons name={(mainIcon || icon) as any} size={Math.round(size * 0.42)} color={colors.white} />
             </Animated.View>
             {typeof badge === 'number' && badge > 0 && (
               <View style={styles.badge}>
@@ -210,15 +216,16 @@ export function SimpleFAB({
   position?: 'bottomRight' | 'bottomLeft';
   style?: ViewStyle;
 }) {
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.wrapper, { bottom: insets.bottom + SPACING.md, paddingHorizontal: SPACING.md, alignItems: position === 'bottomLeft' ? 'flex-start' : 'flex-end' }]}>
       <Pressable
         onPress={onPress}
         android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: true }}
-        style={[styles.fab, { backgroundColor: color, width: size, height: size, borderRadius: size / 2 }, style]}
+        style={[styles.fab, { backgroundColor: color || colors.primary, width: size, height: size, borderRadius: size / 2, shadowColor: color || colors.primary }, style]}
       >
-        <Ionicons name={icon as any} size={Math.round(size * 0.42)} color="#fff" />
+        <Ionicons name={icon as any} size={Math.round(size * 0.42)} color={colors.white} />
       </Pressable>
     </View>
   );

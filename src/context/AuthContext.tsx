@@ -69,6 +69,12 @@ interface AuthContextType extends AuthState {
 // ============================================
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function isPermissionDeniedError(error: any): boolean {
+  const code = error?.code;
+  const message = String(error?.message || '');
+  return code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+}
+
 // ============================================
 // Provider
 // ============================================
@@ -141,8 +147,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
               await AsyncStorage.setItem('user', JSON.stringify(mergedProfile));
             }
           }
-        } catch (err) {
-          console.error('Error fetching user profile:', err);
+        } catch (err: any) {
+          if (!isPermissionDeniedError(err)) {
+            console.error('Error fetching user profile:', err);
+          }
           if (isMountedRef.current) {
             setUser(null);
           }
@@ -360,7 +368,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }, 100);
       }
     } catch (err: any) {
-      const errorMessage = getErrorMessage(err);
+      const isThai = /[\u0E00-\u0E7F]/.test(err.message || '');
+      const errorMessage = isThai ? err.message : getErrorMessage(err);
       if (isMountedRef.current) {
         setError(errorMessage);
       }
@@ -559,8 +568,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(profile);
         await AsyncStorage.setItem('user', JSON.stringify(profile));
       }
-    } catch (err) {
-      console.error('Error refreshing user:', err);
+    } catch (err: any) {
+      if (!isPermissionDeniedError(err)) {
+        console.error('Error refreshing user:', err);
+      }
     } finally {
       profileFetchInProgressRef.current = false;
     }

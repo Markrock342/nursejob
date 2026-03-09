@@ -18,12 +18,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { Loading, EmptyState, Avatar, KittenButton as Button } from '../../components/common';
 import { JobCard } from '../../components/job/JobCard';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { JobPost } from '../../types';
 import { getUserPosts } from '../../services/jobService';
+import { canUserReviewTarget, getReviewsForTarget, getTargetRating, Review } from '../../services/reviewsService';
+import { getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText } from '../../utils/verificationTag';
+import { getPremiumTagColors, getPremiumTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
+import {
+  getCareTypeThaiLabel,
+  getHiringUrgencyThaiLabel,
+  getOrgTypeThaiLabel,
+  getStaffTypeThaiLabel,
+  getThaiLabels,
+  getWorkStyleThaiLabel,
+} from '../../utils/profileLabels';
 
 // ============================================
 // Types
@@ -42,14 +54,21 @@ interface UserData {
   photoURL?: string;
   bio?: string;
   role?: string;
+  orgType?: string;
   staffType?: string;
   experience?: number;
   skills?: string[];
+  interestedStaffTypes?: string[];
+  workStyle?: string[];
+  careNeeds?: string[];
+  careTypes?: string[];
+  hiringUrgency?: string;
   department?: string;
   hospital?: string;
   province?: string;
   licenseNumber?: string;
   isVerified?: boolean;
+  subscriptionPlan?: string;
   createdAt?: Date;
   privacy?: {
     profileVisible?: boolean;
@@ -65,20 +84,37 @@ interface UserData {
   phone?: string;
 }
 
+function isPermissionDeniedError(error: any): boolean {
+  const code = error?.code;
+  const message = String(error?.message || '');
+  return code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+}
+
 // ============================================
 // Component
 // ============================================
 export default function UserProfileScreen() {
   const navigation = useNavigation();
   const route = useRoute<RouteProp<UserProfileRouteParams, 'UserProfile'>>();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const { user } = useAuth();
   const { userId, userName, userPhoto } = route.params;
+  const surfaceBackground = isDark ? colors.surface : colors.white;
+  const elevatedBackground = isDark ? colors.card : colors.white;
+  const statsTones = {
+    posts: { background: colors.primaryBackground, text: colors.primaryDark },
+    rating: { background: colors.warningLight, text: colors.warning },
+    response: { background: colors.successLight, text: colors.success },
+  };
+  const reviewWriteTone = { background: colors.accentLight, text: colors.accentDark };
 
   const [userData, setUserData] = useState<UserData | null>(null);
   const [userPosts, setUserPosts] = useState<JobPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'posts'>('info');
+  const [receivedReviews, setReceivedReviews] = useState<Review[]>([]);
+  const [canReview, setCanReview] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch user data
@@ -103,14 +139,21 @@ export default function UserProfileScreen() {
           photoURL: data.photoURL || userPhoto,
           bio: data.bio,
           role: data.role,
+          orgType: data.orgType,
           staffType: data.staffType,
           experience: data.experience,
           skills: data.skills,
+          interestedStaffTypes: data.interestedStaffTypes,
+          workStyle: data.workStyle,
+          careNeeds: data.careNeeds,
+          careTypes: data.careTypes,
+          hiringUrgency: data.hiringUrgency,
           department: data.department,
           hospital: data.hospital,
-          province: data.province,
+          province: data.province || data.location?.province || data.preferredProvince,
           licenseNumber: data.licenseNumber,
           isVerified: data.isVerified,
+          subscriptionPlan: data.subscription?.plan,
           createdAt: data.createdAt?.toDate?.(),
           privacy: data.privacy,
           isOnline: data.isOnline,
@@ -129,8 +172,10 @@ export default function UserProfileScreen() {
           photoURL: userPhoto,
         });
       }
-    } catch (err) {
-      console.error('Error fetching user data:', err);
+    } catch (err: any) {
+      if (!isPermissionDeniedError(err)) {
+        console.error('Error fetching user data:', err);
+      }
       // Fallback to passed data
       setUserData({
         uid: userId,
@@ -154,20 +199,42 @@ export default function UserProfileScreen() {
     }
   }, [userId]);
 
+  const fetchReviewData = useCallback(async () => {
+    try {
+      const [rating, reviews, eligibility] = await Promise.all([
+        getTargetRating(userId, 'user'),
+        getReviewsForTarget(userId, 'user'),
+        user?.uid && user.uid !== userId ? canUserReviewTarget(user.uid, userId) : Promise.resolve(null),
+      ]);
+
+      setReceivedReviews(reviews);
+      setCanReview(Boolean(eligibility?.canReview));
+      setUserData((prev) => prev ? {
+        ...prev,
+        avgRating: rating.averageRating,
+        reviewCount: rating.totalReviews,
+      } : prev);
+    } catch (err) {
+      console.error('Error fetching review data:', err);
+      setReceivedReviews([]);
+      setCanReview(false);
+    }
+  }, [user?.uid, userId]);
+
   // Initial load
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
-      await Promise.all([fetchUserData(), fetchUserPosts()]);
+      await Promise.all([fetchUserData(), fetchUserPosts(), fetchReviewData()]);
       setIsLoading(false);
     };
     loadData();
-  }, [fetchUserData, fetchUserPosts]);
+  }, [fetchUserData, fetchUserPosts, fetchReviewData]);
 
   // Handle refresh
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([fetchUserData(), fetchUserPosts()]);
+    await Promise.all([fetchUserData(), fetchUserPosts(), fetchReviewData()]);
     setIsRefreshing(false);
   };
 
@@ -205,20 +272,208 @@ export default function UserProfileScreen() {
     return `ใช้งานเมื่อ ${days} วันที่แล้ว`;
   };
 
+  const handleOpenReviews = () => {
+    (navigation as any).navigate('Reviews', {
+      targetUserId: userId,
+      targetName: userData?.displayName || userName,
+      targetRole: userData?.role,
+    });
+  };
+
+  const renderRoleInfo = () => {
+    if (!userData) return null;
+
+    const workStyleLabels = getThaiLabels(userData.workStyle || [], getWorkStyleThaiLabel);
+    const interestedStaffTypeLabels = getThaiLabels(userData.interestedStaffTypes || [], getStaffTypeThaiLabel);
+    const careNeedLabels = getThaiLabels(userData.careNeeds || userData.careTypes || [], getCareTypeThaiLabel);
+
+    if (userData.role === 'nurse') {
+      return (
+        <>
+          {userData.staffType && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+              <Ionicons name="medkit-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>วิชาชีพ</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{getStaffTypeThaiLabel(userData.staffType)}</Text>
+              </View>
+            </View>
+          )}
+          {userData.department && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+              <Ionicons name="medical-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>แผนกที่ถนัด</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{userData.department}</Text>
+              </View>
+            </View>
+          )}
+          {userData.experience && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+              <Ionicons name="time-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประสบการณ์</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{userData.experience} ปี</Text>
+              </View>
+            </View>
+          )}
+          {userData.isVerified && userData.licenseNumber && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+              <Ionicons name="card-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>เลขใบประกอบวิชาชีพ</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{userData.licenseNumber.slice(0, 4)}****</Text>
+              </View>
+            </View>
+          )}
+          {workStyleLabels.length > 0 && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
+              <Ionicons name="options-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>รูปแบบงานที่สนใจ</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{workStyleLabels.join(', ')}</Text>
+              </View>
+            </View>
+          )}
+          {userData.skills && userData.skills.length > 0 && (
+            <View style={[styles.skillsSection, { borderBottomColor: colors.borderLight }]}>
+              <Text style={[styles.skillsTitle, { color: colors.textSecondary }]}>ทักษะ</Text>
+              <View style={styles.skillsTags}>
+                {userData.skills.map((skill, index) => (
+                  <View key={index} style={[styles.skillTag, { backgroundColor: colors.primaryBackground }]}> 
+                    <Text style={[styles.skillTagText, { color: colors.primary }]}>{skill}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </>
+      );
+    }
+
+    if (userData.role === 'hospital') {
+      return (
+        <>
+          <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+            <Ionicons name="business-outline" size={20} color={colors.primary} />
+            <View style={styles.infoContent}>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประเภทองค์กร</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>{getOrgTypeThaiLabel(userData.orgType) || roleLabel}</Text>
+            </View>
+          </View>
+          {userData.hospital && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+              <Ionicons name="home-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ชื่อสถานพยาบาล</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{userData.hospital}</Text>
+              </View>
+            </View>
+          )}
+          {userData.province && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+              <Ionicons name="location-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>พื้นที่รับสมัคร</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{userData.province}</Text>
+              </View>
+            </View>
+          )}
+          {interestedStaffTypeLabels.length > 0 && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
+              <Ionicons name="people-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>บุคลากรที่กำลังมองหา</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{interestedStaffTypeLabels.join(', ')}</Text>
+              </View>
+            </View>
+          )}
+          {userData.hiringUrgency && (
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
+              <Ionicons name="flash-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ความเร่งด่วน</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{getHiringUrgencyThaiLabel(userData.hiringUrgency)}</Text>
+              </View>
+            </View>
+          )}
+          <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+            <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
+            <View style={styles.infoContent}>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประกาศที่เปิดอยู่</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>{userPosts.length} รายการ</Text>
+            </View>
+          </View>
+        </>
+      );
+    }
+
+    return (
+      <>
+        {interestedStaffTypeLabels.length > 0 && (
+          <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
+            <Ionicons name="people-outline" size={20} color={colors.primary} />
+            <View style={styles.infoContent}>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>บุคลากรที่ต้องการติดต่อ</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>{interestedStaffTypeLabels.join(', ')}</Text>
+            </View>
+          </View>
+        )}
+        {careNeedLabels.length > 0 && (
+          <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
+            <Ionicons name="heart-outline" size={20} color={colors.primary} />
+            <View style={styles.infoContent}>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ลักษณะการดูแลที่ต้องการ</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>{careNeedLabels.join(', ')}</Text>
+            </View>
+          </View>
+        )}
+        {userData.province && (
+          <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+            <Ionicons name="location-outline" size={20} color={colors.primary} />
+            <View style={styles.infoContent}>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>{userData.province}</Text>
+            </View>
+          </View>
+        )}
+        <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
+          <Ionicons name="document-text-outline" size={20} color={colors.primary} />
+          <View style={styles.infoContent}>
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประกาศที่เปิดอยู่</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]}>{userPosts.length} รายการ</Text>
+          </View>
+        </View>
+      </>
+    );
+  };
+
   // Loading state
   if (isLoading) {
     return <Loading fullScreen />;
   }
 
+  const verificationTagText = getVerificationTagText({
+    isVerified: userData?.isVerified,
+    role: userData?.role,
+    orgType: userData?.orgType,
+  });
+
+  const roleLabel = getRoleLabel(userData?.role, userData?.orgType, userData?.staffType);
+  const showRoleTag = hasRoleTag(userData?.role, userData?.orgType, userData?.staffType);
+  const roleTagColors = getRoleTagColors(userData?.role);
+  const premiumTagText = getPremiumTagText(userData?.subscriptionPlan);
+  const premiumTagColors = getPremiumTagColors();
+
   // Error state (private profile)
   if (error) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.header}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+        <View style={[styles.header, { backgroundColor: surfaceBackground, borderBottomColor: colors.border }]}> 
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>โปรไฟล์</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>โปรไฟล์</Text>
           <View style={{ width: 40 }} />
         </View>
         
@@ -232,25 +487,25 @@ export default function UserProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: surfaceBackground, borderBottomColor: colors.border }]}> 
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>โปรไฟล์</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>โปรไฟล์</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView
         style={styles.content}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
+          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.primary} colors={[colors.primary]} />
         }
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Header */}
-        <View style={styles.profileHeader}>
+        <View style={[styles.profileHeader, { backgroundColor: surfaceBackground, borderBottomColor: colors.border }]}> 
           <View style={styles.avatarContainer}>
             <Avatar
               uri={userData?.photoURL}
@@ -258,51 +513,62 @@ export default function UserProfileScreen() {
               size={100}
             />
             {userData?.isVerified && (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={24} color="#4ADE80" />
+              <View style={[styles.verifiedBadge, { backgroundColor: surfaceBackground }]}> 
+                <Ionicons name="checkmark-circle" size={24} color={colors.success} />
               </View>
             )}
             {/* Online status */}
             {userData?.privacy?.showOnlineStatus !== false && (
               <View style={[
                 styles.onlineStatus,
+                { borderColor: surfaceBackground },
                 userData?.isOnline ? styles.online : styles.offline
               ]} />
             )}
           </View>
 
-          <Text style={styles.userName}>{userData?.displayName}</Text>
-          
-          {userData?.role && (
-            <View style={styles.roleTag}>
-              <Ionicons 
-                name={userData.role === 'nurse' ? 'medical' : 'business'} 
-                size={14} 
-                color={colors.primary} 
-              />
-              <Text style={styles.roleText}>
-                {userData.role === 'nurse' ? 'พยาบาล' : 
-                 userData.role === 'hospital' ? 'โรงพยาบาล' : 'ผู้ใช้'}
-              </Text>
-            </View>
-          )}
+          <View style={styles.userNameRow}>
+            <Text style={[styles.userName, { color: colors.text }]}>{userData?.displayName}</Text>
+            {showRoleTag ? (
+              <View style={[styles.inlineNameTag, { backgroundColor: roleTagColors.backgroundColor }]}>
+                <Ionicons 
+                  name={getRoleIconName(userData?.role)} 
+                  size={13} 
+                  color={roleTagColors.textColor} 
+                />
+                <Text style={[styles.inlineNameTagText, { color: roleTagColors.textColor }]}>{roleLabel}</Text>
+              </View>
+            ) : null}
+            {hasPremiumTag(userData?.subscriptionPlan) ? (
+              <View style={[styles.inlineNameTag, { backgroundColor: premiumTagColors.backgroundColor }]}>
+                <Ionicons name="diamond" size={13} color={premiumTagColors.textColor} />
+                <Text style={[styles.inlineNameTagText, { color: premiumTagColors.textColor }]}>{premiumTagText}</Text>
+              </View>
+            ) : null}
+            {verificationTagText ? (
+              <View style={[styles.inlineNameTag, styles.nameVerifiedTag]}>
+                <Ionicons name="checkmark-circle" size={13} color={colors.primary} />
+                <Text style={styles.nameVerifiedTagText}>{verificationTagText}</Text>
+              </View>
+            ) : null}
+          </View>
 
           {/* Online status text */}
           {userData?.privacy?.showOnlineStatus !== false && (
-            <Text style={styles.lastActiveText}>
+            <Text style={[styles.lastActiveText, { color: colors.textSecondary }]}>
               {userData?.isOnline ? '🟢 ออนไลน์' : formatLastActive(userData?.lastActiveAt)}
             </Text>
           )}
 
           {userData?.bio && (
-            <Text style={styles.bio}>{userData.bio}</Text>
+            <Text style={[styles.bio, { color: colors.textSecondary }]}>{userData.bio}</Text>
           )}
         </View>
 
         {/* Tabs */}
-        <View style={styles.tabs}>
+        <View style={[styles.tabs, { backgroundColor: surfaceBackground, borderBottomColor: colors.border }]}> 
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'info' && styles.tabActive]}
+            style={[styles.tab, activeTab === 'info' && styles.tabActive, activeTab === 'info' && { borderBottomColor: colors.primary }]}
             onPress={() => setActiveTab('info')}
           >
             <Ionicons 
@@ -310,13 +576,13 @@ export default function UserProfileScreen() {
               size={20} 
               color={activeTab === 'info' ? colors.primary : colors.textSecondary} 
             />
-            <Text style={[styles.tabText, activeTab === 'info' && styles.tabTextActive]}>
+            <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'info' && styles.tabTextActive, activeTab === 'info' && { color: colors.primary }]}>
               ข้อมูล
             </Text>
           </TouchableOpacity>
           
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'posts' && styles.tabActive]}
+            style={[styles.tab, activeTab === 'posts' && styles.tabActive, activeTab === 'posts' && { borderBottomColor: colors.primary }]}
             onPress={() => setActiveTab('posts')}
           >
             <Ionicons 
@@ -324,125 +590,74 @@ export default function UserProfileScreen() {
               size={20} 
               color={activeTab === 'posts' ? colors.primary : colors.textSecondary} 
             />
-            <Text style={[styles.tabText, activeTab === 'posts' && styles.tabTextActive]}>
-              ประกาศ ({userPosts.length})
+            <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'posts' && styles.tabTextActive, activeTab === 'posts' && { color: colors.primary }]}>
+              ประกาศ({userPosts.length})
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* Tab Content */}
         {activeTab === 'info' ? (
-          <View style={styles.infoSection}>
+          <View style={[styles.infoSection, { backgroundColor: surfaceBackground }]}>
             {/* Stats Cards */}
             <View style={styles.statsRow}>
-              <View style={[styles.statCard, { backgroundColor: colors.primaryLight }]}>
-                <Text style={[styles.statValue, { color: colors.primary }]}>
+              <View style={[styles.statCard, { backgroundColor: statsTones.posts.background }]}> 
+                <Text style={[styles.statValue, { color: statsTones.posts.text }]}> 
                   {userPosts.length}
                 </Text>
-                <Text style={[styles.statLabel, { color: colors.primary }]}>ประกาศ</Text>
+                <Text style={[styles.statLabel, { color: statsTones.posts.text }]}>ประกาศ</Text>
               </View>
-              <View style={[styles.statCard, { backgroundColor: '#FEF3C7' }]}>
-                <Text style={[styles.statValue, { color: '#D97706' }]}>
+              <View style={[styles.statCard, { backgroundColor: statsTones.rating.background }]}> 
+                <Text style={[styles.statValue, { color: statsTones.rating.text }]}> 
                   {userData?.avgRating ? userData.avgRating.toFixed(1) : '-'}
                 </Text>
-                <Text style={[styles.statLabel, { color: '#D97706' }]}>คะแนน</Text>
+                <Text style={[styles.statLabel, { color: statsTones.rating.text }]}>คะแนน ({userData?.reviewCount || 0})</Text>
               </View>
-              <View style={[styles.statCard, { backgroundColor: '#D1FAE5' }]}>
-                <Text style={[styles.statValue, { color: '#059669' }]}>
+              <View style={[styles.statCard, { backgroundColor: statsTones.response.background }]}> 
+                <Text style={[styles.statValue, { color: statsTones.response.text }]}> 
                   {userData?.responseRate ? `${userData.responseRate}%` : '-'}
                 </Text>
-                <Text style={[styles.statLabel, { color: '#059669' }]}>ตอบกลับ</Text>
+                <Text style={[styles.statLabel, { color: statsTones.response.text }]}>ตอบกลับ</Text>
               </View>
             </View>
             
-            {/* Staff Type */}
-            {userData?.staffType && (
-              <View style={styles.infoRow}>
-                <Ionicons name="person" size={20} color={colors.primary} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>ประเภทบุคลากร</Text>
-                  <Text style={styles.infoValue}>{userData.staffType}</Text>
-                </View>
-              </View>
-            )}
-            
-            {/* Department */}
-            {userData?.department && (
-              <View style={styles.infoRow}>
-                <Ionicons name="medical" size={20} color={colors.primary} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>แผนก</Text>
-                  <Text style={styles.infoValue}>{userData.department}</Text>
-                </View>
-              </View>
-            )}
+            {renderRoleInfo()}
 
-            {/* Hospital */}
-            {userData?.hospital && (
-              <View style={styles.infoRow}>
-                <Ionicons name="business" size={20} color={colors.primary} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>สถานที่ทำงาน</Text>
-                  <Text style={styles.infoValue}>{userData.hospital}</Text>
-                </View>
-              </View>
-            )}
-            
-            {/* Province */}
-            {userData?.province && (
-              <View style={styles.infoRow}>
-                <Ionicons name="location" size={20} color={colors.primary} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>จังหวัด</Text>
-                  <Text style={styles.infoValue}>{userData.province}</Text>
-                </View>
-              </View>
-            )}
+            <View style={styles.reviewActionsRow}>
+              <TouchableOpacity style={[styles.reviewActionButton, { backgroundColor: colors.primaryBackground }]} onPress={handleOpenReviews}>
+                <Ionicons name="star-outline" size={18} color={colors.primary} />
+                <Text style={[styles.reviewActionText, { color: colors.primary }]}>ดูรีวิวทั้งหมด</Text>
+              </TouchableOpacity>
+              {user?.uid && user.uid !== userId && canReview ? (
+                <TouchableOpacity style={[styles.reviewActionButton, { backgroundColor: reviewWriteTone.background }]} onPress={handleOpenReviews}>
+                  <Ionicons name="create-outline" size={18} color={reviewWriteTone.text} />
+                  <Text style={[styles.reviewActionText, { color: reviewWriteTone.text }]}>เขียนรีวิว</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
 
-            {/* Experience */}
-            {userData?.experience && (
-              <View style={styles.infoRow}>
-                <Ionicons name="time" size={20} color={colors.primary} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>ประสบการณ์</Text>
-                  <Text style={styles.infoValue}>{userData.experience} ปี</Text>
-                </View>
-              </View>
-            )}
-
-            {/* License Number (if verified) */}
-            {userData?.isVerified && userData?.licenseNumber && (
-              <View style={styles.infoRow}>
-                <Ionicons name="card" size={20} color={colors.primary} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>เลขใบประกอบวิชาชีพ</Text>
-                  <Text style={styles.infoValue}>
-                    {userData.licenseNumber.slice(0, 4)}****
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Skills */}
-            {userData?.skills && userData.skills.length > 0 && (
-              <View style={styles.skillsSection}>
-                <Text style={styles.skillsTitle}>ทักษะ</Text>
-                <View style={styles.skillsTags}>
-                  {userData.skills.map((skill, index) => (
-                    <View key={index} style={styles.skillTag}>
-                      <Text style={styles.skillTagText}>{skill}</Text>
+            {receivedReviews.length > 0 ? (
+              <View style={styles.reviewsPreviewSection}>
+                <Text style={[styles.skillsTitle, { color: colors.textSecondary }]}>รีวิวล่าสุด</Text>
+                {receivedReviews.slice(0, 2).map((review) => (
+                  <View key={review.id} style={[styles.reviewPreviewCard, { backgroundColor: elevatedBackground, borderColor: colors.borderLight }]}> 
+                    <View style={styles.reviewPreviewHeader}>
+                      <Text style={[styles.reviewPreviewName, { color: colors.text }]}>{review.userName}</Text>
+                      <Text style={[styles.reviewPreviewRating, { color: colors.accentDark }]}>★ {review.rating.toFixed(1)}</Text>
                     </View>
-                  ))}
-                </View>
+                    <Text style={[styles.reviewPreviewTitle, { color: colors.text }]}>{review.title}</Text>
+                    <Text style={[styles.reviewPreviewContent, { color: colors.textSecondary }]} numberOfLines={2}>{review.content}</Text>
+                  </View>
+                ))}
               </View>
-            )}
+            ) : null}
 
             {/* Member since */}
-            <View style={styles.infoRow}>
+            <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="calendar" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>เป็นสมาชิกตั้งแต่</Text>
-                <Text style={styles.infoValue}>{formatDate(userData?.createdAt)}</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>เป็นสมาชิกตั้งแต่</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{formatDate(userData?.createdAt)}</Text>
               </View>
             </View>
           </View>
@@ -536,26 +751,42 @@ const styles = StyleSheet.create({
   offline: {
     backgroundColor: COLORS.textMuted,
   },
+  userNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
   userName: {
     fontSize: FONT_SIZES.xl,
     fontWeight: '700',
     color: COLORS.text,
-    marginBottom: SPACING.xs,
+    marginBottom: 0,
   },
-  roleTag: {
+  inlineNameTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.primaryBackground,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
     gap: 4,
-    marginBottom: SPACING.sm,
+    backgroundColor: COLORS.border + '66',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.full,
+    maxWidth: '100%',
   },
-  roleText: {
-    fontSize: FONT_SIZES.sm,
+  inlineNameTagText: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  nameVerifiedTag: {
+    backgroundColor: COLORS.primaryBackground,
+  },
+  nameVerifiedTagText: {
+    fontSize: FONT_SIZES.xs,
     color: COLORS.primary,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   lastActiveText: {
     fontSize: FONT_SIZES.sm,
@@ -670,6 +901,62 @@ const styles = StyleSheet.create({
   },
   postsSection: {
     padding: SPACING.md,
+  },
+  reviewActionsRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginTop: SPACING.lg,
+    marginBottom: SPACING.md,
+  },
+  reviewActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  reviewActionText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+  },
+  reviewsPreviewSection: {
+    marginBottom: SPACING.md,
+  },
+  reviewPreviewCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginTop: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+  },
+  reviewPreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  reviewPreviewName: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  reviewPreviewRating: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+    color: '#D97706',
+  },
+  reviewPreviewTitle: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  reviewPreviewContent: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    lineHeight: 20,
   },
 });
 

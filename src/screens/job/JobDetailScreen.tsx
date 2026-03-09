@@ -12,6 +12,7 @@ import {
   Share,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,7 +24,7 @@ import ReportModal from '../../components/report/ReportModal';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { contactForShift, deleteJob, updateJob, incrementViewCount, getShiftContacts, updateJobStatus } from '../../services/jobService';
+import { contactForShift, deleteJob, updateJob, incrementViewCount, getShiftContacts, updateJobStatus, getJobById } from '../../services/jobService';
 import { getUserSubscription } from '../../services/subscriptionService';
 import { getOrCreateConversation } from '../../services/chatService';
 import { toggleFavorite, isFavorited } from '../../services/favoritesService';
@@ -31,6 +32,7 @@ import { useToast } from '../../context/ToastContext';
 import { JobPost, RootStackParamList, SubscriptionPlan, StaffType } from '../../types';
 import { formatDate, formatRelativeTime, callPhone, openLine, openMapsDirections } from '../../utils/helpers';
 import { getStaffTypeLabel } from '../../constants/jobOptions';
+import { getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
 
 // ============================================
 // Types
@@ -48,7 +50,7 @@ interface Props {
 // ============================================
 const formatShiftRate = (rate: number, type: string): string => {
   const formattedRate = rate.toLocaleString('th-TH');
-  const unit = type === 'hour' ? '/ชม.' : type === 'day' ? '/วัน' : '/เวร';
+  const unit = type === 'hour' ? '/ชม.' : type === 'day' ? '/วัน' : type === 'month' ? '/เดือน' : '/เวร';
   return `฿${formattedRate}${unit}`;
 };
 
@@ -74,11 +76,28 @@ const getShiftTimeLabel = (time: string): string => {
   return timeMap[time] || time;
 };
 
+const getJobStartLabel = (job: JobPost): string => {
+  if (job.postType === 'job') {
+    return job.startDateNote || 'ตามตกลง';
+  }
+  return formatShiftDate(job.shiftDate);
+};
+
+const getJobTimeLabel = (job: JobPost): string => {
+  if (job.postType === 'job') {
+    return job.workHours || job.shiftTime || 'ตามตกลง';
+  }
+  const key = (job.shiftDates?.[0] || (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : String(job.shiftDate)))?.slice(0, 10);
+  const slot = key ? job.shiftTimeSlots?.[key] : undefined;
+  return slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || 'ตามตกลง');
+};
+
 // ============================================
 // Component
 // ============================================
 export default function JobDetailScreen({ navigation, route }: Props) {
-  const { job } = route.params;
+  const routeJob = route.params?.job ?? null;
+  const routeJobId = route.params?.jobId || routeJob?.id;
   const { user, requireAuth, isAuthenticated } = useAuth();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -98,15 +117,63 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const [showReportModal, setShowReportModal] = useState(false);
   const [alert, setAlert] = useState<AlertState>(initialAlertState);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [job, setJob] = useState<JobPost | null>(routeJob);
+  const [isLoadingJob, setIsLoadingJob] = useState(!routeJob && Boolean(routeJobId));
   
   // New states for improved flow
   const [applicantsCount, setApplicantsCount] = useState(0);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showContactSuccessModal, setShowContactSuccessModal] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const [jobStatus, setJobStatus] = useState(job?.status ?? 'active');
+  const [jobStatus, setJobStatus] = useState(routeJob?.status ?? 'active');
   const [posterPlan, setPosterPlan] = useState<SubscriptionPlan>('free');
-  const [viewsCount, setViewsCount] = useState<number>(job?.viewsCount ?? 0);
+  const [viewsCount, setViewsCount] = useState<number>(routeJob?.viewsCount ?? 0);
+  const roleLabel = getRoleLabel(job?.posterRole, job?.posterOrgType, job?.posterStaffType);
+  const showRoleTag = hasRoleTag(job?.posterRole, job?.posterOrgType, job?.posterStaffType);
+  const roleTagColors = getRoleTagColors(job?.posterRole);
+  const premiumTagText = getPremiumTagText(job?.posterPlan || posterPlan);
+  const premiumTagColors = getPremiumTagColors();
+  const verificationTagText = getVerificationTagText({
+    isVerified: job?.posterVerified,
+    role: job?.posterRole,
+    orgType: job?.posterOrgType,
+    staffType: job?.posterStaffType,
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadJob = async () => {
+      if (routeJob || !routeJobId) {
+        setIsLoadingJob(false);
+        return;
+      }
+
+      setIsLoadingJob(true);
+      try {
+        const loadedJob = await getJobById(routeJobId);
+        if (!isMounted) return;
+        setJob(loadedJob);
+        setJobStatus(loadedJob?.status ?? 'active');
+        setViewsCount(loadedJob?.viewsCount ?? 0);
+      } catch (error) {
+        console.error('Error loading job from deep link:', error);
+        if (isMounted) {
+          setJob(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingJob(false);
+        }
+      }
+    };
+
+    loadJob();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [routeJob, routeJobId]);
 
   // Check if user is logged in
   const isLoggedIn = isAuthenticated && user;
@@ -156,6 +223,35 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     };
     loadApplicantsCount();
   }, [isOwner, job?.id]);
+
+  if (isLoadingJob) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>กำลังโหลดรายละเอียดประกาศ...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!job) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}> 
+          <Ionicons name="document-text-outline" size={52} color={colors.textMuted} />
+          <Text style={[styles.loadingText, { color: colors.text }]}>ไม่พบประกาศนี้</Text>
+          <TouchableOpacity
+            style={[styles.retryButton, { backgroundColor: colors.primary }]}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.retryButtonText, { color: colors.white }]}>ย้อนกลับ</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Handle contact poster
   const handleContact = () => {
@@ -271,10 +367,16 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const handleShare = async () => {
     try {
       const rateText = formatShiftRate(job.shiftRate, job.rateType);
-      const dateText = formatShiftDate(job.shiftDate);
+      const dateLabel = job.postType === 'job' ? 'เริ่มงาน' : 'วันที่';
+      const timeLabel = job.postType === 'job' ? 'เวลางาน' : 'เวลา';
+      const dateText = getJobStartLabel(job);
+      const timeText = getJobTimeLabel(job);
+      const shareUrl = `https://nursego.app/job/${job.id}`;
+      const appLink = `nursego://job/${job.id}`;
       await Share.share({
-        message: `${job.title}\nวันที่: ${dateText}\nเวลา: ${job.shiftTime}\nค่าตอบแทน: ${rateText}\nสถานที่: ${job.location?.hospital || job.location?.province}\n\nดูรายละเอียดที่ NurseGo App`,
+        message: `${job.title}\n${dateLabel}: ${dateText}\n${timeLabel}: ${timeText}\n${job.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}: ${rateText}\nสถานที่: ${job.location?.hospital || job.location?.province}\n\nดูรายละเอียด: ${shareUrl}\nเปิดตรงในแอป: ${appLink}`,
         title: job.title,
+        url: shareUrl,
       });
     } catch (error) {
       console.error('Error sharing:', error);
@@ -441,13 +543,30 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               size={60}
             />
             <View style={styles.posterInfo}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={styles.posterNameRow}>
                 <Text style={styles.posterName}>{job.posterName}</Text>
-                {posterPlan !== 'free' && (
-                  <View style={[styles.premiumBadge, { marginLeft: 8 }]}>
-                    <Text style={styles.premiumBadgeText}>Premium</Text>
+                {showRoleTag ? (
+                  <View style={[styles.posterTag, { backgroundColor: roleTagColors.backgroundColor }]}>
+                    <Ionicons
+                      name={getRoleIconName(job.posterRole)}
+                      size={11}
+                      color={roleTagColors.textColor}
+                    />
+                    <Text style={[styles.posterTagText, { color: roleTagColors.textColor }]} numberOfLines={1}>{roleLabel}</Text>
                   </View>
-                )}
+                ) : null}
+                {hasPremiumTag(job?.posterPlan || posterPlan) ? (
+                  <View style={[styles.posterTag, { backgroundColor: premiumTagColors.backgroundColor }]}>
+                    <Ionicons name="diamond" size={11} color={premiumTagColors.textColor} />
+                    <Text style={[styles.posterTagText, { color: premiumTagColors.textColor }]} numberOfLines={1}>{premiumTagText}</Text>
+                  </View>
+                ) : null}
+                {verificationTagText ? (
+                  <View style={[styles.posterTag, styles.posterVerifyTag]}>
+                    <Ionicons name="checkmark-circle" size={11} color={COLORS.white} />
+                    <Text style={styles.posterTagText} numberOfLines={1}>{verificationTagText}</Text>
+                  </View>
+                ) : null}
               </View>
               <Text style={styles.postedTime}>โพสต์ {formatRelativeTime(job.createdAt)}</Text>
             </View>
@@ -477,6 +596,12 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             {job.paymentType === 'DEDUCT_PERCENT' && job.deductPercent ? (
               <Badge text={`หัก ${job.deductPercent}%`} variant="danger" />
             ) : null}
+            {job.postType === 'job' && job.employmentType ? (
+              <Badge
+                text={job.employmentType === 'full_time' ? 'งานประจำ' : job.employmentType === 'part_time' ? 'พาร์ตไทม์' : job.employmentType === 'contract' ? 'สัญญาจ้าง' : 'ชั่วคราว'}
+                variant="secondary"
+              />
+            ) : null}
             {job.shiftTime && getShiftTimeLabel(job.shiftTime) !== job.shiftTime ? (
               <Badge text={getShiftTimeLabel(job.shiftTime)} variant="secondary" />
             ) : null}
@@ -490,8 +615,47 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             <Text style={styles.sectionTitle}>รายละเอียดงาน</Text>
           </View>
 
-          {/* Multi-date shift schedule */}
-          {job.shiftDates && job.shiftDates.length > 1 ? (
+          {job.postType === 'job' ? (
+            <>
+              {job.employmentType ? (
+                <View style={styles.detailRow}>
+                  <Ionicons name="briefcase-outline" size={20} color={colors.primary} style={styles.detailIcon} />
+                  <View style={styles.detailContent}>
+                    <Text style={styles.detailLabel}>ประเภทการจ้าง</Text>
+                    <Text style={styles.detailValue}>
+                      {job.employmentType === 'full_time' ? 'งานประจำ' : job.employmentType === 'part_time' ? 'พาร์ตไทม์' : job.employmentType === 'contract' ? 'สัญญาจ้าง' : 'ชั่วคราว'}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={styles.detailRow}>
+                <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>วันเริ่มงาน</Text>
+                  <Text style={styles.detailValue}>{getJobStartLabel(job)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.detailRow}>
+                <Ionicons name="time-outline" size={20} color={colors.primary} style={styles.detailIcon} />
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>วันและเวลาทำงาน</Text>
+                  <Text style={styles.detailValue}>{getJobTimeLabel(job)}</Text>
+                </View>
+              </View>
+
+              {job.benefits && job.benefits.length > 0 ? (
+                <View style={styles.detailRow}>
+                  <Ionicons name="gift-outline" size={20} color={colors.primary} style={styles.detailIcon} />
+                  <View style={styles.detailContent}>
+                    <Text style={styles.detailLabel}>สวัสดิการ</Text>
+                    <Text style={styles.detailValue}>{job.benefits.join(' • ')}</Text>
+                  </View>
+                </View>
+              ) : null}
+            </>
+          ) : job.shiftDates && job.shiftDates.length > 1 ? (
             <View>
               <View style={styles.detailRow}>
                 <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
@@ -534,13 +698,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 <Ionicons name="time-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                 <View style={styles.detailContent}>
                   <Text style={styles.detailLabel}>เวลา</Text>
-                  <Text style={styles.detailValue}>
-                    {(() => {
-                      const key = (job.shiftDates?.[0] || (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : String(job.shiftDate)))?.slice(0, 10);
-                      const slot = key ? job.shiftTimeSlots?.[key] : undefined;
-                      return slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || 'ตามตกลง');
-                    })()}
-                  </Text>
+                  <Text style={styles.detailValue}>{getJobTimeLabel(job)}</Text>
                 </View>
               </View>
             </>
@@ -549,7 +707,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <View style={styles.detailRow}>
             <Ionicons name="cash-outline" size={20} color={colors.success} style={styles.detailIcon} />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>ค่าตอบแทน</Text>
+              <Text style={styles.detailLabel}>{job.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}</Text>
               <Text style={[styles.detailValue, styles.rateValue]}>
                 {formatShiftRate(job.shiftRate, job.rateType)}
               </Text>
@@ -692,7 +850,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) + SPACING.md }]}>
         {!isOwner && (
           <View style={styles.bottomRate}>
-            <Text style={styles.bottomRateLabel}>ค่าตอบแทน</Text>
+            <Text style={styles.bottomRateLabel}>{job.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}</Text>
             <Text style={styles.bottomRateValue}>
               {formatShiftRate(job.shiftRate, job.rateType)}
             </Text>
@@ -782,7 +940,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <Text style={styles.modalIcon}>📞</Text>
           <Text style={styles.modalTitle}>{job.title}</Text>
           <Text style={styles.modalSubtitle}>
-            {formatShiftDate(job.shiftDate)} • {job.shiftTime}
+            {getJobStartLabel(job)} • {getJobTimeLabel(job)}
           </Text>
           <Text style={styles.modalRate}>
             {formatShiftRate(job.shiftRate, job.rateType)}
@@ -996,6 +1154,27 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingTop: Platform.OS === 'android' ? 0 : 0,
   },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
+    gap: SPACING.md,
+  },
+  loadingText: {
+    fontSize: FONT_SIZES.md,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: SPACING.sm,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  retryButtonText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+  },
 
   // Header
   headerCard: {
@@ -1047,11 +1226,37 @@ const styles = StyleSheet.create({
   },
   posterInfo: {
     marginLeft: SPACING.md,
+    flex: 1,
+  },
+  posterNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    flexWrap: 'wrap',
   },
   posterName: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
     color: COLORS.white,
+  },
+  posterTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    maxWidth: 140,
+  },
+  posterVerifyTag: {
+    backgroundColor: 'rgba(255,255,255,0.24)',
+  },
+  posterTagText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.white,
+    flexShrink: 1,
   },
   postedTime: {
     fontSize: FONT_SIZES.sm,

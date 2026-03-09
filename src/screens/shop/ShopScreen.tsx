@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
+import { ThemeColors, useTheme } from '../../context/ThemeContext';
 import { Card, KittenButton as Button } from '../../components/common';
 import CustomAlert, {
   AlertState,
@@ -49,13 +49,22 @@ import {
 // ============================================
 // Helpers
 // ============================================
-const planColor: Record<string, string> = {
-  free: '#888',
-  nurse_pro: '#FF8F00',
-  hospital_starter: '#0288D1',
-  hospital_pro: '#6A1B9A',
-  hospital_enterprise: '#1B5E20',
-  premium: '#FFD700',
+const getPlanTone = (plan: string, colors: ThemeColors) => {
+  switch (plan) {
+    case 'nurse_pro':
+      return { accent: colors.accent, soft: colors.accentLight, label: colors.accentDark };
+    case 'hospital_starter':
+      return { accent: colors.primary, soft: colors.primaryBackground, label: colors.primaryDark };
+    case 'hospital_pro':
+      return { accent: colors.secondary, soft: colors.secondaryLight, label: colors.secondaryDark };
+    case 'hospital_enterprise':
+      return { accent: colors.success, soft: colors.successLight, label: colors.success };
+    case 'premium':
+      return { accent: colors.accent, soft: colors.accentLight, label: colors.accentDark };
+    case 'free':
+    default:
+      return { accent: colors.textMuted, soft: colors.borderLight, label: colors.textSecondary };
+  }
 };
 
 // ============================================
@@ -64,7 +73,7 @@ const planColor: Record<string, string> = {
 export default function ShopScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
 
   const isHospital = user?.role === 'hospital' || user?.role === 'admin';
 
@@ -284,13 +293,22 @@ export default function ShopScreen() {
   const statusDisplay = subscription
     ? getSubscriptionStatusDisplay(subscription)
     : null;
+  const currentPlanTone = getPlanTone(currentPlan, colors);
+  const panelBackground = isDark ? colors.surface : colors.white;
+  const panelAltBackground = isDark ? colors.card : colors.backgroundSecondary;
+  const subtleBorder = colors.border;
+  const toggleActiveStyle = {
+    backgroundColor: panelBackground,
+    borderColor: subtleBorder,
+    borderWidth: isDark ? 1 : 0,
+  };
 
   // ----------------------------------------
   // Render
   // ----------------------------------------
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
         <View style={styles.loadingCenter}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -299,15 +317,15 @@ export default function ShopScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: panelBackground, borderBottomColor: subtleBorder }]}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>🛒 ร้านค้า</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>ร้านค้า</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -316,19 +334,19 @@ export default function ShopScreen() {
         <Card
           style={StyleSheet.flatten([
             styles.currentPlanCard,
-            { borderColor: planColor[currentPlan] },
+            { borderColor: currentPlanTone.accent, backgroundColor: panelBackground },
           ])}>
           <View style={styles.planBannerRow}>
             <View>
-              <Text style={styles.planLabel}>แพ็กเกจปัจจุบัน</Text>
+              <Text style={[styles.planLabel, { color: colors.textSecondary }]}>แพ็กเกจปัจจุบัน</Text>
               <Text
-                style={[styles.planName, { color: planColor[currentPlan] }]}>
+                style={[styles.planName, { color: currentPlanTone.accent }]}> 
                 {statusDisplay?.planName || '🆓 ฟรี'}
               </Text>
             </View>
             {statusDisplay?.expiresText && (
-              <View style={styles.expiryBadge}>
-                <Text style={styles.expiryText}>
+              <View style={[styles.expiryBadge, { backgroundColor: currentPlanTone.soft }]}>
+                <Text style={[styles.expiryText, { color: currentPlanTone.label }]}> 
                   {statusDisplay.expiresText}
                 </Text>
               </View>
@@ -337,17 +355,20 @@ export default function ShopScreen() {
         </Card>
 
         {/* Billing Cycle Toggle */}
-        <View style={styles.toggleRow}>
+        <View style={[styles.toggleRow, { backgroundColor: panelAltBackground }]}>
           <TouchableOpacity
             style={[
               styles.toggleBtn,
               billingCycle === 'monthly' && styles.toggleActive,
+              billingCycle === 'monthly' && toggleActiveStyle,
             ]}
             onPress={() => setBillingCycle('monthly')}>
             <Text
               style={[
                 styles.toggleText,
+                { color: colors.textSecondary },
                 billingCycle === 'monthly' && styles.toggleActiveText,
+                billingCycle === 'monthly' && { color: colors.text },
               ]}>
               รายเดือน
             </Text>
@@ -356,17 +377,20 @@ export default function ShopScreen() {
             style={[
               styles.toggleBtn,
               billingCycle === 'annual' && styles.toggleActive,
+              billingCycle === 'annual' && toggleActiveStyle,
             ]}
             onPress={() => setBillingCycle('annual')}>
             <Text
               style={[
                 styles.toggleText,
+                { color: colors.textSecondary },
                 billingCycle === 'annual' && styles.toggleActiveText,
+                billingCycle === 'annual' && { color: colors.text },
               ]}>
               รายปี
             </Text>
-            <View style={styles.savingsPill}>
-              <Text style={styles.savingsPillText}>ประหยัด ~17%</Text>
+            <View style={[styles.savingsPill, { backgroundColor: colors.successLight }]}>
+              <Text style={[styles.savingsPillText, { color: colors.success }]}>ประหยัด ~17%</Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -374,7 +398,7 @@ export default function ShopScreen() {
         {/* ---- NURSE PLANS ---- */}
         {!isHospital && (
           <>
-            <Text style={styles.sectionTitle}>💊 แพ็กเกจสำหรับพยาบาล</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>แพ็กเกจสำหรับพยาบาล</Text>
             <NursePlanCard
               plan="free"
               isCurrent={currentPlan === 'free'}
@@ -395,7 +419,7 @@ export default function ShopScreen() {
         {/* ---- HOSPITAL PLANS ---- */}
         {isHospital && (
           <>
-            <Text style={styles.sectionTitle}>🏥 แพ็กเกจสำหรับโรงพยาบาล</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>แพ็กเกจสำหรับโรงพยาบาล</Text>
             {(
               [
                 'hospital_starter',
@@ -419,57 +443,57 @@ export default function ShopScreen() {
         )}
 
         {/* ---- ADD-ONS ---- */}
-        <Text style={styles.sectionTitle}>💡 ซื้อแยกรายครั้ง</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>ซื้อแยกรายครั้ง</Text>
 
-        <Card style={styles.itemCard}>
+        <Card style={StyleSheet.flatten([styles.itemCard, { backgroundColor: panelBackground, borderColor: subtleBorder, borderWidth: 1 }])}> 
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
               <Text style={styles.itemIcon}>📝</Text>
               <View>
-                <Text style={styles.itemTitle}>โพสต์เพิ่ม 1 ครั้ง</Text>
-                <Text style={styles.itemDesc}>เพิ่มโพสต์เมื่อครบ limit</Text>
+                <Text style={[styles.itemTitle, { color: colors.text }]}>โพสต์เพิ่ม 1 ครั้ง</Text>
+                <Text style={[styles.itemDesc, { color: colors.textSecondary }]}>เพิ่มโพสต์เมื่อครบ limit</Text>
               </View>
             </View>
             <TouchableOpacity
-              style={styles.buyButton}
+              style={[styles.buyButton, { backgroundColor: colors.primary }]}
               onPress={() => handleBuyAddon('extraPost')}>
-              <Text style={styles.buyButtonText}>฿{PRICING.extraPost}</Text>
+              <Text style={[styles.buyButtonText, { color: colors.white }]}>฿{PRICING.extraPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
 
-        <Card style={styles.itemCard}>
+        <Card style={StyleSheet.flatten([styles.itemCard, { backgroundColor: panelBackground, borderColor: subtleBorder, borderWidth: 1 }])}> 
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
               <Text style={styles.itemIcon}>⏰</Text>
               <View>
-                <Text style={styles.itemTitle}>ต่ออายุโพสต์ +1 วัน</Text>
-                <Text style={styles.itemDesc}>
+                <Text style={[styles.itemTitle, { color: colors.text }]}>ต่ออายุโพสต์ +1 วัน</Text>
+                <Text style={[styles.itemDesc, { color: colors.textSecondary }]}> 
                   ขยายอายุโพสต์ที่ใกล้หมดอายุ
                 </Text>
               </View>
             </View>
             <TouchableOpacity
-              style={styles.buyButton}
+              style={[styles.buyButton, { backgroundColor: colors.primary }]}
               onPress={() => handleBuyAddon('extendPost')}>
-              <Text style={styles.buyButtonText}>฿{PRICING.extendPost}</Text>
+              <Text style={[styles.buyButtonText, { color: colors.white }]}>฿{PRICING.extendPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
 
-        <Card style={styles.itemCard}>
+        <Card style={StyleSheet.flatten([styles.itemCard, { backgroundColor: panelBackground, borderColor: subtleBorder, borderWidth: 1 }])}> 
           <View style={styles.itemRow}>
             <View style={styles.itemInfo}>
               <Text style={styles.itemIcon}>⚡</Text>
               <View>
-                <Text style={styles.itemTitle}>ปุ่มด่วน (Urgent)</Text>
-                <Text style={styles.itemDesc}>ทำให้ประกาศโดดเด่นขึ้น</Text>
+                <Text style={[styles.itemTitle, { color: colors.text }]}>ปุ่มด่วน (Urgent)</Text>
+                <Text style={[styles.itemDesc, { color: colors.textSecondary }]}>ทำให้ประกาศโดดเด่นขึ้น</Text>
               </View>
             </View>
             <TouchableOpacity
-              style={styles.buyButton}
+              style={[styles.buyButton, { backgroundColor: colors.primary }]}
               onPress={() => handleBuyAddon('urgent')}>
-              <Text style={styles.buyButtonText}>฿{PRICING.urgentPost}</Text>
+              <Text style={[styles.buyButtonText, { color: colors.white }]}>฿{PRICING.urgentPost}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -477,18 +501,18 @@ export default function ShopScreen() {
         {/* ---- REFERRAL ---- */}
         {referralInfo && (
           <>
-            <Text style={styles.sectionTitle}>🎁 แนะนำเพื่อน</Text>
-            <Card style={styles.referralCard}>
-              <Text style={styles.referralTitle}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>แนะนำเพื่อน</Text>
+            <Card style={StyleSheet.flatten([styles.referralCard, { backgroundColor: colors.accentLight, borderColor: colors.accent }])}> 
+              <Text style={[styles.referralTitle, { color: colors.accentDark }]}> 
                 แนะนำเพื่อน → ได้ Pro ฟรี 1 เดือน!
               </Text>
-              <Text style={styles.referralDesc}>
+              <Text style={[styles.referralDesc, { color: colors.textSecondary }]}> 
                 เพื่อนสมัครและอัพเกรด คุณและเพื่อนได้รับ Nurse Pro ฟรี 1 เดือน
               </Text>
-              <View style={styles.referralCodeBox}>
-                <Text style={styles.referralCodeLabel}>โค้ดของคุณ</Text>
+              <View style={[styles.referralCodeBox, { backgroundColor: panelBackground, borderColor: colors.accent }]}> 
+                <Text style={[styles.referralCodeLabel, { color: colors.textMuted }]}>โค้ดของคุณ</Text>
                 <View style={styles.referralCodeRow}>
-                  <Text style={styles.referralCode}>
+                  <Text style={[styles.referralCode, { color: colors.text }]}> 
                     {referralInfo.referralCode}
                   </Text>
                   <TouchableOpacity
@@ -497,39 +521,39 @@ export default function ShopScreen() {
                     <Ionicons
                       name="copy-outline"
                       size={18}
-                      color={COLORS.primary}
+                      color={colors.primary}
                     />
-                    <Text style={styles.copyText}>คัดลอก</Text>
+                    <Text style={[styles.copyText, { color: colors.primary }]}>คัดลอก</Text>
                   </TouchableOpacity>
                 </View>
               </View>
-              <View style={styles.referralStats}>
+              <View style={[styles.referralStats, { backgroundColor: panelBackground }]}>
                 <View style={styles.statBox}>
-                  <Text style={styles.statNum}>
+                  <Text style={[styles.statNum, { color: colors.text }]}> 
                     {referralInfo.referredCount}
                   </Text>
-                  <Text style={styles.statLabel}>เพื่อนที่แนะนำ</Text>
+                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>เพื่อนที่แนะนำ</Text>
                 </View>
                 <View
                   style={[
                     styles.statBox,
-                    { borderLeftWidth: 1, borderLeftColor: COLORS.border },
+                    { borderLeftWidth: 1, borderLeftColor: colors.border },
                   ]}>
-                  <Text style={styles.statNum}>
+                  <Text style={[styles.statNum, { color: colors.text }]}> 
                     {referralInfo.rewardMonthsEarned}
                   </Text>
-                  <Text style={styles.statLabel}>เดือนฟรีที่ได้</Text>
+                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>เดือนฟรีที่ได้</Text>
                 </View>
                 <View
                   style={[
                     styles.statBox,
-                    { borderLeftWidth: 1, borderLeftColor: COLORS.border },
+                    { borderLeftWidth: 1, borderLeftColor: colors.border },
                   ]}>
-                  <Text style={styles.statNum}>
+                  <Text style={[styles.statNum, { color: colors.text }]}> 
                     {referralInfo.rewardMonthsEarned -
                       referralInfo.rewardMonthsUsed}
                   </Text>
-                  <Text style={styles.statLabel}>เดือนคงเหลือ</Text>
+                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>เดือนคงเหลือ</Text>
                 </View>
               </View>
             </Card>
@@ -551,10 +575,10 @@ export default function ShopScreen() {
       </ScrollView>
 
       {isPurchasing && (
-        <View style={styles.purchasingOverlay}>
-          <View style={styles.purchasingBox}>
+        <View style={[styles.purchasingOverlay, { backgroundColor: colors.overlay }]}>
+          <View style={[styles.purchasingBox, { backgroundColor: panelBackground }]}> 
             <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.purchasingText}>กำลังดำเนินการ...</Text>
+            <Text style={[styles.purchasingText, { color: colors.text }]}>กำลังดำเนินการ...</Text>
           </View>
         </View>
       )}
@@ -592,6 +616,7 @@ function NursePlanCard({
   onBuy,
   billingCycle,
 }: NursePlanCardProps) {
+  const { colors, isDark } = useTheme();
   const isFree = plan === 'free';
   const features = isFree
     ? ['โพสต์ 2 ครั้ง/วัน', 'โพสต์อยู่ 3 วัน', 'สมัครงาน 3 ครั้ง/วัน']
@@ -601,27 +626,31 @@ function NursePlanCard({
         'สมัครงานไม่จำกัด',
         '🎁 ปุ่มด่วนฟรี 1 ครั้ง/เดือน',
       ];
-  const color = isFree ? '#888' : '#FF8F00';
+  const tone = getPlanTone(plan, colors);
 
   return (
     <Card
       style={StyleSheet.flatten([
         styles.planCard,
-        isCurrent ? { borderColor: color, borderWidth: 2 } : undefined,
+        {
+          backgroundColor: isDark ? colors.surface : colors.white,
+          borderColor: isCurrent ? tone.accent : colors.border,
+          borderWidth: isCurrent ? 2 : 1,
+        },
       ])}>
       <View style={styles.planCardHeader}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.planCardName, { color }]}>
+          <Text style={[styles.planCardName, { color: tone.accent }]}> 
             {isFree ? '🆓 ฟรี' : '👑 Nurse Pro'}
           </Text>
           {!isFree && price !== undefined && (
-            <Text style={styles.planCardPrice}>
+            <Text style={[styles.planCardPrice, { color: colors.text }]}> 
               ฿{price}
-              <Text style={styles.planCardPriceUnit}>
+              <Text style={[styles.planCardPriceUnit, { color: colors.textSecondary }]}> 
                 /{billingCycle === 'annual' ? 'ปี' : 'เดือน'}
               </Text>
               {billingCycle === 'monthly' && (
-                <Text style={styles.planCardPriceUnit}>
+                <Text style={[styles.planCardPriceUnit, { color: colors.textSecondary }]}> 
                   {' '}(฿{PRICING.nursePro}/เดือน)
                 </Text>
               )}
@@ -629,29 +658,29 @@ function NursePlanCard({
           )}
         </View>
         {savings && savings > 0 ? (
-          <View style={styles.savingsTag}>
-            <Text style={styles.savingsTagText}>ประหยัด {savings}%</Text>
+          <View style={[styles.savingsTag, { backgroundColor: colors.successLight }]}>
+            <Text style={[styles.savingsTagText, { color: colors.success }]}>ประหยัด {savings}%</Text>
           </View>
         ) : null}
         {isCurrent && (
-          <View style={styles.currentTag}>
-            <Text style={styles.currentTagText}>ใช้งานอยู่</Text>
+          <View style={[styles.currentTag, { backgroundColor: tone.soft }]}>
+            <Text style={[styles.currentTagText, { color: tone.label }]}>ใช้งานอยู่</Text>
           </View>
         )}
       </View>
       <View style={styles.featureList}>
         {features.map((f, i) => (
           <View key={i} style={styles.featureRow}>
-            <Ionicons name="checkmark-circle" size={16} color={color} />
-            <Text style={styles.featureText}>{f}</Text>
+            <Ionicons name="checkmark-circle" size={16} color={tone.accent} />
+            <Text style={[styles.featureText, { color: colors.text }]}>{f}</Text>
           </View>
         ))}
       </View>
       {!isCurrent && !isFree && (
         <TouchableOpacity
-          style={[styles.planBuyBtn, { backgroundColor: color }]}
+          style={[styles.planBuyBtn, { backgroundColor: tone.accent }]}
           onPress={onBuy}>
-          <Text style={styles.planBuyBtnText}>อัพเกรด</Text>
+          <Text style={[styles.planBuyBtnText, { color: colors.white }]}>อัพเกรด</Text>
         </TouchableOpacity>
       )}
     </Card>
@@ -675,18 +704,17 @@ function HospitalPlanCard({
   onBuy,
   billingCycle,
 }: HospitalPlanCardProps) {
+  const { colors, isDark } = useTheme();
   const planMeta: Record<
     string,
-    { label: string; features: string[]; color: string }
+    { label: string; features: string[] }
   > = {
     hospital_starter: {
       label: '🏥 Starter',
-      color: '#0288D1',
       features: ['5 โพสต์/เดือน', 'โพสต์อยู่ 30 วัน', 'ค้นหาพยาบาล'],
     },
     hospital_pro: {
       label: '🏥 Professional',
-      color: '#6A1B9A',
       features: [
         'โพสต์ไม่จำกัด',
         'ปุ่มด่วนฟรี 3 ครั้ง/เดือน',
@@ -696,7 +724,6 @@ function HospitalPlanCard({
     },
     hospital_enterprise: {
       label: '🏢 Enterprise',
-      color: '#1B5E20',
       features: [
         'ทุกอย่างใน Pro',
         'ปุ่มด่วนฟรี 10 ครั้ง/เดือน',
@@ -707,48 +734,52 @@ function HospitalPlanCard({
   };
 
   const meta = planMeta[plan];
-  const color = meta?.color || '#444';
+  const tone = getPlanTone(plan, colors);
 
   return (
     <Card
       style={StyleSheet.flatten([
         styles.planCard,
-        isCurrent ? { borderColor: color, borderWidth: 2 } : undefined,
+        {
+          backgroundColor: isDark ? colors.surface : colors.white,
+          borderColor: isCurrent ? tone.accent : colors.border,
+          borderWidth: isCurrent ? 2 : 1,
+        },
       ])}>
       <View style={styles.planCardHeader}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.planCardName, { color }]}>{meta?.label}</Text>
-          <Text style={styles.planCardPrice}>
+          <Text style={[styles.planCardName, { color: tone.accent }]}>{meta?.label}</Text>
+          <Text style={[styles.planCardPrice, { color: colors.text }]}> 
             ฿{price}
-            <Text style={styles.planCardPriceUnit}>
+            <Text style={[styles.planCardPriceUnit, { color: colors.textSecondary }]}> 
               /{billingCycle === 'annual' ? 'ปี' : 'เดือน'}
             </Text>
           </Text>
         </View>
         {savings > 0 && (
-          <View style={styles.savingsTag}>
-            <Text style={styles.savingsTagText}>ประหยัด {savings}%</Text>
+          <View style={[styles.savingsTag, { backgroundColor: colors.successLight }]}>
+            <Text style={[styles.savingsTagText, { color: colors.success }]}>ประหยัด {savings}%</Text>
           </View>
         )}
         {isCurrent && (
-          <View style={styles.currentTag}>
-            <Text style={styles.currentTagText}>ใช้งานอยู่</Text>
+          <View style={[styles.currentTag, { backgroundColor: tone.soft }]}>
+            <Text style={[styles.currentTagText, { color: tone.label }]}>ใช้งานอยู่</Text>
           </View>
         )}
       </View>
       <View style={styles.featureList}>
         {(meta?.features || []).map((f, i) => (
           <View key={i} style={styles.featureRow}>
-            <Ionicons name="checkmark-circle" size={16} color={color} />
-            <Text style={styles.featureText}>{f}</Text>
+            <Ionicons name="checkmark-circle" size={16} color={tone.accent} />
+            <Text style={[styles.featureText, { color: colors.text }]}>{f}</Text>
           </View>
         ))}
       </View>
       {!isCurrent && (
         <TouchableOpacity
-          style={[styles.planBuyBtn, { backgroundColor: color }]}
+          style={[styles.planBuyBtn, { backgroundColor: tone.accent }]}
           onPress={onBuy}>
-          <Text style={styles.planBuyBtnText}>เลือกแผนนี้</Text>
+          <Text style={[styles.planBuyBtnText, { color: colors.white }]}>เลือกแผนนี้</Text>
         </TouchableOpacity>
       )}
     </Card>

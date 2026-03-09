@@ -392,6 +392,13 @@ export default function SettingsScreen() {
         <SectionHeader title="ช่วยเหลือและสนับสนุน" />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SettingRow
+            icon="sparkles"
+            title="คู่มือเริ่มต้นใช้งาน"
+            subtitle="ดูวิธีใช้แอปและฟีเจอร์สำคัญอีกครั้ง"
+            onPress={() => (navigation as any).navigate('OnboardingSurvey')}
+            showArrow
+          />
+          <SettingRow
             icon="help-circle"
             title="คำถามที่พบบ่อย"
             onPress={() => (navigation as any).navigate('Help')}
@@ -695,6 +702,36 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.xs,
     color: COLORS.textMuted,
     marginTop: SPACING.sm,
+  },
+  quickActionSection: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+  },
+  quickActionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    padding: SPACING.md,
+    gap: SPACING.md,
+  },
+  quickActionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickActionContent: {
+    flex: 1,
+  },
+  quickActionTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+  },
+  quickActionSubtitle: {
+    fontSize: FONT_SIZES.sm,
+    marginTop: 2,
   },
 
   // Subscription Styles

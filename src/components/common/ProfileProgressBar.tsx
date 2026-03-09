@@ -6,6 +6,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 
 // User type for profile progress
 interface User {
@@ -30,6 +31,7 @@ interface ProgressItem {
 }
 
 export default function ProfileProgressBar({ user, onPress }: ProfileProgressBarProps) {
+  const { colors, isDark } = useTheme();
   if (!user) return null;
 
   // Calculate progress items
@@ -75,13 +77,17 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
   const completedCount = items.filter(item => item.completed).length;
   const totalItems = items.length;
   const progressPercent = Math.round((completedCount / totalItems) * 100);
+  const panelBackground = isDark ? colors.surface : colors.white;
+  const subtlePanel = isDark ? colors.card : colors.background;
+  const completedTone = { background: colors.successLight, text: colors.success };
+  const progressColor = progressPercent >= 80 ? colors.success : progressPercent >= 50 ? colors.warning : colors.error;
 
   // If 100% complete, show minimal view
   if (progressPercent === 100) {
     return (
-      <View style={styles.completedContainer}>
-        <Ionicons name="checkmark-circle" size={18} color="#059669" style={{ marginRight: 6 }} />
-        <Text style={styles.completedText}>โปรไฟล์สมบูรณ์แล้ว</Text>
+      <View style={[styles.completedContainer, { backgroundColor: completedTone.background }]}> 
+        <Ionicons name="checkmark-circle" size={18} color={completedTone.text} style={{ marginRight: 6 }} />
+        <Text style={[styles.completedText, { color: completedTone.text }]}>โปรไฟล์สมบูรณ์แล้ว</Text>
       </View>
     );
   }
@@ -91,26 +97,24 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
 
   return (
     <TouchableOpacity 
-      style={styles.container} 
+      style={[styles.container, { backgroundColor: panelBackground, borderColor: colors.border }]} 
       onPress={onPress}
       activeOpacity={0.8}
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>โปรไฟล์ของคุณ</Text>
-        <Text style={styles.percentText}>{progressPercent}%</Text>
+        <Text style={[styles.title, { color: colors.text }]}>โปรไฟล์ของคุณ</Text>
+        <Text style={[styles.percentText, { color: colors.primary }]}>{progressPercent}%</Text>
       </View>
 
       {/* Progress Bar */}
       <View style={styles.progressContainer}>
-        <View style={styles.progressBackground}>
+        <View style={[styles.progressBackground, { backgroundColor: colors.borderLight }]}>
           <View 
             style={[
               styles.progressFill,
               { width: `${progressPercent}%` },
-              progressPercent >= 80 && styles.progressGreen,
-              progressPercent >= 50 && progressPercent < 80 && styles.progressYellow,
-              progressPercent < 50 && styles.progressRed,
+              { backgroundColor: progressColor },
             ]} 
           />
         </View>
@@ -123,13 +127,15 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
             key={item.key} 
             style={[
               styles.item,
+              { backgroundColor: subtlePanel, borderColor: colors.borderLight },
               item.completed && styles.itemCompleted,
+              item.completed && { backgroundColor: colors.successLight, borderColor: colors.success },
             ]}
           >
             <Ionicons
               name={item.completed ? 'checkmark' : item.icon as any}
               size={16}
-              color={item.completed ? '#10B981' : '#9CA3AF'}
+              color={item.completed ? colors.success : colors.textMuted}
             />
           </View>
         ))}
@@ -137,12 +143,12 @@ export default function ProfileProgressBar({ user, onPress }: ProfileProgressBar
 
       {/* Suggestion */}
       {nextIncomplete && (
-        <View style={styles.suggestion}>
-          <Ionicons name={nextIncomplete.icon as any} size={15} color={COLORS.primary} style={{ marginRight: 6 }} />
-          <Text style={styles.suggestionText}>
+        <View style={[styles.suggestion, { backgroundColor: colors.primaryBackground }]}> 
+          <Ionicons name={nextIncomplete.icon as any} size={15} color={colors.primary} style={{ marginRight: 6 }} />
+          <Text style={[styles.suggestionText, { color: colors.primary }]}>
             เพิ่ม{nextIncomplete.label}เพื่อโปรไฟล์ที่ดีขึ้น
           </Text>
-          <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
         </View>
       )}
     </TouchableOpacity>
@@ -202,15 +208,6 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     borderRadius: 4,
-  },
-  progressGreen: {
-    backgroundColor: '#10B981',
-  },
-  progressYellow: {
-    backgroundColor: '#F59E0B',
-  },
-  progressRed: {
-    backgroundColor: '#EF4444',
   },
   itemsContainer: {
     flexDirection: 'row',

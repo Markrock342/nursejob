@@ -38,9 +38,26 @@ export interface ApplicantDetails {
   userProfile?: {
     id: string;
     displayName: string;
+    firstName?: string;
+    lastName?: string;
     email: string;
     phone?: string;
     photoURL?: string;
+    role?: 'user' | 'nurse' | 'hospital' | 'admin';
+    orgType?: string;
+    staffType?: string;
+    staffTypes?: string[];
+    interestedStaffTypes?: string[];
+    workStyle?: string[];
+    careNeeds?: string[];
+    careTypes?: string[];
+    hiringUrgency?: string;
+    preferredProvince?: string;
+    location?: {
+      province?: string;
+      district?: string;
+    };
+    isVerified?: boolean;
     licenseNumber?: string;
     experience?: number;
     skills?: string[];
@@ -104,9 +121,23 @@ export async function getHospitalApplications(posterId: string): Promise<Applica
           userProfile: userProfile ? {
             id: userProfile.id,
             displayName: userProfile.displayName,
+            firstName: userProfile.firstName,
+            lastName: userProfile.lastName,
             email: userProfile.email,
             phone: userProfile.phone,
             photoURL: userProfile.photoURL || undefined,
+            role: userProfile.role,
+            orgType: userProfile.orgType,
+            staffType: userProfile.staffType,
+            staffTypes: userProfile.staffTypes,
+            interestedStaffTypes: userProfile.interestedStaffTypes,
+            workStyle: userProfile.workStyle,
+            careNeeds: userProfile.careNeeds,
+            careTypes: userProfile.careTypes,
+            hiringUrgency: userProfile.hiringUrgency,
+            preferredProvince: userProfile.preferredProvince,
+            location: userProfile.location,
+            isVerified: userProfile.isVerified,
             licenseNumber: userProfile.licenseNumber,
             experience: userProfile.experience,
             skills: userProfile.skills,
@@ -118,6 +149,10 @@ export async function getHospitalApplications(posterId: string): Promise<Applica
     
     return contacts.sort((a, b) => b.contactedAt.getTime() - a.contactedAt.getTime());
   } catch (error) {
+    if ((error as any)?.code === 'permission-denied') {
+      console.warn('[getHospitalApplications] permission denied while reading applicant records');
+      return [];
+    }
     console.error('Error getting contacts:', error);
     return [];
   }
@@ -151,9 +186,23 @@ export async function getJobApplications(shiftId: string): Promise<ApplicantDeta
         userProfile: userProfile ? {
           id: userProfile.id,
           displayName: userProfile.displayName,
+          firstName: userProfile.firstName,
+          lastName: userProfile.lastName,
           email: userProfile.email,
           phone: userProfile.phone,
           photoURL: userProfile.photoURL || undefined,
+          role: userProfile.role,
+          orgType: userProfile.orgType,
+          staffType: userProfile.staffType,
+          staffTypes: userProfile.staffTypes,
+          interestedStaffTypes: userProfile.interestedStaffTypes,
+          workStyle: userProfile.workStyle,
+          careNeeds: userProfile.careNeeds,
+          careTypes: userProfile.careTypes,
+          hiringUrgency: userProfile.hiringUrgency,
+          preferredProvince: userProfile.preferredProvince,
+          location: userProfile.location,
+          isVerified: userProfile.isVerified,
           licenseNumber: userProfile.licenseNumber,
           experience: userProfile.experience,
           skills: userProfile.skills,

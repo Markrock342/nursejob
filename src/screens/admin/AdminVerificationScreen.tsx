@@ -132,6 +132,7 @@ export default function AdminVerificationScreen() {
         <Avatar name={item.userName} size={50} />
         <View style={styles.requestInfo}>
           <Text style={styles.requestName}>{item.userName}</Text>
+          <Text style={styles.requestEmail}>{item.firstName} {item.lastName}</Text>
           <Text style={styles.requestEmail}>{item.userEmail}</Text>
           <Text style={styles.requestDate}>
             ส่งเมื่อ {formatRelativeTime(item.submittedAt)}
@@ -239,11 +240,25 @@ export default function AdminVerificationScreen() {
                 <Avatar name={selectedRequest.userName} size={60} />
                 <View style={styles.modalUserInfo}>
                   <Text style={styles.modalUserName}>{selectedRequest.userName}</Text>
+                  <Text style={styles.modalUserEmail}>{selectedRequest.firstName} {selectedRequest.lastName}</Text>
                   <Text style={styles.modalUserEmail}>{selectedRequest.userEmail}</Text>
                   {selectedRequest.userPhone && (
                     <Text style={styles.modalUserPhone}>📱 {selectedRequest.userPhone}</Text>
                   )}
                 </View>
+              </View>
+            </Card>
+
+            {/* Identity Info */}
+            <Card style={styles.modalCard}>
+              <Text style={styles.modalSectionTitle}>ข้อมูลผู้ยื่นคำขอ</Text>
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>ชื่อจริง:</Text>
+                <Text style={styles.modalInfoValue}>{selectedRequest.firstName}</Text>
+              </View>
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>นามสกุล:</Text>
+                <Text style={styles.modalInfoValue}>{selectedRequest.lastName}</Text>
               </View>
             </Card>
 

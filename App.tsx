@@ -78,11 +78,14 @@ function AppContent() {
   if (showSplash) return <SplashScreen />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.primary }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AuthProvider>
         <NotificationProvider>
           <ToastProvider>
-            <StatusBar style={isDark ? 'light' : 'light'} backgroundColor={colors.primary} />
+            <StatusBar
+              style={isDark ? 'light' : 'dark'}
+              backgroundColor={colors.background}
+            />
             <AppNavigator />
           </ToastProvider>
         </NotificationProvider>

@@ -125,6 +125,9 @@ export default function NotificationsScreen() {
   const navigation = useNavigation();
   const { user, requireAuth } = useAuth();
   const { colors } = useTheme();
+  const panelBackground = colors.surface;
+  const sectionBackground = colors.backgroundSecondary;
+  const unreadBackground = colors.primaryBackground;
   
   // State hooks
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -233,14 +236,17 @@ export default function NotificationsScreen() {
 
   // Render function callbacks
   const renderSectionHeader = useCallback(({ section }: { section: { title: string } }) => (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{section.title}</Text>
+    <View style={[styles.sectionHeader, { backgroundColor: sectionBackground, borderBottomColor: colors.border }]}>
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{section.title}</Text>
     </View>
-  ), []);
+  ), [colors.border, colors.textSecondary, sectionBackground]);
 
   const renderNotification = useCallback(({ item }: { item: Notification }) => (
     <TouchableOpacity
-      style={[styles.notificationItem, !item.isRead && styles.unread]}
+      style={[
+        styles.notificationItem,
+        { backgroundColor: item.isRead ? panelBackground : unreadBackground, borderBottomColor: colors.borderLight },
+      ]}
       onPress={() => handleNotificationPress(item)}
       onLongPress={() => handleDelete(item)}
       activeOpacity={0.7}
@@ -258,17 +264,17 @@ export default function NotificationsScreen() {
         />
       </View>
       <View style={styles.content}>
-        <Text style={[styles.title, !item.isRead && styles.titleUnread]}>
+        <Text style={[styles.title, { color: colors.text }, !item.isRead && styles.titleUnread]}>
           {item.title}
         </Text>
-        <Text style={styles.body} numberOfLines={2}>
+        <Text style={[styles.body, { color: colors.textSecondary }]} numberOfLines={2}>
           {item.body}
         </Text>
-        <Text style={styles.time}>{formatRelativeTime(item.createdAt)}</Text>
+        <Text style={[styles.time, { color: colors.textMuted }]}>{formatRelativeTime(item.createdAt)}</Text>
       </View>
-      {!item.isRead && <View style={styles.unreadDot} />}
+      {!item.isRead && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
     </TouchableOpacity>
-  ), [handleNotificationPress, handleDelete]);
+  ), [colors.borderLight, colors.primary, colors.text, colors.textMuted, colors.textSecondary, handleDelete, handleNotificationPress, panelBackground, unreadBackground]);
 
   // ============================================
   // 2. NOW CONDITIONAL RETURNS ARE SAFE
@@ -282,7 +288,7 @@ export default function NotificationsScreen() {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>การแจ้งเตือน</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>การแจ้งเตือน</Text>
           <View style={{ width: 80 }} />
         </View>
         <EmptyState
@@ -311,10 +317,10 @@ export default function NotificationsScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>การแจ้งเตือน</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>การแจ้งเตือน</Text>
         {unreadCount > 0 ? (
           <TouchableOpacity onPress={handleMarkAllRead} style={styles.markAllButton}>
-            <Text style={styles.markAllRead}>อ่านทั้งหมด</Text>
+            <Text style={[styles.markAllRead, { color: colors.primary }]}>อ่านทั้งหมด</Text>
           </TouchableOpacity>
         ) : (
           <View style={{ width: 80 }} />

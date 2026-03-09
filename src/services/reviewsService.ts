@@ -16,9 +16,11 @@ import {
   serverTimestamp,
   Timestamp,
   increment,
+  documentId,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { assertAuthUser } from './security/authGuards';
+import { getJobById } from './jobService';
 
 const REVIEWS_COLLECTION = 'reviews';
 const HOSPITALS_COLLECTION = 'hospitals';
@@ -57,6 +59,38 @@ export interface HospitalRating {
   };
 }
 
+export type ReviewTargetType = 'hospital' | 'user';
+
+export interface ReviewEligibility {
+  canReview: boolean;
+  isVerified: boolean;
+  relatedJobId?: string;
+  relatedJobTitle?: string;
+}
+
+function getEmploymentTargetId(targetId: string, targetType: ReviewTargetType) {
+  return targetType === 'hospital' ? { hospitalId: targetId, targetId } : { revieweeId: targetId, targetId };
+}
+
+function getTargetNameFromDoc(data: any): string {
+  return data.targetName || data.hospitalName || data.revieweeName || '';
+}
+
+function toReview(docSnap: any): Review {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    ...data,
+    hospitalId: data.hospitalId || data.targetId || data.revieweeId,
+    createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
+    updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+    response: data.response ? {
+      ...data.response,
+      respondedAt: data.response.respondedAt?.toDate(),
+    } : undefined,
+  } as Review;
+}
+
 // Create review
 export async function createReview(
   hospitalId: string,
@@ -70,36 +104,50 @@ export async function createReview(
     cons?: string;
     wouldRecommend?: boolean;
     userPhotoURL?: string;
+    targetType?: ReviewTargetType;
+    targetName?: string;
+    relatedJobId?: string;
+    isVerified?: boolean;
   }
 ): Promise<string> {
   try {
     assertAuthUser(userId, 'ไม่สามารถรีวิวแทนผู้ใช้อื่นได้');
 
+    const targetType = options?.targetType || 'hospital';
+    const targetId = hospitalId;
+
     // Check if user already reviewed this hospital
-    const existing = await getUserReviewForHospital(userId, hospitalId);
+    const existing = await getUserReviewForTarget(userId, targetId, targetType);
     if (existing) {
       throw new Error('คุณได้รีวิวโรงพยาบาลนี้แล้ว');
     }
 
     const docRef = await addDoc(collection(db, REVIEWS_COLLECTION), {
-      hospitalId,
+      ...getEmploymentTargetId(targetId, targetType),
+      targetType,
+      targetName: options?.targetName || null,
+      hospitalId: targetType === 'hospital' ? targetId : null,
       reviewerId: userId,
       userId,
       userName,
       userPhotoURL: options?.userPhotoURL || null,
+      revieweeId: targetType === 'user' ? targetId : null,
       rating,
       title,
       content,
       pros: options?.pros || null,
       cons: options?.cons || null,
       wouldRecommend: options?.wouldRecommend ?? true,
-      isVerified: false,
+      relatedJobId: options?.relatedJobId || null,
+      isVerified: options?.isVerified ?? false,
       helpful: 0,
       createdAt: serverTimestamp(),
     });
 
     // Update hospital rating
-    await updateHospitalRating(hospitalId);
+    if (targetType === 'hospital') {
+      await updateHospitalRating(targetId);
+    }
 
     return docRef.id;
   } catch (error) {
@@ -111,23 +159,7 @@ export async function createReview(
 // Get reviews for hospital
 export async function getHospitalReviews(hospitalId: string): Promise<Review[]> {
   try {
-    const q = query(
-      collection(db, REVIEWS_COLLECTION),
-      where('hospitalId', '==', hospitalId),
-      orderBy('createdAt', 'desc')
-    );
-    const snapshot = await getDocs(q);
-    
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
-      updatedAt: (doc.data().updatedAt as Timestamp)?.toDate(),
-      response: doc.data().response ? {
-        ...doc.data().response,
-        respondedAt: doc.data().response.respondedAt?.toDate(),
-      } : undefined,
-    })) as Review[];
+    return getReviewsForTarget(hospitalId, 'hospital');
   } catch (error) {
     console.error('Error getting reviews:', error);
     return [];
@@ -139,11 +171,19 @@ export async function getUserReviewForHospital(
   userId: string,
   hospitalId: string
 ): Promise<Review | null> {
+  return getUserReviewForTarget(userId, hospitalId, 'hospital');
+}
+
+export async function getUserReviewForTarget(
+  userId: string,
+  targetId: string,
+  targetType: ReviewTargetType = 'hospital'
+): Promise<Review | null> {
   try {
     const reviewerQuery = query(
       collection(db, REVIEWS_COLLECTION),
       where('reviewerId', '==', userId),
-      where('hospitalId', '==', hospitalId)
+      where(targetType === 'hospital' ? 'hospitalId' : 'revieweeId', '==', targetId)
     );
     let snapshot = await getDocs(reviewerQuery);
 
@@ -152,22 +192,112 @@ export async function getUserReviewForHospital(
       const legacyQuery = query(
         collection(db, REVIEWS_COLLECTION),
         where('userId', '==', userId),
-        where('hospitalId', '==', hospitalId)
+        where(targetType === 'hospital' ? 'hospitalId' : 'revieweeId', '==', targetId)
       );
       snapshot = await getDocs(legacyQuery);
     }
     
     if (snapshot.empty) return null;
     
-    const doc = snapshot.docs[0];
-    return {
-      id: doc.id,
-      ...doc.data(),
-      createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
-    } as Review;
+    return toReview(snapshot.docs[0]);
   } catch (error) {
     console.error('Error getting user review:', error);
     return null;
+  }
+}
+
+export async function getReviewsForTarget(
+  targetId: string,
+  targetType: ReviewTargetType = 'hospital'
+): Promise<Review[]> {
+  try {
+    const q = query(
+      collection(db, REVIEWS_COLLECTION),
+      where(targetType === 'hospital' ? 'hospitalId' : 'revieweeId', '==', targetId),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(toReview);
+  } catch (error) {
+    console.error('Error getting reviews for target:', error);
+    return [];
+  }
+}
+
+export async function getTargetRating(
+  targetId: string,
+  targetType: ReviewTargetType = 'hospital'
+): Promise<HospitalRating> {
+  try {
+    const reviews = await getReviewsForTarget(targetId, targetType);
+    const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let sum = 0;
+
+    reviews.forEach(review => {
+      sum += review.rating;
+      breakdown[review.rating as 1 | 2 | 3 | 4 | 5]++;
+    });
+
+    return {
+      averageRating: reviews.length > 0 ? Math.round((sum / reviews.length) * 10) / 10 : 0,
+      totalReviews: reviews.length,
+      ratingBreakdown: breakdown,
+    };
+  } catch (error) {
+    console.error('Error getting target rating:', error);
+    return {
+      averageRating: 0,
+      totalReviews: 0,
+      ratingBreakdown: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    };
+  }
+}
+
+export async function canUserReviewTarget(
+  currentUserId: string,
+  targetUserId: string,
+): Promise<ReviewEligibility> {
+  try {
+    assertAuthUser(currentUserId, 'ไม่สามารถตรวจสอบสิทธิ์รีวิวได้');
+
+    const [asWorkerSnap, asPosterSnap] = await Promise.all([
+      getDocs(query(
+        collection(db, 'shift_contacts'),
+        where('interestedUserId', '==', currentUserId),
+        where('status', '==', 'confirmed')
+      )),
+      getDocs(query(
+        collection(db, 'shift_contacts'),
+        where('posterId', '==', currentUserId),
+        where('status', '==', 'confirmed')
+      )),
+    ]);
+
+    const candidateDocs = [
+      ...asWorkerSnap.docs.filter((docSnap) => docSnap.data().posterId === targetUserId),
+      ...asPosterSnap.docs.filter((docSnap) => docSnap.data().interestedUserId === targetUserId),
+    ];
+
+    for (const docSnap of candidateDocs) {
+      const data = docSnap.data();
+      const job = data.jobId ? await getJobById(data.jobId) : null;
+      const now = new Date();
+      const expired = Boolean(job?.expiresAt && new Date(job.expiresAt as any) < now);
+      const completed = !job || job.status === 'closed' || job.status === 'expired' || job.status === 'deleted' || expired;
+      if (completed) {
+        return {
+          canReview: true,
+          isVerified: true,
+          relatedJobId: data.jobId,
+          relatedJobTitle: job?.title,
+        };
+      }
+    }
+
+    return { canReview: false, isVerified: false };
+  } catch (error) {
+    console.error('Error checking review eligibility:', error);
+    return { canReview: false, isVerified: false };
   }
 }
 
@@ -294,28 +424,5 @@ async function updateHospitalRating(hospitalId: string): Promise<void> {
 
 // Get hospital rating summary
 export async function getHospitalRating(hospitalId: string): Promise<HospitalRating> {
-  try {
-    const reviews = await getHospitalReviews(hospitalId);
-    
-    const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    let sum = 0;
-    
-    reviews.forEach(review => {
-      sum += review.rating;
-      breakdown[review.rating as 1 | 2 | 3 | 4 | 5]++;
-    });
-
-    return {
-      averageRating: reviews.length > 0 ? Math.round((sum / reviews.length) * 10) / 10 : 0,
-      totalReviews: reviews.length,
-      ratingBreakdown: breakdown,
-    };
-  } catch (error) {
-    console.error('Error getting hospital rating:', error);
-    return {
-      averageRating: 0,
-      totalReviews: 0,
-      ratingBreakdown: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-    };
-  }
+  return getTargetRating(hospitalId, 'hospital');
 }

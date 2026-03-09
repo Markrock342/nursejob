@@ -20,6 +20,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { formatRelativeTime } from '../../utils/helpers';
 import { getStaffTypeLabel } from '../../constants/jobOptions';
 import { StaffType } from '../../types';
+import { getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
 
 // ============================================
 // Helpers
@@ -44,6 +45,9 @@ const formatShiftDate = (date: Date): string => {
 
 // Build display for multi-date jobs
 const getShiftDateSummary = (job: JobPost): string => {
+  if (job.postType === 'job') {
+    return job.startDateNote || 'เริ่มงานตามตกลง';
+  }
   const dates = job.shiftDates;
   if (!dates || dates.length === 0) return formatShiftDate(job.shiftDate);
   if (dates.length === 1) {
@@ -55,6 +59,9 @@ const getShiftDateSummary = (job: JobPost): string => {
 };
 
 const getShiftTimeSummary = (job: JobPost): string => {
+  if (job.postType === 'job') {
+    return job.workHours || job.shiftTime || 'เวลางานตามตกลง';
+  }
   const slots = job.shiftTimeSlots;
   const dates = job.shiftDates;
   if (!slots || !dates || dates.length === 0) {
@@ -102,6 +109,17 @@ export function JobCard({
 
   const isUrgent = job.status === 'urgent' || job.isUrgent;
   const distanceKm: number | undefined = (job as any)._distanceKm;
+  const roleLabel = getRoleLabel(job.posterRole, job.posterOrgType, job.posterStaffType);
+  const showRoleTag = hasRoleTag(job.posterRole, job.posterOrgType, job.posterStaffType);
+  const roleTagColors = getRoleTagColors(job.posterRole);
+  const premiumTagText = getPremiumTagText(job.posterPlan);
+  const premiumTagColors = getPremiumTagColors();
+  const verificationTagText = getVerificationTagText({
+    isVerified: job.posterVerified,
+    role: job.posterRole,
+    orgType: job.posterOrgType,
+    staffType: job.posterStaffType,
+  });
 
   const handlePosterPress = () => {
     if (showPosterProfile && job.posterId) {
@@ -189,10 +207,32 @@ export function JobCard({
                 {job.posterName}
               </Text>
             </TouchableOpacity>
-            {job.posterVerified ? (
-              <View style={[styles.verifiedBadge, { backgroundColor: colors.primaryBackground }]}>
+            {showRoleTag ? (
+              <View style={[styles.inlineTag, { backgroundColor: roleTagColors.backgroundColor }]}> 
+                <Ionicons
+                  name={getRoleIconName(job.posterRole)}
+                  size={11}
+                  color={roleTagColors.textColor}
+                />
+                <Text style={[styles.inlineTagText, { color: roleTagColors.textColor }]} numberOfLines={1}>
+                  {roleLabel}
+                </Text>
+              </View>
+            ) : null}
+            {hasPremiumTag(job.posterPlan) ? (
+              <View style={[styles.inlineTag, { backgroundColor: premiumTagColors.backgroundColor }]}> 
+                <Ionicons name="diamond" size={11} color={premiumTagColors.textColor} />
+                <Text style={[styles.inlineTagText, { color: premiumTagColors.textColor }]} numberOfLines={1}>
+                  {premiumTagText}
+                </Text>
+              </View>
+            ) : null}
+            {verificationTagText ? (
+              <View style={[styles.inlineTag, { backgroundColor: colors.primaryBackground }] }>
                 <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
-                <Text style={[styles.verifiedText, { color: colors.primary }]}>ยืนยันแล้ว</Text>
+                <Text style={[styles.inlineTagText, { color: colors.primary }]} numberOfLines={1}>
+                  {verificationTagText}
+                </Text>
               </View>
             ) : null}
           </View>
@@ -385,17 +425,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flexShrink: 1,
   },
-  verifiedBadge: {
+  inlineTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.full,
+    maxWidth: 132,
   },
-  verifiedText: {
-    fontSize: 10,
+  inlineTagText: {
+    fontSize: 9,
     fontWeight: '600',
+    flexShrink: 1,
   },
   locationRow: {
     flexDirection: 'row',

@@ -35,7 +35,38 @@ export default function NearbyJobAlertScreen() {
   const navigation = useNavigation() as any;
   const { user, updateUser } = useAuth();
   const { hasPermission, registerForNotifications } = useNotifications();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+
+  const heroTone = {
+    background: colors.primaryBackground,
+    icon: colors.primary,
+  };
+  const pushStatusTone = hasPermission
+    ? {
+        background: colors.successLight,
+        border: colors.success,
+        icon: colors.success,
+        title: colors.success,
+        text: colors.success,
+      }
+    : {
+        background: colors.warningLight,
+        border: colors.warning,
+        icon: colors.warning,
+        title: colors.warning,
+        text: colors.warning,
+      };
+  const locationTone = {
+    background: isDark ? colors.card : colors.primaryBackground,
+    refreshBackground: colors.primaryBackground,
+    hintBackground: colors.warningLight,
+    hintText: colors.warning,
+  };
+  const infoTone = {
+    background: colors.infoLight,
+    border: colors.info,
+    text: colors.info,
+  };
 
   const [enabled, setEnabled] = useState(false);
   const [radiusKm, setRadiusKm] = useState(5);
@@ -183,7 +214,7 @@ export default function NearbyJobAlertScreen() {
         style={[styles.container, { backgroundColor: colors.background }]}
         edges={['top']}
       >
-        <ActivityIndicator style={{ flex: 1 }} size="large" color="#0EA5E9" />
+        <ActivityIndicator style={{ flex: 1 }} size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -210,8 +241,8 @@ export default function NearbyJobAlertScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* ── Hero section ─────────────────── */}
         <View style={styles.hero}>
-          <View style={styles.heroIcon}>
-            <Ionicons name="location" size={38} color="#0EA5E9" />
+          <View style={[styles.heroIcon, { backgroundColor: heroTone.background }]}>
+            <Ionicons name="location" size={38} color={heroTone.icon} />
           </View>
           <Text style={[styles.heroTitle, { color: colors.text }]}>แจ้งเตือนงานใกล้คุณ</Text>
           <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>
@@ -224,21 +255,21 @@ export default function NearbyJobAlertScreen() {
           style={[
             styles.statusCard,
             {
-              backgroundColor: hasPermission ? '#ECFDF5' : '#FFF7ED',
-              borderColor: hasPermission ? '#86EFAC' : '#FDBA74',
+              backgroundColor: pushStatusTone.background,
+              borderColor: pushStatusTone.border,
             },
           ]}
         >
           <Ionicons
             name={hasPermission ? 'notifications-circle' : 'notifications-off-circle'}
             size={22}
-            color={hasPermission ? '#059669' : '#EA580C'}
+            color={pushStatusTone.icon}
           />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.statusTitle, { color: hasPermission ? '#065F46' : '#9A3412' }]}>
+            <Text style={[styles.statusTitle, { color: pushStatusTone.title }]}>
               {hasPermission ? 'Push Notification พร้อมใช้งาน' : 'ยังไม่เปิดสิทธิ์แจ้งเตือน'}
             </Text>
-            <Text style={[styles.statusSub, { color: hasPermission ? '#047857' : '#C2410C' }]}>
+            <Text style={[styles.statusSub, { color: pushStatusTone.text }]}>
               {hasPermission
                 ? 'เมื่อมีงานใหม่ในรัศมีที่ตั้งไว้ ระบบจะส่งแจ้งเตือนทันที'
                 : 'กดบันทึกเพื่อขอสิทธิ์แจ้งเตือน และรับงานใหม่ใกล้ตัว'}
@@ -255,8 +286,8 @@ export default function NearbyJobAlertScreen() {
         >
           <View style={styles.toggleRow}>
             <View style={styles.toggleLeft}>
-              <View style={styles.toggleIconWrap}>
-                <Ionicons name="notifications" size={20} color="#0EA5E9" />
+              <View style={[styles.toggleIconWrap, { backgroundColor: colors.primaryBackground }]}>
+                <Ionicons name="notifications" size={20} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.toggleTitle, { color: colors.text }]}>
@@ -270,8 +301,8 @@ export default function NearbyJobAlertScreen() {
             <Switch
               value={enabled}
               onValueChange={setEnabled}
-              trackColor={{ false: colors.border, true: '#BAE6FD' }}
-              thumbColor={enabled ? '#0EA5E9' : '#CBD5E1'}
+              trackColor={{ false: colors.border, true: colors.primaryBackground }}
+              thumbColor={enabled ? colors.primary : colors.textMuted}
             />
           </View>
         </View>
@@ -288,18 +319,18 @@ export default function NearbyJobAlertScreen() {
             >
               <Text style={[styles.cardTitle, { color: colors.text }]}>ตำแหน่งของคุณ</Text>
               <TouchableOpacity
-                style={styles.locationRow}
+                style={[styles.locationRow, { backgroundColor: locationTone.background }]}
                 onPress={getLocation}
                 disabled={isLoadingLocation}
                 activeOpacity={0.7}
               >
                 {isLoadingLocation ? (
-                  <ActivityIndicator size="small" color="#0EA5E9" style={{ marginRight: 8 }} />
+                  <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 8 }} />
                 ) : (
                   <Ionicons
                     name={lat ? 'location' : 'location-outline'}
                     size={22}
-                    color="#0EA5E9"
+                    color={colors.primary}
                     style={{ marginRight: 8 }}
                   />
                 )}
@@ -320,16 +351,16 @@ export default function NearbyJobAlertScreen() {
                     </Text>
                   )}
                 </View>
-                <View style={styles.refreshTag}>
-                  <Ionicons name="refresh" size={14} color="#0EA5E9" />
-                  <Text style={styles.refreshTagText}>อัพเดท</Text>
+                <View style={[styles.refreshTag, { backgroundColor: locationTone.refreshBackground }]}> 
+                  <Ionicons name="refresh" size={14} color={colors.primary} />
+                  <Text style={[styles.refreshTagText, { color: colors.primary }]}>อัพเดท</Text>
                 </View>
               </TouchableOpacity>
 
               {!lat && (
-                <View style={styles.locationHint}>
-                  <Ionicons name="information-circle-outline" size={14} color="#F59E0B" />
-                  <Text style={styles.locationHintText}>
+                <View style={[styles.locationHint, { backgroundColor: locationTone.hintBackground }]}> 
+                  <Ionicons name="information-circle-outline" size={14} color={locationTone.hintText} />
+                  <Text style={[styles.locationHintText, { color: locationTone.hintText }]}> 
                     ต้องการตำแหน่งของคุณเพื่อแจ้งเตือนงานใกล้เคียง
                   </Text>
                 </View>
@@ -348,16 +379,21 @@ export default function NearbyJobAlertScreen() {
               </Text>
 
               <View style={styles.radiusHeroRow}>
-                <View style={styles.radiusBigWrap}>
-                  <Text style={styles.radiusBig}>{radiusKm}</Text>
-                  <Text style={styles.radiusUnit}>กม.</Text>
+                <View
+                  style={[
+                    styles.radiusBigWrap,
+                    { backgroundColor: colors.primaryBackground, borderColor: colors.primary },
+                  ]}
+                >
+                  <Text style={[styles.radiusBig, { color: colors.primary }]}>{radiusKm}</Text>
+                  <Text style={[styles.radiusUnit, { color: colors.primaryDark }]}>กม.</Text>
                 </View>
                 <View style={styles.radiusMetaWrap}>
-                  <Text style={styles.radiusMetaTitle}>โหมดครอบคลุม</Text>
-                  <Text style={styles.radiusMetaValue}>
+                  <Text style={[styles.radiusMetaTitle, { color: colors.textSecondary }]}>โหมดครอบคลุม</Text>
+                  <Text style={[styles.radiusMetaValue, { color: colors.text }]}>
                     {radiusKm <= 3 ? 'แม่นยำสูง' : radiusKm <= 10 ? 'สมดุล' : 'ครอบคลุมกว้าง'}
                   </Text>
-                  <Text style={styles.radiusMetaHint}>ปรับระยะได้ตามความต้องการรับงาน</Text>
+                  <Text style={[styles.radiusMetaHint, { color: colors.textSecondary }]}>ปรับระยะได้ตามความต้องการรับงาน</Text>
                 </View>
               </View>
 
@@ -370,8 +406,8 @@ export default function NearbyJobAlertScreen() {
                       style={[
                         styles.radiusChip,
                         {
-                          backgroundColor: isActive ? '#0EA5E9' : colors.background,
-                          borderColor: isActive ? '#0EA5E9' : colors.border,
+                          backgroundColor: isActive ? colors.primary : (isDark ? colors.card : colors.background),
+                          borderColor: isActive ? colors.primary : colors.border,
                         },
                       ]}
                       onPress={() => setRadiusKm(r)}
@@ -380,7 +416,7 @@ export default function NearbyJobAlertScreen() {
                       <Text
                         style={[
                           styles.radiusChipText,
-                          { color: isActive ? '#FFF' : colors.textSecondary },
+                          { color: isActive ? colors.white : colors.textSecondary },
                         ]}
                       >
                         {r} กม.
@@ -397,6 +433,7 @@ export default function NearbyJobAlertScreen() {
                     style={[
                       styles.scaleFill,
                       {
+                        backgroundColor: colors.primary,
                         width: `${(RADIUS_OPTIONS.indexOf(radiusKm) + 1) / RADIUS_OPTIONS.length * 100}%`,
                       },
                     ]}
@@ -414,9 +451,9 @@ export default function NearbyJobAlertScreen() {
             </View>
 
             {/* Info box */}
-            <View style={styles.infoBox}>
-              <Ionicons name="bulb-outline" size={18} color="#0EA5E9" style={{ marginTop: 2 }} />
-              <Text style={styles.infoText}>
+            <View style={[styles.infoBox, { backgroundColor: infoTone.background, borderLeftColor: infoTone.border }]}> 
+              <Ionicons name="bulb-outline" size={18} color={infoTone.border} style={{ marginTop: 2 }} />
+              <Text style={[styles.infoText, { color: infoTone.text }]}> 
                 ระบบจะส่ง Push Notification ทันทีเมื่อมีการโพสต์งานใหม่ภายในรัศมีที่คุณกำหนด
                 ตำแหน่งของคุณจะถูกใช้เพื่อคำนวณระยะทางเท่านั้น
               </Text>
@@ -426,16 +463,16 @@ export default function NearbyJobAlertScreen() {
 
         {/* ── Save button ───────────────────── */}
         <TouchableOpacity
-          style={[styles.saveBtn, isSaving && { opacity: 0.6 }]}
+          style={[styles.saveBtn, { backgroundColor: colors.primary }, isSaving && { opacity: 0.6 }]}
           onPress={handleSave}
           disabled={isSaving}
           activeOpacity={0.8}
         >
           {isSaving ? (
-            <ActivityIndicator size="small" color="#FFF" />
+            <ActivityIndicator size="small" color={colors.white} />
           ) : (
             <>
-              <Ionicons name="checkmark-circle" size={20} color="#FFF" />
+              <Ionicons name="checkmark-circle" size={20} color={colors.white} />
               <Text style={styles.saveBtnText}>บันทึกการตั้งค่า</Text>
             </>
           )}
@@ -472,7 +509,6 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#E0F2FE',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.md,
@@ -538,7 +574,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#E0F2FE',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -548,7 +583,6 @@ const styles = StyleSheet.create({
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F9FF',
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
   },
@@ -558,23 +592,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: '#E0F2FE',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 20,
     marginLeft: SPACING.sm,
   },
-  refreshTagText: { fontSize: 11, color: '#0EA5E9', fontWeight: '600' },
+  refreshTagText: { fontSize: 11, fontWeight: '600' },
   locationHint: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     marginTop: SPACING.sm,
-    backgroundColor: '#FFFBEB',
     borderRadius: BORDER_RADIUS.sm,
     padding: SPACING.sm,
   },
-  locationHintText: { fontSize: FONT_SIZES.xs, color: '#92400E', flex: 1 },
+  locationHintText: { fontSize: FONT_SIZES.xs, flex: 1 },
 
   radiusHeroRow: {
     flexDirection: 'row',
@@ -586,41 +618,34 @@ const styles = StyleSheet.create({
     width: 108,
     height: 108,
     borderRadius: 54,
-    backgroundColor: '#E0F2FE',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#7DD3FC',
   },
   radiusBig: {
     fontSize: 36,
     fontWeight: '800',
-    color: '#0EA5E9',
     lineHeight: 40,
   },
   radiusUnit: {
     fontSize: FONT_SIZES.xs,
     fontWeight: '700',
-    color: '#0284C7',
   },
   radiusMetaWrap: {
     flex: 1,
   },
   radiusMetaTitle: {
     fontSize: FONT_SIZES.xs,
-    color: '#64748B',
     fontWeight: '600',
     marginBottom: 2,
   },
   radiusMetaValue: {
     fontSize: FONT_SIZES.lg,
-    color: '#0F172A',
     fontWeight: '800',
   },
   radiusMetaHint: {
     marginTop: 4,
     fontSize: FONT_SIZES.xs,
-    color: '#64748B',
   },
   radiusGrid: {
     flexDirection: 'row',
@@ -646,7 +671,6 @@ const styles = StyleSheet.create({
   },
   scaleFill: {
     height: 6,
-    backgroundColor: '#0EA5E9',
     borderRadius: 3,
   },
   scaleLabels: {
@@ -661,16 +685,13 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     marginHorizontal: SPACING.md,
     marginBottom: SPACING.md,
-    backgroundColor: '#EFF6FF',
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     borderLeftWidth: 3,
-    borderLeftColor: '#0EA5E9',
   },
   infoText: {
     flex: 1,
     fontSize: FONT_SIZES.xs,
-    color: '#1E40AF',
     lineHeight: 18,
   },
 
@@ -679,7 +700,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.sm,
-    backgroundColor: '#0EA5E9',
     marginHorizontal: SPACING.md,
     marginTop: SPACING.sm,
     paddingVertical: 16,

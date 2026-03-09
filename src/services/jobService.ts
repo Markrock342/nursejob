@@ -78,10 +78,21 @@ function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
     title: data.title || 'หาคนแทน',
     posterName: data.posterName || 'ไม่ระบุชื่อ',
     posterId: data.posterId || '',
-    posterVerified: data.posterVerified || false,
+    posterVerified: data.posterVerified,
+    posterRole: data.posterRole,
+    posterOrgType: data.posterOrgType,
+    posterStaffType: data.posterStaffType,
+    posterPlan: data.posterPlan,
     department: data.department || 'ทั่วไป',
+    description: data.description || '',
+    benefits: Array.isArray(data.benefits) ? data.benefits : [],
+    employmentType: data.employmentType || data.salaryType,
+    startDateNote: data.startDateNote,
+    workHours: data.workHours,
     shiftRate: data.shiftRate || 0,
+    salary: data.salary,
     rateType: data.rateType || 'shift',
+    salaryType: data.salaryType,
     shiftDate: data.shiftDate?.toDate?.() ?? new Date(),
     shiftTime: data.shiftTime || '',
     location: {
@@ -107,6 +118,51 @@ function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
     viewsCount: data.viewsCount || 0,
     applicantsCount: data.applicantsCount || 0,
   } as JobPost;
+}
+
+async function enrichJobsWithPosterMetadata(jobs: JobPost[]): Promise<JobPost[]> {
+  const posterIds = [...new Set(
+    jobs
+      .filter((job) => job.posterId && (!job.posterRole || !job.posterStaffType || job.posterVerified === undefined))
+      .map((job) => job.posterId)
+  )];
+
+  if (posterIds.length === 0) return jobs;
+
+  const posterEntries = await Promise.all(
+    posterIds.map(async (posterId) => {
+      try {
+        const posterDoc = await getDoc(doc(db, 'users', posterId));
+        if (!posterDoc.exists()) return [posterId, null] as const;
+        const posterData = posterDoc.data();
+        return [posterId, {
+          role: posterData.role,
+          orgType: posterData.orgType,
+          staffType: posterData.staffType,
+          isVerified: Boolean(posterData.isVerified),
+          plan: posterData.subscription?.plan,
+        }] as const;
+      } catch {
+        return [posterId, null] as const;
+      }
+    })
+  );
+
+  const posterMap = new Map(posterEntries);
+
+  return jobs.map((job) => {
+    const poster = posterMap.get(job.posterId);
+    if (!poster) return job;
+
+    return {
+      ...job,
+      posterRole: job.posterRole || poster.role,
+      posterOrgType: job.posterOrgType || poster.orgType,
+      posterStaffType: job.posterStaffType || poster.staffType,
+      posterVerified: job.posterVerified ?? poster.isVerified,
+      posterPlan: job.posterPlan || poster.plan,
+    };
+  });
 }
 
 /** ตรวจว่าโพสต์ active และยังไม่หมดอายุ */
@@ -146,7 +202,9 @@ export function subscribeToJobs(callback: (jobs: JobPost[]) => void): () => void
       return;
     }
 
-    callback(jobs);
+    enrichJobsWithPosterMetadata(jobs)
+      .then(callback)
+      .catch(() => callback(jobs));
   }, (error) => {
     // ถ้า permission-denied → ไม่ต้อง callback และไม่ต้อง log error spam
     if ((error as any)?.code === 'permission-denied') {
@@ -178,6 +236,7 @@ export async function getJobs(
 
     const snapshot = await getDocs(jobsQuery);
     let jobs = snapshot.docs.map(mapDocToJob).filter(isActivePost);
+    jobs = await enrichJobsWithPosterMetadata(jobs);
 
     // Client-side filters
     if (filters) {
@@ -215,7 +274,9 @@ export async function getJobById(jobId: string): Promise<JobPost | null> {
   try {
     const docSnap = await getDoc(doc(db, JOBS_COLLECTION, jobId));
     if (!docSnap.exists()) return null;
-    return mapDocToJob(docSnap as QueryDocumentSnapshot);
+    const job = mapDocToJob(docSnap as QueryDocumentSnapshot);
+    const [enrichedJob] = await enrichJobsWithPosterMetadata([job]);
+    return enrichedJob;
   } catch (error) {
     console.error('[getJobById] error:', error);
     throw error;
@@ -262,7 +323,12 @@ export async function getJobsNearby(
       limit(PAGE_SIZE),
     );
     const snapshot = await getDocs(jobsQuery);
-    const jobs = snapshot.docs.map(mapDocToJob).filter(isActivePost);
+    let jobs = snapshot.docs.map(mapDocToJob).filter(isActivePost);
+    jobs = jobs.filter((job) => {
+      if (job.lat == null || job.lng == null) return false;
+      return getDistanceKm(lat, lng, job.lat, job.lng) <= radiusKm;
+    });
+    jobs = await enrichJobsWithPosterMetadata(jobs);
 
     // เรียงตามระยะทางจริงโดยใช้ Haversine
     jobs.sort((a, b) => {
@@ -446,15 +512,14 @@ export async function deleteJob(jobId: string): Promise<void> {
 // Get jobs by user ID (ประกาศของฉัน)
 export async function getUserPosts(userId: string): Promise<JobPost[]> {
   try {
-    if (!isAuthUser(userId)) return [];
-
     const jobsQuery = query(
       collection(db, JOBS_COLLECTION),
       where('posterId', '==', userId),
       orderBy('createdAt', 'desc'),
     );
     const snapshot = await getDocs(jobsQuery);
-    return snapshot.docs.map(mapDocToJob);
+    const jobs = snapshot.docs.map(mapDocToJob);
+    return enrichJobsWithPosterMetadata(jobs);
   } catch (error) {
     console.error('[getUserPosts] error:', error);
     return [];
@@ -466,11 +531,6 @@ export function subscribeToUserPosts(
   userId: string,
   callback: (posts: JobPost[]) => void,
 ): () => void {
-  if (!isAuthUser(userId)) {
-    callback([]);
-    return () => {};
-  }
-
   const postsQuery = query(
     collection(db, JOBS_COLLECTION),
     where('posterId', '==', userId),
@@ -478,7 +538,10 @@ export function subscribeToUserPosts(
   );
 
   return onSnapshot(postsQuery, (snapshot) => {
-    callback(snapshot.docs.map(mapDocToJob));
+    const jobs = snapshot.docs.map(mapDocToJob);
+    enrichJobsWithPosterMetadata(jobs)
+      .then(callback)
+      .catch(() => callback(jobs));
   }, (error) => {
     console.error('[subscribeToUserPosts] error:', error);
     callback([]);

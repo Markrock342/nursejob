@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
 
 // Guard geolocation import so app doesn't crash in Expo Go where
@@ -26,6 +26,42 @@ export function useLocation() {
   const [location, setLocation] = useState<UserLocation | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+
+  const clearLocationWatch = useCallback(() => {
+    const G = getGeolocationSync();
+    if (!G || watchIdRef.current == null) return;
+    try {
+      G.clearWatch(watchIdRef.current);
+    } catch (_) {}
+    watchIdRef.current = null;
+  }, []);
+
+  const startWatching = useCallback(() => {
+    const G = getGeolocationSync();
+    if (!G || watchIdRef.current != null) return;
+
+    watchIdRef.current = G.watchPosition(
+      (pos: any) => {
+        setLocation({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+        setError(null);
+      },
+      (err: any) => {
+        setError(err.message);
+      },
+      {
+        enableHighAccuracy: true,
+        distanceFilter: 100,
+        interval: 30000,
+        fastestInterval: 15000,
+        showsBackgroundLocationIndicator: false,
+      }
+    );
+  }, []);
 
   const requestPermission = useCallback(async () => {
     if (Platform.OS === 'android') {
@@ -49,7 +85,7 @@ export function useLocation() {
     return true;
   }, []);
 
-  const getLocation = useCallback(async () => {
+  const getLocation = useCallback(async (): Promise<UserLocation | null> => {
     setLoading(true);
     setError(null);
     try {
@@ -57,35 +93,44 @@ export function useLocation() {
       if (!hasPermission) {
         setError('ไม่ได้รับอนุญาตให้เข้าถึงตำแหน่ง');
         setLoading(false);
-        return;
+        return null;
       }
       const G = getGeolocationSync();
       if (!G) {
         setError('Geolocation native module not available (Expo Go). Use a development build or run on a device with the native module installed.');
         setLoading(false);
-        return;
+        return null;
       }
 
-      G.getCurrentPosition(
-        (pos: any) => {
-          setLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy: pos.coords.accuracy,
-          });
-          setLoading(false);
-        },
-        (err: any) => {
-          setError(err.message);
-          setLoading(false);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
-      );
+      return await new Promise<UserLocation | null>((resolve) => {
+        G.getCurrentPosition(
+          (pos: any) => {
+            const nextLocation = {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+            };
+            setLocation(nextLocation);
+            startWatching();
+            setLoading(false);
+            resolve(nextLocation);
+          },
+          (err: any) => {
+            setError(err.message);
+            setLoading(false);
+            resolve(null);
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+        );
+      });
     } catch (e: any) {
       setError(e.message);
       setLoading(false);
+      return null;
     }
-  }, [requestPermission]);
+  }, [requestPermission, startWatching]);
+
+  useEffect(() => () => clearLocationWatch(), [clearLocationWatch]);
 
   return { location, loading, error, getLocation };
 }

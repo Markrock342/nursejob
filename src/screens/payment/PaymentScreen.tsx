@@ -48,6 +48,10 @@ export default function PaymentScreen({ route, navigation }: Props) {
         (jobData as any).posterName = user.displayName || 'ไม่ระบุชื่อ';
         (jobData as any).posterPhoto = user.photoURL || '';
         (jobData as any).posterVerified = Boolean((user as any).isVerified);
+        (jobData as any).posterRole = (user as any).role;
+        (jobData as any).posterOrgType = (user as any).orgType;
+        (jobData as any).posterStaffType = (user as any).staffType;
+        (jobData as any).posterPlan = (user as any)?.subscription?.plan || 'free';
       }
 
       await createJob(jobData as Partial<JobPost>);

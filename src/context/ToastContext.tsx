@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../theme';
+import { useTheme } from './ThemeContext';
 
 // ============================================
 // Types
@@ -60,6 +61,7 @@ interface ToastProviderProps {
 
 export function ToastProvider({ children }: ToastProviderProps) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const [toast, setToast] = useState<ToastConfig | null>(null);
   const [visible, setVisible] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -136,27 +138,27 @@ export function ToastProvider({ children }: ToastProviderProps) {
       case 'success':
         return {
           icon: 'checkmark-circle' as const,
-          backgroundColor: '#10B981',
-          iconColor: '#FFFFFF',
+          backgroundColor: colors.success,
+          iconColor: colors.white,
         };
       case 'error':
         return {
           icon: 'close-circle' as const,
-          backgroundColor: '#EF4444',
-          iconColor: '#FFFFFF',
+          backgroundColor: colors.error,
+          iconColor: colors.white,
         };
       case 'warning':
         return {
           icon: 'warning' as const,
-          backgroundColor: '#F59E0B',
-          iconColor: '#FFFFFF',
+          backgroundColor: colors.warning,
+          iconColor: colors.white,
         };
       case 'info':
       default:
         return {
           icon: 'information-circle' as const,
-          backgroundColor: COLORS.primary,
-          iconColor: '#FFFFFF',
+          backgroundColor: colors.primary,
+          iconColor: colors.white,
         };
     }
   };
@@ -194,9 +196,9 @@ export function ToastProvider({ children }: ToastProviderProps) {
             </View>
             <View style={styles.textContainer}>
               {toast.title && (
-                <Text style={styles.title}>{toast.title}</Text>
+                <Text style={[styles.title, { color: colors.white }]}>{toast.title}</Text>
               )}
-              <Text style={styles.message} numberOfLines={2}>{toast.message}</Text>
+              <Text style={[styles.message, { color: 'rgba(255,255,255,0.9)' }]} numberOfLines={2}>{toast.message}</Text>
             </View>
             <TouchableOpacity onPress={hideToast} style={styles.closeButton}>
               <Ionicons name="close" size={20} color="rgba(255,255,255,0.7)" />

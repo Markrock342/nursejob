@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { useTheme, ThemeColors } from '../../context/ThemeContext';
 
 // ============================================
 // Error Boundary Component
@@ -16,6 +17,11 @@ interface Props {
   children: React.ReactNode;
 }
 
+interface InnerProps extends Props {
+  colors: ThemeColors;
+  isDark: boolean;
+}
+
 interface State {
   hasError: boolean;
   error: Error | null;
@@ -23,7 +29,7 @@ interface State {
   errorCount: number;
 }
 
-export class ErrorBoundary extends React.Component<Props, State> {
+class ErrorBoundaryImpl extends React.Component<InnerProps, State> {
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -66,17 +72,18 @@ export class ErrorBoundary extends React.Component<Props, State> {
   };
 
   render() {
+    const { colors, isDark } = this.props;
     if (this.state.hasError) {
       return (
-        <ScrollView style={styles.container}>
+        <ScrollView style={[styles.container, { backgroundColor: colors.background }]}> 
           <View style={styles.content}>
             {/* Header */}
-            <Text style={styles.title}>⚠️ Something went wrong</Text>
+            <Text style={[styles.title, { color: colors.error }]}>⚠️ Something went wrong</Text>
             
             {/* Error count warning */}
             {this.state.errorCount > 3 && (
-              <View style={styles.warningBox}>
-                <Text style={styles.warningText}>
+              <View style={[styles.warningBox, { backgroundColor: colors.warningLight, borderLeftColor: colors.warning }]}> 
+                <Text style={[styles.warningText, { color: colors.text }]}> 
                   ⚠️ Multiple errors detected ({this.state.errorCount}x).
                   If this persists, please reinstall the app.
                 </Text>
@@ -85,42 +92,42 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
             {/* Error message */}
             {this.state.error && (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorTitle}>Error Message:</Text>
-                <Text style={styles.errorText}>{this.state.error.toString()}</Text>
+              <View style={[styles.errorBox, { backgroundColor: colors.errorLight, borderColor: colors.error }]}> 
+                <Text style={[styles.errorTitle, { color: colors.error }]}>Error Message:</Text>
+                <Text style={[styles.errorText, { color: colors.text }]}>{this.state.error.toString()}</Text>
               </View>
             )}
 
             {/* Error stack trace (development only)*/}
             {this.state.errorInfo && __DEV__ && (
-              <View style={styles.stackBox}>
-                <Text style={styles.stackTitle}>Stack Trace:</Text>
-                <Text style={styles.stackText}>{this.state.errorInfo.componentStack}</Text>
+              <View style={[styles.stackBox, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+                <Text style={[styles.stackTitle, { color: colors.text }]}>Stack Trace:</Text>
+                <Text style={[styles.stackText, { color: colors.textSecondary }]}>{this.state.errorInfo.componentStack}</Text>
               </View>
             )}
 
             {/* Helpful instructions */}
-            <View style={styles.instructionsBox}>
-              <Text style={styles.instructionsTitle}>What to do:</Text>
-              <Text style={styles.instructionText}>1. Tap "Try Again" to recover</Text>
-              <Text style={styles.instructionText}>2. If it persists, restart the app</Text>
-              <Text style={styles.instructionText}>
+            <View style={[styles.instructionsBox, { backgroundColor: colors.successLight, borderLeftColor: colors.success }]}> 
+              <Text style={[styles.instructionsTitle, { color: colors.success }]}>What to do:</Text>
+              <Text style={[styles.instructionText, { color: colors.text }]}>1. Tap "Try Again" to recover</Text>
+              <Text style={[styles.instructionText, { color: colors.text }]}>2. If it persists, restart the app</Text>
+              <Text style={[styles.instructionText, { color: colors.text }]}> 
                 3. If still broken, please contact support@nursego.app
               </Text>
             </View>
 
             {/* Reset button */}
             <TouchableOpacity
-              style={styles.button}
+              style={[styles.button, { backgroundColor: colors.primary }]}
               onPress={this.handleReset}
               activeOpacity={0.7}
             >
-              <Text style={styles.buttonText}>Try Again</Text>
+              <Text style={[styles.buttonText, { color: colors.white }]}>Try Again</Text>
             </TouchableOpacity>
 
             {/* Development info */}
             {__DEV__ && (
-              <Text style={styles.devInfo}>
+              <Text style={[styles.devInfo, { color: isDark ? colors.textMuted : '#999' }]}>
                 💡 Error Boundary is in development mode. See console for details.
               </Text>
             )}
@@ -131,6 +138,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
     return this.props.children;
   }
+}
+
+export function ErrorBoundary({ children }: Props) {
+  const { colors, isDark } = useTheme();
+  return <ErrorBoundaryImpl colors={colors} isDark={isDark}>{children}</ErrorBoundaryImpl>;
 }
 
 const styles = StyleSheet.create({

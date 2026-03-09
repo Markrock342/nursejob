@@ -20,6 +20,7 @@ import {
   Dimensions,
   Image,
   Modal,
+  StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PanGestureHandler, PinchGestureHandler, State, Swipeable } from 'react-native-gesture-handler';
@@ -33,6 +34,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useChatNotification } from '../../context/ChatNotificationContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { formatRelativeTime } from '../../utils/helpers';
+import FirstVisitTip from '../../components/common/FirstVisitTip';
 import {
   subscribeToMessages,
   subscribeToConversations,
@@ -42,6 +44,7 @@ import {
   deleteConversation,
   hideConversation,
   sendImage,
+  getConversationChatAvailability,
 } from '../../services/chatService';
 import { Message } from '../../types';
 
@@ -175,6 +178,8 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
 export function ChatListScreen({ navigation }: any) {
   const { user } = useAuth();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const headerBackground = colors.primary;
   const [conversations, setConversations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -195,8 +200,9 @@ export function ChatListScreen({ navigation }: any) {
   // Not logged in
   if (!user) {
     return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top']}>
-        <View style={[styles.chatHeader, { backgroundColor: colors.primary }]}>
+      <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
+        <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
+        <View style={[styles.chatHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 14 }]}> 
           <Text style={styles.chatHeaderTitle}>ข้อความ</Text>
         </View>
         <View style={styles.centered}>
@@ -225,6 +231,7 @@ export function ChatListScreen({ navigation }: any) {
     navigation.navigate('ChatRoom', {
       conversationId: c.id,
       recipientName: other?.displayName || other?.name || 'ผู้ใช้',
+      recipientPhoto: other?.photoURL,
       jobTitle: c.jobTitle,
     });
   };
@@ -266,8 +273,9 @@ export function ChatListScreen({ navigation }: any) {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top']}>
-        <View style={[styles.chatHeader, { backgroundColor: colors.primary }]}>
+      <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
+        <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
+        <View style={[styles.chatHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 14 }]}> 
           <Text style={styles.chatHeaderTitle}>ข้อความ</Text>
         </View>
         <View style={styles.centered}><ActivityIndicator color={colors.primary} /></View>
@@ -276,8 +284,9 @@ export function ChatListScreen({ navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[styles.chatHeader, { backgroundColor: colors.primary }]}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
+      <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
+      <View style={[styles.chatHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 14 }]}> 
         <Text style={styles.chatHeaderTitle}>ข้อความ</Text>
         {hidden.length > 0 && (
           <TouchableOpacity onPress={() => setShowHidden(true)} style={styles.hiddenBtn}>
@@ -287,7 +296,7 @@ export function ChatListScreen({ navigation }: any) {
         )}
       </View>
 
-      <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
         <Ionicons name="search-outline" size={18} color={colors.textMuted} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
@@ -302,6 +311,18 @@ export function ChatListScreen({ navigation }: any) {
           </TouchableOpacity>
         )}
       </View>
+
+      {user?.uid && (
+        <FirstVisitTip
+          storageKey={`first_tip_chat_${user.uid}`}
+          icon="chatbubbles-outline"
+          title="ข้อความทั้งหมดจะถูกรวมไว้ที่นี่"
+          description="เมื่อคุณติดต่อจากหน้าโพสต์ ระบบจะสร้างห้องแชทให้อัตโนมัติ คุณปัดเพื่อซ่อนหรือลบห้องได้ และกลับมาดูภาพรวมการใช้งานจากคู่มือได้ทุกเมื่อ"
+          actionLabel="ดูคู่มือ"
+          onAction={() => navigation.navigate('OnboardingSurvey')}
+          containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: 4 }}
+        />
+      )}
 
       {visible.length === 0 && !search ? (
         <View style={styles.centered}>
@@ -341,8 +362,9 @@ export function ChatListScreen({ navigation }: any) {
       )}
 
       <Modal visible={showHidden} animationType="slide" onRequestClose={() => setShowHidden(false)}>
-        <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top']}>
-          <View style={[styles.chatHeader, { backgroundColor: colors.primary }]}>
+        <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
+          <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
+          <View style={[styles.chatHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 14 }]}> 
             <TouchableOpacity onPress={() => setShowHidden(false)} style={{ padding: 4 }}>
               <Ionicons name="arrow-back" size={24} color="#FFF" />
             </TouchableOpacity>
@@ -446,7 +468,7 @@ function MessageBubble({
 // CHAT ROOM SCREEN
 // ============================================
 export function ChatRoomScreen({ navigation, route }: any) {
-  const { conversationId, recipientName, jobTitle } = route.params;
+  const { conversationId, recipientName, recipientPhoto, jobTitle } = route.params;
   const { user } = useAuth();
   const { colors } = useTheme();
   const { setActiveConversationId } = useChatNotification();
@@ -459,6 +481,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
   const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
   const [imageScale, setImageScale] = useState(1);
   const [isDownloadingImage, setIsDownloadingImage] = useState(false);
+  const [chatLockReason, setChatLockReason] = useState<string | null>(null);
   const flatRef = useRef<FlatList>(null);
 
   const baseScale = useRef(new Animated.Value(1)).current;
@@ -487,25 +510,48 @@ export function ChatRoomScreen({ navigation, route }: any) {
     if (user?.uid) markConversationAsRead(conversationId, user.uid).catch(() => {});
   }, [conversationId, user?.uid]);
 
+  useEffect(() => {
+    let isMounted = true;
+    const checkAvailability = async () => {
+      const state = await getConversationChatAvailability(conversationId);
+      if (!isMounted) return;
+      setChatLockReason(state.isLocked ? (state.reason || 'แชทนี้ถูกปิดแล้ว') : null);
+    };
+
+    checkAvailability();
+    const interval = setInterval(checkAvailability, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [conversationId]);
+
   const handleSend = async () => {
     const t = text.trim();
-    if (!t || isSending || !user?.uid) return;
+    if (!t || isSending || !user?.uid || chatLockReason) return;
     setText('');
     setIsSending(true);
     try {
       await sendMessage(conversationId, user.uid, user.displayName || 'ผู้ใช้', t);
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (error: any) {
+      setChatLockReason(error?.message || 'แชทนี้ถูกปิดแล้ว');
+      Alert.alert('ส่งข้อความไม่ได้', error?.message || 'แชทนี้ถูกปิดแล้ว');
     } finally { setIsSending(false); }
   };
 
   const handleImagePick = async () => {
+    if (chatLockReason) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
     if (!result.canceled && result.assets[0] && user?.uid) {
       setIsSending(true);
       try { await sendImage(conversationId, user.uid, user.displayName || 'ผู้ใช้', result.assets[0].uri, 'photo.jpg'); }
-      catch { Alert.alert('ข้อผิดพลาด', 'ส่งรูปภาพไม่สำเร็จ'); }
+      catch (error: any) {
+        setChatLockReason(error?.message || 'แชทนี้ถูกปิดแล้ว');
+        Alert.alert('ข้อผิดพลาด', error?.message || 'ส่งรูปภาพไม่สำเร็จ');
+      }
       finally { setIsSending(false); }
     }
   };
@@ -644,13 +690,16 @@ export function ChatRoomScreen({ navigation, route }: any) {
   };
 
   const insets = useSafeAreaInsets();
+  const headerBackground = colors.primary;
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[styles.roomHeader, { backgroundColor: colors.primary }]}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
+      <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
+      <View style={[styles.roomHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 12 }]}> 
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
+        <Avatar uri={recipientPhoto} name={recipientName || 'ผู้ใช้'} size={38} />
         <View style={styles.roomHeaderCenter}>
           <Text style={styles.roomHeaderName} numberOfLines={1}>{recipientName}</Text>
           {jobTitle && <Text style={styles.roomHeaderSub} numberOfLines={1}>📋 {jobTitle}</Text>}
@@ -659,7 +708,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
       </View>
 
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={{ flex: 1, backgroundColor: colors.background }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
@@ -673,28 +722,36 @@ export function ChatRoomScreen({ navigation, route }: any) {
           onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
         />
 
+        {chatLockReason ? (
+          <View style={[styles.chatLockBanner, { backgroundColor: colors.warningLight || '#FFF7ED', borderTopColor: colors.warning || '#F59E0B' }]}>
+            <Ionicons name="lock-closed-outline" size={16} color={colors.warning || '#F59E0B'} />
+            <Text style={[styles.chatLockBannerText, { color: colors.warning || '#B45309' }]}>{chatLockReason}</Text>
+          </View>
+        ) : null}
+
         <View style={[styles.inputBar, {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           paddingBottom: Math.max(insets.bottom, 8),
         }]}>
-          <TouchableOpacity onPress={handleImagePick} style={styles.attBtn}>
+          <TouchableOpacity onPress={handleImagePick} style={styles.attBtn} disabled={Boolean(chatLockReason)}>
             <Ionicons name="image-outline" size={24} color={colors.textMuted} />
           </TouchableOpacity>
           <TextInput
             style={[styles.msgInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-            placeholder="พิมพ์ข้อความ..."
+            placeholder={chatLockReason ? 'แชทนี้ถูกปิดแล้ว' : 'พิมพ์ข้อความ...'}
             placeholderTextColor={colors.textMuted}
             value={text}
             onChangeText={setText}
             multiline
             maxLength={2000}
             onSubmitEditing={handleSend}
+            editable={!chatLockReason}
           />
           <TouchableOpacity
             onPress={handleSend}
-            disabled={!text.trim() || isSending}
-            style={[styles.sendBtn, { backgroundColor: text.trim() ? colors.primary : colors.border }]}
+            disabled={!text.trim() || isSending || Boolean(chatLockReason)}
+            style={[styles.sendBtn, { backgroundColor: text.trim() && !chatLockReason ? colors.primary : colors.border }]}
           >
             {isSending ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="send" size={18} color="#FFF" />}
           </TouchableOpacity>
@@ -910,6 +967,19 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderTopWidth: 1,
     gap: 6,
+  },
+  chatLockBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
+  chatLockBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
   },
   attBtn: { padding: 6, alignSelf: 'flex-end', marginBottom: 4 },
   msgInput: {

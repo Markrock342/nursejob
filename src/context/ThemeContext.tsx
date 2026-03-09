@@ -92,15 +92,26 @@ interface ThemeContextType {
 // ============================================
 // Helper to apply palette to theme colors
 // ============================================
-const applyPalette = (baseColors: ThemeColors, palette: ColorPalette): ThemeColors => {
+const withAlpha = (hex: string, alpha: number) => {
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return hex;
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+};
+
+const applyPalette = (baseColors: ThemeColors, palette: ColorPalette, isDark: boolean): ThemeColors => {
   return {
     ...baseColors,
     primary: palette.primary,
     primaryLight: palette.primaryLight,
     primaryDark: palette.primaryDark,
-    primaryBackground: palette.primaryBackground,
+    primaryBackground: isDark ? withAlpha(palette.primaryLight, 0.16) : palette.primaryBackground,
     secondary: palette.secondary,
+    secondaryLight: isDark ? withAlpha(palette.secondary, 0.16) : baseColors.secondaryLight,
     accent: palette.accent,
+    accentLight: isDark ? withAlpha(palette.accent, 0.16) : baseColors.accentLight,
   };
 };
 
@@ -176,36 +187,36 @@ export const lightColors: ThemeColors = {
 // Dark Theme Colors
 // ============================================
 export const darkColors: ThemeColors = {
-  primary: '#60A5FA',
-  primaryLight: '#93C5FD',
-  primaryDark: '#3B82F6',
-  primaryBackground: '#1E3A5F',
-  
-  background: '#0F172A',
-  backgroundSecondary: '#1E293B',
-  surface: '#1E293B',
-  card: '#334155',
-  
-  text: '#F1F5F9',
-  textSecondary: '#CBD5E1',
-  textMuted: '#94A3B8',
-  textLight: '#64748B',
-  textInverse: '#0F172A',
-  
-  border: '#475569',
-  borderLight: '#334155',
-  divider: '#334155',
-  
-  success: '#34D399',
-  successLight: '#064E3B',
+  primary: '#8AC5FF',
+  primaryLight: '#C6E0FF',
+  primaryDark: '#4EA1F3',
+  primaryBackground: 'rgba(138, 197, 255, 0.14)',
+
+  background: '#090C14',
+  backgroundSecondary: '#101522',
+  surface: '#151B28',
+  card: '#1A2232',
+
+  text: '#F3F6FC',
+  textSecondary: '#B7C0D4',
+  textMuted: '#8792A8',
+  textLight: '#657087',
+  textInverse: '#090C14',
+
+  border: '#2A3447',
+  borderLight: '#202938',
+  divider: '#202938',
+
+  success: '#4ADE80',
+  successLight: 'rgba(74, 222, 128, 0.16)',
   warning: '#FBBF24',
-  warningLight: '#78350F',
-  error: '#F87171',
-  errorLight: '#7F1D1D',
-  danger: '#F87171',
-  dangerLight: '#7F1D1D',
+  warningLight: 'rgba(251, 191, 36, 0.16)',
+  error: '#FB7185',
+  errorLight: 'rgba(251, 113, 133, 0.16)',
+  danger: '#FB7185',
+  dangerLight: 'rgba(251, 113, 133, 0.16)',
   info: '#60A5FA',
-  infoLight: '#1E3A8A',
+  infoLight: 'rgba(96, 165, 250, 0.16)',
   
   // Special
   urgent: '#FF6B6B',
@@ -220,14 +231,14 @@ export const darkColors: ThemeColors = {
   line: '#06C755',
   
   // Secondary
-  secondary: '#67E8F9',
-  secondaryDark: '#22D3EE',
-  secondaryLight: '#A5F3FC',
+  secondary: '#67E8D2',
+  secondaryDark: '#2FBFA9',
+  secondaryLight: 'rgba(103, 232, 210, 0.16)',
   
   // Accent
-  accent: '#FB7185',
-  accentDark: '#F43F5E',
-  accentLight: '#FDA4AF',
+  accent: '#E7C26A',
+  accentDark: '#C9962E',
+  accentLight: 'rgba(231, 194, 106, 0.16)',
   
   white: '#FFFFFF',
   black: '#000000',
@@ -330,7 +341,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   // Get current colors based on palette
   const selectedPalette = PALETTES.find(p => p.id === paletteId) || PALETTES[0];
   const baseColors = isDark ? darkColors : lightColors;
-  const colors = applyPalette(baseColors, selectedPalette);
+  const colors = applyPalette(baseColors, selectedPalette, isDark);
   
   // Update global state
   useEffect(() => {

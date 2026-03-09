@@ -14,7 +14,8 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -37,46 +38,28 @@ interface CustomAlertProps {
   autoClose?: number;
 }
 
-const ALERT_CONFIG: Record<AlertType, {
+const ALERT_ICONS: Record<AlertType, {
   ionicon: string;
-  color: string;
-  bgColor: string;
-  ringColor: string;
   defaultTitle: string;
 }> = {
   success: {
     ionicon: 'checkmark-circle',
-    color: '#10B981',
-    bgColor: '#ECFDF5',
-    ringColor: 'rgba(16,185,129,0.15)',
     defaultTitle: 'สำเร็จ!',
   },
   error: {
     ionicon: 'close-circle',
-    color: '#EF4444',
-    bgColor: '#FEF2F2',
-    ringColor: 'rgba(239,68,68,0.15)',
     defaultTitle: 'เกิดข้อผิดพลาด',
   },
   warning: {
     ionicon: 'warning',
-    color: '#F59E0B',
-    bgColor: '#FFFBEB',
-    ringColor: 'rgba(245,158,11,0.15)',
     defaultTitle: 'คำเตือน',
   },
   info: {
     ionicon: 'information-circle',
-    color: '#3B82F6',
-    bgColor: '#EFF6FF',
-    ringColor: 'rgba(59,130,246,0.15)',
     defaultTitle: 'แจ้งเตือน',
   },
   question: {
     ionicon: 'help-circle',
-    color: '#8B5CF6',
-    bgColor: '#F5F3FF',
-    ringColor: 'rgba(139,92,246,0.15)',
     defaultTitle: 'ยืนยันรายการ',
   },
 };
@@ -90,13 +73,21 @@ export default function CustomAlert({
   onClose,
   autoClose,
 }: CustomAlertProps) {
+  const { colors, isDark } = useTheme();
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(80)).current;
   const scaleAnim = useRef(new Animated.Value(0.92)).current;
   const iconScaleAnim = useRef(new Animated.Value(0)).current;
 
-  const config = ALERT_CONFIG[type];
-  const displayTitle = title || config.defaultTitle;
+  const iconConfig = ALERT_ICONS[type];
+  const config = {
+    success: { color: colors.success, bgColor: colors.successLight, ringColor: isDark ? 'rgba(52,211,153,0.2)' : 'rgba(16,185,129,0.15)' },
+    error: { color: colors.error, bgColor: colors.errorLight, ringColor: isDark ? 'rgba(248,113,113,0.22)' : 'rgba(239,68,68,0.15)' },
+    warning: { color: colors.warning, bgColor: colors.warningLight, ringColor: isDark ? 'rgba(251,191,36,0.2)' : 'rgba(245,158,11,0.15)' },
+    info: { color: colors.info, bgColor: colors.infoLight, ringColor: isDark ? 'rgba(96,165,250,0.2)' : 'rgba(59,130,246,0.15)' },
+    question: { color: colors.primary, bgColor: colors.primaryBackground, ringColor: isDark ? 'rgba(96,165,250,0.18)' : 'rgba(14,165,233,0.12)' },
+  }[type];
+  const displayTitle = title || iconConfig.defaultTitle;
 
   useEffect(() => {
     if (visible) {
@@ -132,10 +123,10 @@ export default function CustomAlert({
 
   const getButtonStyle = (btnStyle?: string, index?: number, total?: number) => {
     const isLast = index === (total ?? 1) - 1;
-    if (btnStyle === 'cancel') return { bg: '#F1F5F9', fg: '#64748B', border: '#E2E8F0' };
-    if (btnStyle === 'destructive') return { bg: '#FEF2F2', fg: '#EF4444', border: '#FCA5A5' };
-    if (isLast || total === 1) return { bg: config.color, fg: '#FFFFFF', border: config.color };
-    return { bg: '#F8FAFC', fg: '#475569', border: '#E2E8F0' };
+    if (btnStyle === 'cancel') return { bg: colors.backgroundSecondary, fg: colors.textSecondary, border: colors.border };
+    if (btnStyle === 'destructive') return { bg: colors.errorLight, fg: colors.error, border: colors.error };
+    if (isLast || total === 1) return { bg: config.color, fg: colors.white, border: config.color };
+    return { bg: colors.background, fg: colors.textSecondary, border: colors.border };
   };
 
   return (
@@ -146,7 +137,7 @@ export default function CustomAlert({
       statusBarTranslucent
       onRequestClose={() => handleClose()}
     >
-      <Animated.View style={[styles.backdrop, { opacity: backdropAnim }]}>
+      <Animated.View style={[styles.backdrop, { opacity: backdropAnim, backgroundColor: colors.overlay }]}> 
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
@@ -158,6 +149,7 @@ export default function CustomAlert({
         <Animated.View
           style={[
             styles.card,
+            { backgroundColor: colors.surface, shadowColor: isDark ? '#000000' : '#0F172A' },
             { transform: [{ translateY: slideAnim }, { scale: scaleAnim }] },
           ]}
         >
@@ -167,14 +159,14 @@ export default function CustomAlert({
               style={[styles.iconRing, { backgroundColor: config.ringColor, transform: [{ scale: iconScaleAnim }] }]}
             >
               <View style={[styles.iconCircle, { backgroundColor: config.bgColor }]}>
-                <Ionicons name={config.ionicon as any} size={38} color={config.color} />
+                <Ionicons name={iconConfig.ionicon as any} size={38} color={config.color} />
               </View>
             </Animated.View>
 
-            <Text style={styles.title}>{displayTitle}</Text>
-            {message ? <Text style={styles.message}>{message}</Text> : null}
+            <Text style={[styles.title, { color: colors.text }]}>{displayTitle}</Text>
+            {message ? <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text> : null}
 
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
             <View style={[styles.buttonRow, buttons.length > 2 && styles.buttonColumn]}>
               {buttons.map((btn, idx) => {

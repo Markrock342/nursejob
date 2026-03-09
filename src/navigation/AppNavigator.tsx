@@ -2,8 +2,8 @@
 // APP NAVIGATOR - Production Ready
 // ============================================
 
-import React, { useRef } from 'react';
-import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
+import React, { useEffect, useRef } from 'react';
+import { NavigationContainer, NavigationContainerRef, DefaultTheme, LinkingOptions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet, ActivityIndicator, Platform } from 'react-native';
@@ -76,6 +76,27 @@ import { COLORS, SPACING, FONT_SIZES } from '../theme';
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+
+const linking: LinkingOptions<RootStackParamList> = {
+  prefixes: ['nursego://', 'https://nursego.app', 'https://www.nursego.app'],
+  config: {
+    screens: {
+      Main: {
+        screens: {
+          Home: 'home',
+          Chat: 'chat',
+          PostJob: 'post-job',
+          Profile: 'profile',
+        },
+      },
+      JobDetail: 'job/:jobId',
+      NearbyJobAlert: 'nearby-jobs',
+      Notifications: 'notifications',
+      Favorites: 'favorites',
+      Settings: 'settings',
+    },
+  },
+};
 
 // ============================================
 // AUTH NAVIGATOR
@@ -464,10 +485,11 @@ function RootNavigator() {
 // LOADING SCREEN
 // ============================================
 function LoadingScreen() {
+  const { colors } = useTheme();
   return (
-    <View style={styles.loadingContainer}>
-      <ActivityIndicator size="large" color={COLORS.primary} />
-      <Text style={styles.loadingText}>กำลังโหลด...</Text>
+    <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={[styles.loadingText, { color: colors.text }]}>กำลังโหลด...</Text>
     </View>
   );
 }
@@ -476,8 +498,46 @@ function LoadingScreen() {
 // APP NAVIGATOR (Main Export)
 // ============================================
 export default function AppNavigator() {
-  const { isInitialized } = useAuth();
+  const { isInitialized, user, isAdmin } = useAuth();
+  const { colors } = useTheme();
   const navigationRef = useRef<NavigationContainerRef<any>>(null);
+  const isNavigationReadyRef = useRef(false);
+  const hasHandledOnboardingRef = useRef(false);
+
+  const navigationTheme = {
+    ...DefaultTheme,
+    colors: {
+      ...DefaultTheme.colors,
+      primary: colors.primary,
+      background: colors.background,
+      card: colors.surface,
+      text: colors.text,
+      border: colors.border,
+      notification: colors.error,
+    },
+  };
+
+  useEffect(() => {
+    if (!isInitialized || !isNavigationReadyRef.current) return;
+
+    if (!user?.uid || isAdmin || user.onboardingCompleted) {
+      hasHandledOnboardingRef.current = false;
+      return;
+    }
+
+    if (hasHandledOnboardingRef.current) return;
+
+    const currentRoute = navigationRef.current?.getCurrentRoute()?.name;
+    if (currentRoute === 'OnboardingSurvey') {
+      hasHandledOnboardingRef.current = true;
+      return;
+    }
+
+    hasHandledOnboardingRef.current = true;
+    requestAnimationFrame(() => {
+      navigationRef.current?.navigate('OnboardingSurvey');
+    });
+  }, [isInitialized, isAdmin, user?.uid, user?.onboardingCompleted]);
 
   if (!isInitialized) {
     return <LoadingScreen />;
@@ -485,7 +545,14 @@ export default function AppNavigator() {
 
   return (
     <ErrorBoundary>
-      <NavigationContainer ref={navigationRef}>
+      <NavigationContainer
+        ref={navigationRef}
+        theme={navigationTheme}
+        linking={linking}
+        onReady={() => {
+          isNavigationReadyRef.current = true;
+        }}
+      >
         <ChatNotificationProvider navigation={navigationRef.current}>
           <RootNavigator />
         </ChatNotificationProvider>

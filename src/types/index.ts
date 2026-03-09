@@ -272,6 +272,10 @@ export interface JobPost {
   posterName: string;
   posterId: string;
   posterPhoto?: string;
+  posterRole?: 'user' | 'nurse' | 'hospital' | 'admin' | string;
+  posterOrgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency' | string;
+  posterStaffType?: string;
+  posterPlan?: string;
   
   // ประเภทบุคลากรที่ต้องการ
   staffType?: 'RN' | 'PN' | 'NA' | 'CG' | 'SITTER' | 'OTHER' | string;
@@ -280,6 +284,10 @@ export interface JobPost {
   department: string;
   description?: string;
   requirements?: string[];
+  benefits?: string[];
+  employmentType?: string;
+  startDateNote?: string;
+  workHours?: string;
   
   // ค่าตอบแทน
   shiftRate: number;
@@ -467,10 +475,11 @@ export interface JobFilters {
 export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
-  JobDetail: { job: JobPost };
+  JobDetail: { job?: JobPost; jobId?: string };
   ChatRoom: { 
     conversationId: string; 
     recipientName?: string;
+    recipientPhoto?: string;
     jobTitle?: string;
   };
   EditProfile: undefined;
@@ -483,7 +492,13 @@ export type RootStackParamList = {
   ThemeSelection: undefined; // เลือกโทนสี
   Documents: undefined;
   Applicants: undefined;
-  Reviews: { hospitalId: string; hospitalName: string };
+  Reviews: {
+    hospitalId?: string;
+    hospitalName?: string;
+    targetUserId?: string;
+    targetName?: string;
+    targetRole?: string;
+  };
   Help: undefined;
   Terms: undefined;
   Privacy: undefined;

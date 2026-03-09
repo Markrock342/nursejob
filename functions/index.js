@@ -13,6 +13,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const { defineString } = require('firebase-functions/params');
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -29,6 +30,11 @@ const CONFIG = {
   CHECK_INTERVAL_HOURS: 6,
 };
 
+const ADMIN_USERNAME = defineString('ADMIN_USERNAME');
+const ADMIN_PASSWORD_HASH = defineString('ADMIN_PASSWORD_HASH');
+const ADMIN_EMAIL = defineString('ADMIN_EMAIL');
+const ADMIN_DISPLAY_NAME = defineString('ADMIN_DISPLAY_NAME');
+
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
@@ -42,12 +48,11 @@ function safeEqualHex(a, b) {
 }
 
 function getAdminEnvConfig() {
-  const runtimeAdmin = (typeof functions.config === 'function' ? functions.config().admin : null) || {};
   return {
-    username: runtimeAdmin.username || process.env.ADMIN_USERNAME || '',
-    passwordHash: (runtimeAdmin.password_hash || process.env.ADMIN_PASSWORD_HASH || '').toLowerCase(),
-    email: runtimeAdmin.email || process.env.ADMIN_EMAIL || 'admin@nursego.admin',
-    displayName: runtimeAdmin.display_name || process.env.ADMIN_DISPLAY_NAME || 'Administrator',
+    username: (ADMIN_USERNAME.value() || process.env.ADMIN_USERNAME || '').trim(),
+    passwordHash: (ADMIN_PASSWORD_HASH.value() || process.env.ADMIN_PASSWORD_HASH || '').toLowerCase(),
+    email: (ADMIN_EMAIL.value() || process.env.ADMIN_EMAIL || 'admin@nursego.admin').trim(),
+    displayName: (ADMIN_DISPLAY_NAME.value() || process.env.ADMIN_DISPLAY_NAME || 'Administrator').trim(),
   };
 }
 
@@ -179,7 +184,33 @@ exports.verifyAdminLogin = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('unauthenticated', 'Invalid admin credentials');
   }
 
-  const adminUid = `admin_${sha256(cfg.username).slice(0, 20)}`;
+  const desiredAdminUid = `admin_${sha256(cfg.username).slice(0, 20)}`;
+  let authUser;
+
+  try {
+    authUser = await admin.auth().getUserByEmail(cfg.email);
+    await admin.auth().updateUser(authUser.uid, {
+      password: String(password),
+      displayName: cfg.displayName,
+      emailVerified: true,
+      disabled: false,
+    });
+  } catch (error) {
+    if (error?.code === 'auth/user-not-found') {
+      authUser = await admin.auth().createUser({
+        uid: desiredAdminUid,
+        email: cfg.email,
+        password: String(password),
+        displayName: cfg.displayName,
+        emailVerified: true,
+        disabled: false,
+      });
+    } else {
+      throw error;
+    }
+  }
+
+  const adminUid = authUser.uid;
 
   await db.collection('users').doc(adminUid).set({
     uid: adminUid,
@@ -191,10 +222,14 @@ exports.verifyAdminLogin = functions.https.onCall(async (data, context) => {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
 
-  const customToken = await admin.auth().createCustomToken(adminUid);
+  await admin.auth().setCustomUserClaims(adminUid, {
+    admin: true,
+    role: 'admin',
+  });
 
   return {
-    customToken,
+    email: cfg.email,
+    signInMethod: 'password',
     profile: {
       id: adminUid,
       uid: adminUid,
@@ -1240,6 +1275,72 @@ exports.onUserCreate = functions.firestore
   });
 
 // ============================================
+// 9.1 ON NEW VERIFICATION REQUEST
+// แจ้งเตือน admin เมื่อมีคำขอใหม่เข้ามา
+// ============================================
+exports.onNewVerificationRequest = functions.firestore
+  .document('verifications/{verificationId}')
+  .onCreate(async (snap, context) => {
+    const verification = snap.data() || {};
+    const verificationId = context.params.verificationId;
+
+    try {
+      const title = 'มีคำขอยืนยันตัวตนใหม่';
+      const body = `${verification.userName || 'ผู้ใช้'} ส่งคำขอให้ตรวจสอบเอกสารแล้ว`;
+      const data = {
+        type: 'admin_verification_request',
+        verificationId,
+        userId: verification.userId || null,
+      };
+
+      const adminsSnapshot = await db.collection('users')
+        .where('isAdmin', '==', true)
+        .get();
+
+      if (adminsSnapshot.empty) {
+        console.log('ℹ️ No admins found for verification notification');
+        return null;
+      }
+
+      for (const adminDoc of adminsSnapshot.docs) {
+        const adminData = adminDoc.data() || {};
+
+        await createInAppNotification(adminDoc.id, {
+          type: 'admin_verification_request',
+          title,
+          body,
+          data,
+        });
+
+        if (adminData.pushToken) {
+          await sendExpoPush(adminData.pushToken, title, body, data);
+        } else if (adminData.fcmToken) {
+          try {
+            await admin.messaging().send({
+              notification: { title, body },
+              data: {
+                type: 'admin_verification_request',
+                verificationId,
+                userId: verification.userId || '',
+              },
+              token: adminData.fcmToken,
+              android: { channelId: 'default', priority: 'high' },
+            });
+          } catch (fcmErr) {
+            console.warn('FCM admin verification notify failed:', fcmErr.message);
+          }
+        }
+      }
+
+      console.log(`✅ Sent verification request notifications to ${adminsSnapshot.size} admins`);
+      return null;
+    } catch (error) {
+      console.error('❌ Error notifying admins about verification request:', error);
+      return null;
+    }
+  });
+
+// ============================================
 // 10. ON JOB ABOUT TO EXPIRE - 6 hours before
 // แจ้งเตือนก่อนงานหมดอายุ
 // ============================================
@@ -1283,6 +1384,29 @@ exports.notifyJobExpiringSoon = functions.pubsub
           body: `"${job.title}" จะหมดอายุใน 6 ชั่วโมง ขยายเวลาหรือปิดรับสมัคร?`,
           data: { jobId: doc.id },
         });
+
+        const posterDoc = await db.collection('users').doc(job.posterId).get();
+        if (posterDoc.exists) {
+          const poster = posterDoc.data() || {};
+          const title = '⏰ งานของคุณกำลังจะหมดอายุ';
+          const body = `"${job.title}" จะหมดอายุใน 6 ชั่วโมง ขยายเวลาหรือปิดรับสมัคร?`;
+          const pushData = { type: 'job_expiring', jobId: doc.id };
+
+          if (poster.pushToken) {
+            await sendExpoPush(poster.pushToken, title, body, pushData);
+          } else if (poster.fcmToken) {
+            try {
+              await admin.messaging().send({
+                notification: { title, body },
+                data: { type: 'job_expiring', jobId: doc.id },
+                token: poster.fcmToken,
+                android: { channelId: 'jobs', priority: 'high' },
+              });
+            } catch (fcmErr) {
+              console.warn('FCM job expiry notify failed:', fcmErr.message);
+            }
+          }
+        }
         
         // Mark as notified
         await doc.ref.update({ expiryNotified: true });

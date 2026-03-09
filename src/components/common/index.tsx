@@ -56,12 +56,25 @@ export function Button({
   style,
   textStyle,
 }: ButtonProps) {
+  const { colors } = useTheme();
   const isDisabled = disabled || loading;
+
+  const variantColors = {
+    primary: { bg: colors.primary, border: colors.primary, fg: colors.white },
+    secondary: { bg: colors.secondary, border: colors.secondary, fg: colors.white },
+    outline: { bg: 'transparent', border: colors.primary, fg: colors.primary },
+    ghost: { bg: 'transparent', border: 'transparent', fg: colors.primary },
+    danger: { bg: colors.danger, border: colors.danger, fg: colors.white },
+  }[variant];
 
   const buttonStyles = [
     styles.button,
-    styles[`button_${variant}`],
     styles[`button_${size}`],
+    {
+      backgroundColor: variantColors.bg,
+      borderColor: variantColors.border,
+      borderWidth: variant === 'outline' ? 1 : 0,
+    },
     fullWidth && styles.buttonFullWidth,
     isDisabled && styles.buttonDisabled,
     style,
@@ -69,8 +82,8 @@ export function Button({
 
   const textStyles = [
     styles.buttonText,
-    styles[`buttonText_${variant}`],
     styles[`buttonText_${size}`],
+    { color: variantColors.fg },
     isDisabled && styles.buttonTextDisabled,
     textStyle,
   ];
@@ -84,7 +97,7 @@ export function Button({
     >
       {loading ? (
         <ActivityIndicator 
-          color={variant === 'outline' || variant === 'ghost' ? COLORS.primary : COLORS.white} 
+          color={variantColors.fg} 
           size="small" 
         />
       ) : (
@@ -183,11 +196,17 @@ interface CardProps {
 }
 
 export function Card({ children, onPress, style, padding = SPACING.md, shadow = true }: CardProps) {
+  const { colors, isDark } = useTheme();
   const cardContent = (
     <View style={[
       styles.card,
       shadow && SHADOWS.medium,
       { padding },
+      {
+        backgroundColor: colors.surface,
+        borderColor: colors.border,
+        shadowColor: isDark ? '#000000' : '#0F172A',
+      },
       style,
     ]}>
       {children}
@@ -216,6 +235,7 @@ interface AvatarProps {
 }
 
 export function Avatar({ uri, name, size = 50, style }: AvatarProps) {
+  const { colors } = useTheme();
   const initials = name
     ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : '?';
@@ -236,7 +256,7 @@ export function Avatar({ uri, name, size = 50, style }: AvatarProps) {
   return (
     <View style={[
       styles.avatarPlaceholder,
-      { width: size, height: size, borderRadius: size / 2 },
+      { width: size, height: size, borderRadius: size / 2, backgroundColor: colors.primary },
     ]}>
       <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>{initials}</Text>
     </View>
@@ -254,14 +274,24 @@ interface BadgeProps {
 }
 
 export function Badge({ text, variant = 'primary', size = 'medium', style }: BadgeProps) {
+  const { colors } = useTheme();
+  const variantColors = {
+    primary: { bg: colors.primaryLight, fg: colors.primaryDark },
+    secondary: { bg: colors.secondaryLight, fg: colors.secondaryDark },
+    success: { bg: colors.successLight, fg: colors.success },
+    warning: { bg: colors.warningLight, fg: colors.warning },
+    danger: { bg: colors.dangerLight, fg: colors.danger },
+    info: { bg: colors.infoLight, fg: colors.info },
+  }[variant];
+
   return (
     <View style={[
       styles.badge,
-      styles[`badge_${variant}`],
       styles[`badge_${size}`],
+      { backgroundColor: variantColors.bg },
       style,
     ]}>
-      <Text style={[styles.badgeText, styles[`badgeText_${size}`]]}>{text}</Text>
+      <Text style={[styles.badgeText, styles[`badgeText_${size}`], { color: variantColors.fg }]}>{text}</Text>
     </View>
   );
 }
@@ -278,20 +308,21 @@ interface LoadingProps {
 }
 
 export function Loading({ size = 'large', color = COLORS.primary, text, message, fullScreen = false }: LoadingProps) {
+  const { colors } = useTheme();
   const displayText = text || message;
   if (fullScreen) {
     return (
-      <View style={styles.loadingFullScreen}>
-        <ActivityIndicator size={size} color={color} />
-        {displayText && <Text style={styles.loadingText}>{displayText}</Text>}
+      <View style={[styles.loadingFullScreen, { backgroundColor: colors.background }]}> 
+        <ActivityIndicator size={size} color={color || colors.primary} />
+        {displayText && <Text style={[styles.loadingText, { color: colors.textSecondary }]}>{displayText}</Text>}
       </View>
     );
   }
 
   return (
     <View style={styles.loadingContainer}>
-      <ActivityIndicator size={size} color={color} />
-      {displayText && <Text style={styles.loadingText}>{displayText}</Text>}
+      <ActivityIndicator size={size} color={color || colors.primary} />
+      {displayText && <Text style={[styles.loadingText, { color: colors.textSecondary }]}>{displayText}</Text>}
     </View>
   );
 }
@@ -316,6 +347,7 @@ export function ModalContainer({
   showCloseButton = true,
   fullScreen = false,
 }: ModalContainerProps) {
+  const { colors, isDark } = useTheme();
   return (
     <Modal
       visible={visible}
@@ -324,15 +356,15 @@ export function ModalContainer({
       onRequestClose={onClose}
     >
       {fullScreen ? (
-        <SafeAreaView style={[styles.modalFullScreen]} edges={['top', 'bottom']}>
+        <SafeAreaView style={[styles.modalFullScreen, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
           {title && (
-            <View style={styles.modalFullScreenHeader}>
+            <View style={[styles.modalFullScreenHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
               {showCloseButton && (
                 <TouchableOpacity onPress={onClose} style={styles.modalCloseButton}>
-                  <Text style={styles.modalCloseText}>✕</Text>
+                  <Text style={[styles.modalCloseText, { color: colors.text }]}>✕</Text>
                 </TouchableOpacity>
               )}
-              <Text style={styles.modalFullScreenTitle}>{title}</Text>
+              <Text style={[styles.modalFullScreenTitle, { color: colors.text }]}>{title}</Text>
               <View style={{ width: 44 }} />
             </View>
           )}
@@ -345,14 +377,14 @@ export function ModalContainer({
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <Pressable style={styles.modalOverlay} onPress={onClose}>
-            <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={[styles.modalOverlay, { backgroundColor: isDark ? colors.overlay : 'rgba(0, 0, 0, 0.5)' }]} onPress={onClose}>
+            <Pressable style={[styles.modalContent, { backgroundColor: colors.surface }]} onPress={(e) => e.stopPropagation()}>
               {title && (
                 <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>{title}</Text>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>{title}</Text>
                   {showCloseButton && (
                     <TouchableOpacity onPress={onClose}>
-                      <Text style={styles.modalClose}>✕</Text>
+                      <Text style={[styles.modalClose, { color: colors.textSecondary }]}>✕</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -385,6 +417,7 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({ icon = '📭', title, description, subtitle, actionText, actionLabel, onAction }: EmptyStateProps) {
+  const { colors } = useTheme();
   const displayDescription = description || subtitle;
   const displayActionText = actionText || actionLabel;
   
@@ -395,13 +428,13 @@ export function EmptyState({ icon = '📭', title, description, subtitle, action
     <View style={styles.emptyState}>
       {isIoniconName ? (
         <View style={styles.emptyStateIconContainer}>
-          <Ionicons name={icon as any} size={64} color={COLORS.textMuted} />
+          <Ionicons name={icon as any} size={64} color={colors.textMuted} />
         </View>
       ) : (
         <Text style={styles.emptyStateIcon}>{icon}</Text>
       )}
-      <Text style={styles.emptyStateTitle}>{title}</Text>
-      {displayDescription && <Text style={styles.emptyStateDescription}>{displayDescription}</Text>}
+      <Text style={[styles.emptyStateTitle, { color: colors.text }]}>{title}</Text>
+      {displayDescription && <Text style={[styles.emptyStateDescription, { color: colors.textSecondary }]}>{displayDescription}</Text>}
       {displayActionText && onAction && (
         <Button title={displayActionText} onPress={onAction} variant="outline" size="small" />
       )}
@@ -418,17 +451,18 @@ interface DividerProps {
 }
 
 export function Divider({ text, style }: DividerProps) {
+  const { colors } = useTheme();
   if (text) {
     return (
       <View style={[styles.dividerContainer, style]}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>{text}</Text>
-        <View style={styles.dividerLine} />
+        <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+        <Text style={[styles.dividerText, { color: colors.textSecondary }]}>{text}</Text>
+        <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
       </View>
     );
   }
 
-  return <View style={[styles.divider, style]} />;
+  return <View style={[styles.divider, { backgroundColor: colors.border }, style]} />;
 }
 
 // ============================================
@@ -443,11 +477,15 @@ interface ChipProps {
 }
 
 export function Chip({ label, selected, onPress, icon, style }: ChipProps) {
+  const { colors } = useTheme();
   return (
     <TouchableOpacity
       style={[
         styles.chip,
-        selected && styles.chipSelected,
+        {
+          backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
+          borderColor: selected ? colors.primary : colors.border,
+        },
         style,
       ]}
       onPress={onPress}
@@ -457,7 +495,7 @@ export function Chip({ label, selected, onPress, icon, style }: ChipProps) {
       {icon && (
         <View style={styles.chipIcon}>{typeof icon === 'string' || typeof icon === 'number' ? <Text>{icon}</Text> : icon}</View>
       )}
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
+      <Text style={[styles.chipText, { color: selected ? colors.white : colors.textSecondary }, selected && styles.chipTextSelected]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -854,3 +892,4 @@ export { default as ProfileProgressBar } from './ProfileProgressBar';
 export { default as FAB, SimpleFAB } from './FAB';
 export { default as ThemePicker } from './ThemePicker';
 export { default as KittenButton } from './KittenButton';
+export { default as FirstVisitTip } from './FirstVisitTip';

@@ -222,7 +222,9 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.logo}>📱</Text>
+            <View style={styles.logoContainer}>
+              <Ionicons name="chatbubble-ellipses-outline" size={34} color="#FFFFFF" />
+            </View>
             <Text style={styles.title}>
               {step === 'phone' ? 'เข้าสู่ระบบด้วยเบอร์โทร' : 'ยืนยัน OTP'}
             </Text>
@@ -387,6 +389,15 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: SPACING.xl,
+  },
+  logoContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.md,
   },
   logo: {
     fontSize: 64,

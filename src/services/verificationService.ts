@@ -29,6 +29,8 @@ export interface VerificationRequest {
   id?: string;
   userId: string;
   userName: string;
+  firstName: string;
+  lastName: string;
   userEmail: string;
   userPhone?: string;
   
@@ -272,6 +274,8 @@ export async function approveVerificationRequest(
     await updateDoc(userRef, {
       isVerified: true,
       verifiedAt: serverTimestamp(),
+      firstName: requestData.firstName,
+      lastName: requestData.lastName,
       licenseNumber: requestData.licenseNumber,
       licenseType: requestData.licenseType,
       licenseExpiry: requestData.licenseExpiry,
