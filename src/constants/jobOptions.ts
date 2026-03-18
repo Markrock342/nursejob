@@ -266,6 +266,123 @@ export const QUICK_TAGS = [
 ] as const;
 
 // ============================================
+// Tags แยกตามหมวดประกาศ
+// ============================================
+
+export interface TagGroup {
+  title: string;
+  icon: string;
+  tags: string[];
+}
+
+export const SHIFT_TAGS: TagGroup[] = [
+  {
+    title: 'ความเร่งด่วน',
+    icon: 'flash-outline',
+    tags: ['ด่วน', 'เริ่มงานทันที', 'หาคนด่วนมาก'],
+  },
+  {
+    title: 'สวัสดิการ',
+    icon: 'gift-outline',
+    tags: ['มีที่พัก', 'มีอาหาร', 'มีรถรับส่ง', 'มียูนิฟอร์ม'],
+  },
+  {
+    title: 'ลักษณะงาน',
+    icon: 'briefcase-outline',
+    tags: ['ทำต่อได้', 'ไม่ต้องมีประสบการณ์', 'นอนเฝ้า', 'ไม่ต้องนอนเฝ้า', 'งานเบา', 'มีพี่เลี้ยง'],
+  },
+];
+
+export const JOB_TAGS: TagGroup[] = [
+  {
+    title: 'ความเร่งด่วน',
+    icon: 'flash-outline',
+    tags: ['ด่วน', 'เริ่มงานทันที', 'รับหลายอัตรา'],
+  },
+  {
+    title: 'คุณสมบัติ',
+    icon: 'school-outline',
+    tags: ['ไม่ต้องมีประสบการณ์', 'ยินดีรับจบใหม่', 'มีใบประกอบวิชาชีพ', 'ประสบการณ์ 1+ ปี', 'ประสบการณ์ 3+ ปี'],
+  },
+  {
+    title: 'สิ่งที่ได้รับ',
+    icon: 'gift-outline',
+    tags: ['มีที่พัก', 'มีอาหาร', 'มีรถรับส่ง', 'มียูนิฟอร์ม', 'ฝึกอบรมฟรี', 'ทุนการศึกษา'],
+  },
+  {
+    title: 'รูปแบบงาน',
+    icon: 'time-outline',
+    tags: ['ทำต่อได้', 'Part-time', 'Full-time', 'งานกะ', 'จันทร์-ศุกร์', 'เสาร์-อาทิตย์หยุด'],
+  },
+];
+
+export const HOMECARE_TAGS: TagGroup[] = [
+  {
+    title: 'ความเร่งด่วน',
+    icon: 'flash-outline',
+    tags: ['ด่วน', 'เริ่มงานทันที', 'ต้องการวันนี้'],
+  },
+  {
+    title: 'ลักษณะผู้ป่วย',
+    icon: 'heart-outline',
+    tags: ['ผู้ป่วยสุภาพ', 'ผู้ป่วยติดเตียง', 'ผู้สูงอายุ', 'เด็กเล็ก', 'ผู้ป่วยหลังผ่าตัด', 'ผู้ป่วยจิตเวช'],
+  },
+  {
+    title: 'สวัสดิการ',
+    icon: 'gift-outline',
+    tags: ['มีที่พัก', 'มีอาหาร', 'มีรถรับส่ง'],
+  },
+  {
+    title: 'ลักษณะงาน',
+    icon: 'briefcase-outline',
+    tags: ['นอนเฝ้า', 'ไม่ต้องนอนเฝ้า', 'ทำต่อได้', 'ไม่ต้องมีประสบการณ์', 'มีพี่เลี้ยง'],
+  },
+];
+
+// Lookup by postType for convenience
+export const TAGS_BY_POST_TYPE: Record<string, TagGroup[]> = {
+  shift: SHIFT_TAGS,
+  job: JOB_TAGS,
+  homecare: HOMECARE_TAGS,
+};
+
+// ============================================
+// สวัสดิการ (Benefits) - แยกตามหมวด
+// ============================================
+
+export interface BenefitGroup {
+  title: string;
+  icon: string;
+  benefits: string[];
+}
+
+export const BENEFIT_GROUPS: BenefitGroup[] = [
+  {
+    title: 'ประกัน & สิทธิ์',
+    icon: 'shield-checkmark-outline',
+    benefits: ['ประกันสังคม', 'ประกันกลุ่ม', 'ประกันอุบัติเหตุ', 'กองทุนสำรองเลี้ยงชีพ', 'สิทธิลาป่วย'],
+  },
+  {
+    title: 'เงิน & โบนัส',
+    icon: 'cash-outline',
+    benefits: ['โบนัส', 'OT', 'ค่าเวร', 'ค่าตำแหน่ง', 'ค่าครองชีพ', 'ค่าใบประกอบวิชาชีพ', 'เบี้ยขยัน'],
+  },
+  {
+    title: 'สิ่งอำนวยความสะดวก',
+    icon: 'home-outline',
+    benefits: ['ที่พัก', 'อาหาร', 'รถรับส่ง', 'ยูนิฟอร์ม', 'ที่จอดรถ'],
+  },
+  {
+    title: 'วันหยุด & สวัสดิการอื่นๆ',
+    icon: 'calendar-outline',
+    benefits: ['วันหยุดตามปฏิทิน', 'พักร้อน', 'ลากิจ', 'ลาคลอด', 'ทุนการศึกษา', 'ฝึกอบรม', 'ตรวจสุขภาพประจำปี'],
+  },
+];
+
+// All benefits flattened for quick access
+export const ALL_BENEFITS = BENEFIT_GROUPS.flatMap(g => g.benefits);
+
+// ============================================
 // Helper Functions
 // ============================================
 

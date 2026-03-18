@@ -4,7 +4,7 @@
 // Sub-type selection embedded in card after role pick
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,9 +20,11 @@ import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { KittenButton as Button } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import { AuthStackParamList } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { completeUserOnboarding } from '../../services/authService';
+import { trackEvent } from '../../services/analyticsService';
 
 // ============================================
 // Role definitions
@@ -49,7 +51,7 @@ const ROLES: RoleOption[] = [
     title: 'พยาบาล / บุคลากรทางการแพทย์',
     subtitle: 'กำลังมองหางานเวร, งานพาร์ทไทม์',
     bullets: [
-      'รับงานเวร / งานพาร์ทไทม์',
+      'ค้นหางานเวร / งานพาร์ทไทม์',
       'แจ้งเตือนงานใกล้ตัวอัตโนมัติ',
       'แสดงใบประกอบวิชาชีพได้',
     ],
@@ -109,6 +111,8 @@ type Nav = NativeStackNavigationProp<AuthStackParamList, 'ChooseRole'>;
 type Route = RouteProp<AuthStackParamList, 'ChooseRole'>;
 
 export default function ChooseRoleScreen({ navigation, route }: { navigation: Nav; route: Route }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { phone, registrationData, fromGoogle } = route.params;
   const { user, refreshUser } = useAuth();
   const [selectedRole, setSelectedRole] = useState<RoleKey | null>(null);
@@ -116,7 +120,29 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
   const [selectedOrgType, setSelectedOrgType] = useState<OrgType | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  useEffect(() => {
+    trackEvent({
+      eventName: 'onboarding_started',
+      screenName: 'ChooseRole',
+      props: {
+        entryPoint: fromGoogle ? 'google_sign_in' : 'phone_registration',
+      },
+    });
+  }, [fromGoogle]);
+
   const handleContinue = async () => {
+    await trackEvent({
+      eventName: 'onboarding_step_completed',
+      screenName: 'ChooseRole',
+      props: {
+        step: 'role_selection',
+        role: selectedRole || 'user',
+        staffType: selectedRole === 'nurse' ? selectedStaffType || null : null,
+        orgType: selectedRole === 'hospital' ? selectedOrgType || null : null,
+        entryPoint: fromGoogle ? 'google_sign_in' : 'phone_registration',
+      },
+    });
+
     if (fromGoogle) {
       // Google users: save role directly to Firestore and close the Auth modal
       setIsSaving(true);
@@ -146,11 +172,21 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
       role: selectedRole || 'user',
       staffType: selectedRole === 'nurse' ? (selectedStaffType || undefined) : undefined,
       orgType: selectedRole === 'hospital' ? (selectedOrgType || undefined) : undefined,
-      ...registrationData,
+      registrationData,
     });
   };
 
   const handleSkip = () => {
+    trackEvent({
+      eventName: 'onboarding_step_completed',
+      screenName: 'ChooseRole',
+      props: {
+        step: 'role_selection_skipped',
+        role: 'user',
+        entryPoint: fromGoogle ? 'google_sign_in' : 'phone_registration',
+      },
+    });
+
     if (fromGoogle) {
       if (!user?.uid) {
         Alert.alert('เกิดข้อผิดพลาด', 'ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
@@ -174,11 +210,21 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
       phone: phone || '',
       phoneVerified: true,
       role: 'user',
+      registrationData,
     });
   };
 
   // Clear sub-selection when role changes
   const handleSelectRole = (role: RoleKey) => {
+    trackEvent({
+      eventName: 'role_selected',
+      screenName: 'ChooseRole',
+      props: {
+        role,
+        entryPoint: fromGoogle ? 'google_sign_in' : 'phone_registration',
+      },
+    });
+
     setSelectedRole(role);
     setSelectedStaffType(null);
     setSelectedOrgType(null);
@@ -312,7 +358,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   scroll: { padding: SPACING.lg, paddingBottom: 60 },
   backBtn: {

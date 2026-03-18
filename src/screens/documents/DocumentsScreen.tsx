@@ -2,7 +2,7 @@
 // DOCUMENTS SCREEN - Production Ready
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,16 +13,19 @@ import {
   RefreshControl,
   Modal,
   Platform,
+  StatusBar,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import { WebView } from 'react-native-webview';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Loading, EmptyState, KittenButton as Button } from '../../components/common';
+import { Loading, EmptyState, ModalContainer } from '../../components/common';
 import {
   getUserDocuments,
   uploadDocument,
@@ -32,6 +35,7 @@ import {
   getDocumentTypeLabel,
   formatFileSize,
 } from '../../services/documentsService';
+import { readUriAsBlob } from '../../services/storageService';
 import { formatDate } from '../../utils/helpers';
 
 const documentTypes: { type: DocumentType; icon: string }[] = [
@@ -48,13 +52,17 @@ const documentTypes: { type: DocumentType; icon: string }[] = [
 export default function DocumentsScreen() {
   const { user, requireAuth } = useAuth();
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const headerBackground = colors.surface;
+  const statusBarStyle = isDark ? 'light-content' : 'dark-content';
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [selectedType, setSelectedType] = useState<DocumentType | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<Document | null>(null);
 
   const loadDocuments = useCallback(async () => {
     if (!user?.uid) return;
@@ -143,9 +151,7 @@ export default function DocumentsScreen() {
     setIsUploading(true);
 
     try {
-      // Convert URI to Blob
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      const blob = await readUriAsBlob(uri, mimeType);
 
       const doc = await uploadDocument(
         user.uid,
@@ -169,17 +175,22 @@ export default function DocumentsScreen() {
 
   const handleDelete = (doc: Document) => {
     Alert.alert(
-      'ลบเอกสาร',
-      `ต้องการลบ "${doc.name}" หรือไม่?`,
+      doc.status === 'pending' ? 'ยกเลิกคำขอ' : 'ลบเอกสาร',
+      doc.status === 'pending'
+        ? `ต้องการยกเลิกคำขอสำหรับ "${doc.name}" หรือไม่?`
+        : `ต้องการลบ "${doc.name}" หรือไม่?`,
       [
         { text: 'ยกเลิก', style: 'cancel' },
         {
-          text: 'ลบ',
+          text: doc.status === 'pending' ? 'ยืนยัน' : 'ลบ',
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteDocument(doc.id, doc.fileUrl);
+              await deleteDocument(doc.id, doc.fileUrl, doc.storagePath);
               setDocuments(prev => prev.filter(d => d.id !== doc.id));
+              if (previewDocument?.id === doc.id) {
+                setPreviewDocument(null);
+              }
             } catch (error) {
               Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถลบได้');
             }
@@ -189,10 +200,35 @@ export default function DocumentsScreen() {
     );
   };
 
+  const isImageDocument = (doc: Document) => doc.mimeType?.startsWith('image/');
+
+  const getStatusMeta = (doc: Document) => {
+    if (doc.status === 'approved' || doc.isVerified) {
+      return {
+        icon: 'checkmark-circle' as const,
+        text: 'อนุมัติแล้ว',
+        color: colors.success,
+      };
+    }
+    if (doc.status === 'rejected') {
+      return {
+        icon: 'close-circle' as const,
+        text: 'ไม่ผ่านการตรวจสอบ',
+        color: colors.error,
+      };
+    }
+    return {
+      icon: 'time' as const,
+      text: 'รอการตรวจสอบ',
+      color: colors.warning,
+    };
+  };
+
   // Not logged in
   if (!user) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+        <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <EmptyState
           icon="documents-outline"
           title="เข้าสู่ระบบเพื่อจัดการเอกสาร"
@@ -210,9 +246,10 @@ export default function DocumentsScreen() {
 
   const renderDocument = ({ item }: { item: Document }) => {
     const typeInfo = documentTypes.find(t => t.type === item.type);
+    const statusMeta = getStatusMeta(item);
 
     return (
-      <View style={styles.documentCard}>
+      <TouchableOpacity style={styles.documentCard} activeOpacity={0.9} onPress={() => setPreviewDocument(item)}>
         <View style={styles.documentIcon}>
           <Ionicons
             name={(typeInfo?.icon || 'document') as any}
@@ -226,18 +263,15 @@ export default function DocumentsScreen() {
             {getDocumentTypeLabel(item.type)} • {formatFileSize(item.fileSize)}
           </Text>
           <View style={styles.documentStatus}>
-            {item.isVerified ? (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={14} color={colors.success} />
-                <Text style={styles.verifiedText}>ยืนยันแล้ว</Text>
-              </View>
-            ) : (
-                <View>
-                  <Text style={styles.pendingText}>รอการตรวจสอบ</Text>
-                </View>
-            )}
+            <View style={styles.verifiedBadge}>
+              <Ionicons name={statusMeta.icon} size={14} color={statusMeta.color} />
+              <Text style={[styles.verifiedText, { color: statusMeta.color }]}>{statusMeta.text}</Text>
+            </View>
             <Text style={styles.documentDate}>{formatDate(item.createdAt)}</Text>
           </View>
+          {item.rejectionReason ? (
+            <Text style={styles.rejectionText} numberOfLines={2}>เหตุผล: {item.rejectionReason}</Text>
+          ) : null}
         </View>
         <TouchableOpacity
           style={styles.deleteButton}
@@ -245,13 +279,14 @@ export default function DocumentsScreen() {
         >
           <Ionicons name="trash-outline" size={20} color={colors.error} />
         </TouchableOpacity>
-      </View>
+      </TouchableOpacity>
     );
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[styles.header, { backgroundColor: colors.surface }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
+      <View style={[styles.header, { backgroundColor: headerBackground }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -328,11 +363,50 @@ export default function DocumentsScreen() {
           </View>
         </View>
       </Modal>
+
+      <ModalContainer
+        visible={Boolean(previewDocument)}
+        onClose={() => setPreviewDocument(null)}
+        title={previewDocument?.name || 'ดูเอกสาร'}
+        fullScreen
+      >
+        {previewDocument ? (
+          <View style={styles.previewContent}>
+            <View style={styles.previewMetaCard}>
+              <Text style={styles.previewMetaTitle}>{getDocumentTypeLabel(previewDocument.type)}</Text>
+              <Text style={styles.previewMetaText}>{previewDocument.fileName}</Text>
+              <Text style={styles.previewMetaText}>สถานะ: {getStatusMeta(previewDocument).text}</Text>
+              {previewDocument.rejectionReason ? (
+                <Text style={styles.previewRejectText}>เหตุผลที่ไม่ผ่าน: {previewDocument.rejectionReason}</Text>
+              ) : null}
+            </View>
+
+            <View style={styles.previewFrame}>
+              {isImageDocument(previewDocument) ? (
+                <Image source={{ uri: previewDocument.fileUrl }} style={styles.previewImage} resizeMode="contain" />
+              ) : (
+                <WebView source={{ uri: previewDocument.fileUrl }} style={styles.previewWebview} />
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.previewActionButton,
+                { backgroundColor: previewDocument.status === 'pending' ? colors.warning : colors.error },
+              ]}
+              onPress={() => handleDelete(previewDocument)}
+            >
+              <Ionicons name={previewDocument.status === 'pending' ? 'close-circle-outline' : 'trash-outline'} size={18} color="#FFF" />
+              <Text style={styles.previewActionText}>{previewDocument.status === 'pending' ? 'ยกเลิกคำขอ' : 'ลบเอกสาร'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </ModalContainer>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -424,6 +498,11 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.xs,
     color: COLORS.warning,
   },
+  rejectionText: {
+    marginTop: 6,
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.error,
+  },
   documentDate: {
     fontSize: FONT_SIZES.xs,
     color: COLORS.textMuted,
@@ -478,6 +557,58 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.xs,
     color: COLORS.text,
     textAlign: 'center',
+  },
+  previewContent: {
+    flex: 1,
+    gap: SPACING.md,
+  },
+  previewMetaCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    gap: 4,
+  },
+  previewMetaTitle: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  previewMetaText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+  },
+  previewRejectText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.error,
+    marginTop: SPACING.xs,
+  },
+  previewFrame: {
+    flex: 1,
+    minHeight: 420,
+    backgroundColor: '#0F172A',
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewWebview: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  previewActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  previewActionText: {
+    color: '#FFF',
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
   },
 });
 

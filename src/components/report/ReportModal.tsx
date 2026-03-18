@@ -2,7 +2,7 @@
 // REPORT MODAL - Modal สำหรับรายงาน
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import { ModalContainer, KittenButton as Button } from '../common';
 import {
   createReport,
@@ -46,6 +47,8 @@ export default function ReportModal({
   reporterName,
   reporterEmail,
 }: ReportModalProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [selectedReason, setSelectedReason] = useState<ReportReason | null>(null);
   const [additionalInfo, setAdditionalInfo] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,6 +59,7 @@ export default function ReportModal({
       case 'job': return 'ประกาศ';
       case 'user': return 'ผู้ใช้';
       case 'message': return 'ข้อความ';
+      case 'review': return 'รีวิว';
       default: return 'เนื้อหา';
     }
   };
@@ -127,7 +131,7 @@ export default function ReportModal({
         {/* Target Info */}
         <View style={styles.targetInfo}>
           <Ionicons 
-            name={targetType === 'job' ? 'briefcase' : targetType === 'user' ? 'person' : 'chatbubble'} 
+            name={targetType === 'job' ? 'briefcase' : targetType === 'user' ? 'person' : targetType === 'review' ? 'flag' : 'chatbubble'} 
             size={20} 
             color={COLORS.primary} 
           />
@@ -211,7 +215,7 @@ export default function ReportModal({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     padding: SPACING.md,
   },

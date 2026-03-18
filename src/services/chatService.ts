@@ -18,6 +18,7 @@ import { db, storage } from '../config/firebase';
 import { Message, Conversation } from '../types';
 import { assertAuthUser, isAuthUser } from './security/authGuards';
 import { getJobById } from './jobService';
+import { beginTrackedSubscription, PerformanceMetricOptions, recordQueryRead } from './performanceMetrics';
 
 export interface ConversationChatAvailability {
   isLocked: boolean;
@@ -25,6 +26,52 @@ export interface ConversationChatAvailability {
   jobId?: string;
   jobTitle?: string;
   jobStatus?: string;
+}
+
+export interface ConversationRecipientInfo {
+  recipientId?: string;
+  recipientName?: string;
+  recipientPhoto?: string;
+  jobTitle?: string;
+}
+
+const CONVERSATION_WINDOW_SIZE = 100;
+const MESSAGE_WINDOW_SIZE = 200;
+const PARTICIPANT_CACHE_TTL_MS = 5 * 60 * 1000;
+const participantProfileCache = new Map<string, { displayName?: string; photoURL?: string; expiresAt: number }>();
+const conversationSubscribers = new Map<string, Set<(conversations: Conversation[]) => void>>();
+const conversationUnsubscribers = new Map<string, () => void>();
+const latestConversationsByUser = new Map<string, Conversation[]>();
+
+async function getCachedParticipantProfile(userId: string): Promise<{ displayName?: string; photoURL?: string } | null> {
+  const cached = participantProfileCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached;
+  }
+
+  try {
+    const userDoc = await getDoc(doc(db, 'users', userId));
+    if (!userDoc.exists()) {
+      participantProfileCache.set(userId, { expiresAt: Date.now() + 30_000 });
+      return null;
+    }
+
+    const data = userDoc.data();
+    const profile = {
+      displayName: data.displayName,
+      photoURL: data.photoURL,
+    };
+
+    participantProfileCache.set(userId, {
+      ...profile,
+      expiresAt: Date.now() + PARTICIPANT_CACHE_TTL_MS,
+    });
+
+    return profile;
+  } catch {
+    participantProfileCache.set(userId, { expiresAt: Date.now() + 30_000 });
+    return null;
+  }
 }
 
 async function getConversationDocOrThrow(conversationId: string) {
@@ -96,13 +143,7 @@ async function enrichConversationParticipants(conversations: Conversation[]): Pr
   const profileEntries = await Promise.all(
     userIds.map(async (userId) => {
       try {
-        const userDoc = await getDoc(doc(db, 'users', userId));
-        if (!userDoc.exists()) return [userId, null] as const;
-        const data = userDoc.data();
-        return [userId, {
-          displayName: data.displayName,
-          photoURL: data.photoURL,
-        }] as const;
+        return [userId, await getCachedParticipantProfile(userId)] as const;
       } catch {
         return [userId, null] as const;
       }
@@ -124,6 +165,49 @@ async function enrichConversationParticipants(conversations: Conversation[]): Pr
       };
     }),
   }));
+}
+
+export async function getConversationRecipientInfo(
+  conversationId: string,
+  currentUserId: string
+): Promise<ConversationRecipientInfo | null> {
+  try {
+    if (!isAuthUser(currentUserId)) return null;
+
+    const conversationSnap = await getDoc(doc(db, 'conversations', conversationId));
+    if (!conversationSnap.exists()) return null;
+
+    const data = conversationSnap.data();
+    const participants = Array.isArray(data.participantDetails) ? data.participantDetails : [];
+    const otherParticipant = participants.find((participant: any) => participant?.id && participant.id !== currentUserId);
+
+    if (!otherParticipant?.id) {
+      return {
+        jobTitle: data.jobTitle,
+      };
+    }
+
+    let recipientName = otherParticipant.displayName || otherParticipant.name || '';
+    let recipientPhoto = otherParticipant.photoURL || '';
+
+    if (!recipientName || !recipientPhoto) {
+      const userSnap = await getDoc(doc(db, 'users', otherParticipant.id));
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        recipientName = recipientName || userData.displayName || userData.username || 'ผู้ใช้';
+        recipientPhoto = recipientPhoto || userData.photoURL || '';
+      }
+    }
+
+    return {
+      recipientId: otherParticipant.id,
+      recipientName: recipientName || 'ผู้ใช้',
+      recipientPhoto: recipientPhoto || undefined,
+      jobTitle: data.jobTitle,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // Create or get existing conversation
@@ -191,6 +275,67 @@ export const getOrCreateConversation = async (
   }
 };
 
+export const getOrCreateConversationWithStatus = async (
+  userId: string,
+  userName: string,
+  otherUserId: string,
+  otherUserName: string,
+  jobId?: string,
+  jobTitle?: string,
+  hospitalName?: string
+): Promise<{ conversationId: string; created: boolean }> => {
+  assertAuthUser(userId, 'เซสชันไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
+  try {
+    if (jobId) {
+      const job = await getJobById(jobId);
+      const lockReason = isJobChatLocked(job);
+      if (lockReason) {
+        throw new Error(lockReason);
+      }
+    }
+
+    const conversationsRef = collection(db, 'conversations');
+    const q = query(
+      conversationsRef,
+      where('participants', 'array-contains', userId)
+    );
+
+    const snapshot = await getDocs(q);
+
+    for (const doc of snapshot.docs) {
+      const data = doc.data();
+      if (data.participants.includes(otherUserId)) {
+        if (jobId && data.jobId === jobId) {
+          return { conversationId: doc.id, created: false };
+        } else if (!jobId && !data.jobId) {
+          return { conversationId: doc.id, created: false };
+        }
+      }
+    }
+
+    const newConversation = {
+      participants: [userId, otherUserId],
+      participantDetails: [
+        { id: userId, name: userName },
+        { id: otherUserId, name: otherUserName },
+      ],
+      jobId: jobId || null,
+      jobTitle: jobTitle || null,
+      hospitalName: hospitalName || null,
+      lastMessage: '',
+      lastMessageAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+      unreadCount: 0,
+    };
+
+    const docRef = await addDoc(conversationsRef, newConversation);
+    return { conversationId: docRef.id, created: true };
+  } catch (error) {
+    console.error('Error creating conversation:', error);
+    throw error;
+  }
+};
+
 // Send a message
 export const sendMessage = async (
   conversationId: string,
@@ -248,12 +393,21 @@ export const sendMessage = async (
 // Subscribe to messages in a conversation
 export const subscribeToMessages = (
   conversationId: string,
-  callback: (messages: Message[]) => void
+  callback: (messages: Message[]) => void,
+  metrics?: PerformanceMetricOptions
 ): (() => void) => {
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-  const q = query(messagesRef, orderBy('createdAt', 'asc'));
-  
-  return onSnapshot(q, (snapshot) => {
+  const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(MESSAGE_WINDOW_SIZE));
+  const endMetric = beginTrackedSubscription({
+    screenName: metrics?.screenName,
+    source: metrics?.source || 'chat:messages',
+  });
+
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: `${metrics?.source || 'chat:messages'}:snapshot`,
+    });
     const messages: Message[] = snapshot.docs.map(doc => {
       const data = doc.data();
       // Handle pending serverTimestamp (null) - use current time
@@ -283,52 +437,130 @@ export const subscribeToMessages = (
     
     callback(messages);
   });
+
+  return () => {
+    endMetric();
+    unsubscribe();
+  };
 };
 
 // Subscribe to user's conversations
 export const subscribeToConversations = (
   userId: string,
-  callback: (conversations: Conversation[]) => void
+  callback: (conversations: Conversation[]) => void,
+  metrics?: PerformanceMetricOptions
 ): (() => void) => {
   if (!isAuthUser(userId)) {
+    latestConversationsByUser.set(userId, []);
     callback([]);
     return () => {};
   }
-  const conversationsRef = collection(db, 'conversations');
-  // Use simpler query without orderBy to avoid index requirement
-  const q = query(
-    conversationsRef,
-    where('participants', 'array-contains', userId)
-  );
-  
-  return onSnapshot(q, (snapshot) => {
-    const conversations: Conversation[] = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      lastMessageAt: (doc.data().lastMessageAt as Timestamp)?.toDate() || new Date(),
-      createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
-    })) as Conversation[];
-    
-    // Sort client-side instead
-    conversations.sort((a, b) => {
-      const dateA = a.lastMessageAt instanceof Date ? a.lastMessageAt.getTime() : 0;
-      const dateB = b.lastMessageAt instanceof Date ? b.lastMessageAt.getTime() : 0;
-      return dateB - dateA; // descending
+  const listeners = conversationSubscribers.get(userId) || new Set<(conversations: Conversation[]) => void>();
+  listeners.add(callback);
+  conversationSubscribers.set(userId, listeners);
+
+  const cachedConversations = latestConversationsByUser.get(userId);
+  if (cachedConversations) {
+    callback(cachedConversations);
+  }
+
+  if (!conversationUnsubscribers.has(userId)) {
+    const conversationsRef = collection(db, 'conversations');
+    const preferredQuery = query(
+      conversationsRef,
+      where('participants', 'array-contains', userId),
+      orderBy('lastMessageAt', 'desc'),
+      limit(CONVERSATION_WINDOW_SIZE)
+    );
+    const fallbackQuery = query(
+      conversationsRef,
+      where('participants', 'array-contains', userId),
+      limit(CONVERSATION_WINDOW_SIZE)
+    );
+    const endMetric = beginTrackedSubscription({
+      screenName: metrics?.screenName,
+      source: metrics?.source || 'chat:conversations',
     });
-    
-    enrichConversationParticipants(conversations)
-      .then(callback)
-      .catch(() => callback(conversations));
-  }, (error: any) => {
-    if (error?.code === 'permission-denied') {
-      // Silently ignore — triggered when auth token not yet active (cached user race)
-      console.warn('[subscribeToConversations] permission-denied, will retry on next auth');
-      callback([]);
-      return;
-    }
-    console.error('Error subscribing to conversations:', error);
-    callback([]); // Return empty array on error
-  });
+
+    let fallbackUnsubscribe: (() => void) | null = null;
+
+    const emitConversations = (snapshot: any) => {
+      recordQueryRead(snapshot.size, {
+        screenName: metrics?.screenName,
+        source: `${metrics?.source || 'chat:conversations'}:snapshot`,
+      });
+
+      const conversations: Conversation[] = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        ...doc.data(),
+        lastMessageAt: (doc.data().lastMessageAt as Timestamp)?.toDate() || new Date(),
+        createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
+      })) as Conversation[];
+
+      conversations.sort((a, b) => {
+        const dateA = a.lastMessageAt instanceof Date ? a.lastMessageAt.getTime() : 0;
+        const dateB = b.lastMessageAt instanceof Date ? b.lastMessageAt.getTime() : 0;
+        return dateB - dateA;
+      });
+
+      enrichConversationParticipants(conversations)
+        .then((enrichedConversations) => {
+          latestConversationsByUser.set(userId, enrichedConversations);
+          const activeListeners = conversationSubscribers.get(userId);
+          activeListeners?.forEach((listener) => listener(enrichedConversations));
+        })
+        .catch(() => {
+          latestConversationsByUser.set(userId, conversations);
+          const activeListeners = conversationSubscribers.get(userId);
+          activeListeners?.forEach((listener) => listener(conversations));
+        });
+    };
+
+    const preferredUnsubscribe = onSnapshot(preferredQuery, emitConversations, (error: any) => {
+      if (error?.code === 'permission-denied') {
+        console.warn('[subscribeToConversations] permission-denied, will retry on next auth');
+        latestConversationsByUser.set(userId, []);
+        const activeListeners = conversationSubscribers.get(userId);
+        activeListeners?.forEach((listener) => listener([]));
+        return;
+      }
+
+      if (!fallbackUnsubscribe) {
+        fallbackUnsubscribe = onSnapshot(fallbackQuery, emitConversations, () => {
+          latestConversationsByUser.set(userId, []);
+          const activeListeners = conversationSubscribers.get(userId);
+          activeListeners?.forEach((listener) => listener([]));
+        });
+        return;
+      }
+
+      console.error('Error subscribing to conversations:', error);
+      latestConversationsByUser.set(userId, []);
+      const activeListeners = conversationSubscribers.get(userId);
+      activeListeners?.forEach((listener) => listener([]));
+    });
+
+    conversationUnsubscribers.set(userId, () => {
+      endMetric();
+      preferredUnsubscribe();
+      if (fallbackUnsubscribe) {
+        fallbackUnsubscribe();
+      }
+    });
+  }
+
+  return () => {
+    const activeListeners = conversationSubscribers.get(userId);
+    if (!activeListeners) return;
+
+    activeListeners.delete(callback);
+    if (activeListeners.size > 0) return;
+
+    conversationSubscribers.delete(userId);
+    const unsubscribe = conversationUnsubscribers.get(userId);
+    conversationUnsubscribers.delete(userId);
+    unsubscribe?.();
+  };
 };
 
 // Mark messages as read
@@ -715,5 +947,50 @@ export const sendSavedDocument = async (
   } catch (error) {
     console.error('Error sending saved document:', error);
     throw new Error('ไม่สามารถส่งเอกสารได้');
+  }
+};
+
+export const sendLocationMessage = async (
+  conversationId: string,
+  senderId: string,
+  senderName: string,
+  location: {
+    lat: number;
+    lng: number;
+    address: string;
+    province?: string;
+    district?: string;
+  }
+): Promise<void> => {
+  try {
+    assertAuthUser(senderId, 'ไม่สามารถส่งพิกัดแทนผู้ใช้อื่นได้');
+    await assertConversationCanSend(conversationId);
+
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    await addDoc(messagesRef, {
+      senderId,
+      senderName,
+      text: `📍 ${location.address || 'ตำแหน่งที่ปักหมุด'}`,
+      type: 'location',
+      location,
+      createdAt: serverTimestamp(),
+      isRead: false,
+    });
+
+    const conversationRef = doc(db, 'conversations', conversationId);
+    const conversationDoc = await getDoc(conversationRef);
+
+    if (conversationDoc.exists()) {
+      const data = conversationDoc.data();
+      await updateDoc(conversationRef, {
+        lastMessage: '📍 ตำแหน่งที่ส่งมา',
+        lastMessageAt: serverTimestamp(),
+        deletedBy: [],
+        unreadCount: (data.unreadCount || 0) + 1,
+      });
+    }
+  } catch (error) {
+    console.error('Error sending location:', error);
+    throw new Error('ไม่สามารถส่งตำแหน่งได้');
   }
 };

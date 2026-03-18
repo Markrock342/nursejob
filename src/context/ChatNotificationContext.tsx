@@ -16,7 +16,7 @@ import {
 // Removed `expo-av` usage (replaced with vibration + web audio fallback)
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from './AuthContext';
-import { subscribeToConversations } from '../services/chatService';
+import { getConversationRecipientInfo, subscribeToConversations } from '../services/chatService';
 import { sendMessageNotification } from '../services/notificationService';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../theme';
 import { Conversation } from '../types';
@@ -130,6 +130,9 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
     senderName: '', 
     message: '',
     conversationId: '',
+    recipientId: '',
+    recipientPhoto: '',
+    jobTitle: '',
   });
   
   // Store previous conversations to detect new messages
@@ -216,6 +219,9 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
               senderName,
               message: msgText,
               conversationId: conv.id,
+              recipientId: otherParticipant?.id || '',
+              recipientPhoto: otherParticipant?.photoURL || '',
+              jobTitle: conv.jobTitle || '',
             });
             setShowToast(true);
             playSound();
@@ -239,15 +245,23 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
   }, [user?.uid, isInitialized, activeConversationId, playSound]);
 
   // Handle toast press - navigate to chat
-  const handleToastPress = useCallback(() => {
-    if (navigation && toastData.conversationId) {
-      navigation.navigate('ChatRoom', {
+  const handleToastPress = useCallback(async () => {
+    const navigator = navigation?.current ?? navigation;
+    if (navigator && toastData.conversationId) {
+      const conversationMeta = user?.uid
+        ? await getConversationRecipientInfo(toastData.conversationId, user.uid)
+        : null;
+
+      navigator.navigate('ChatRoom', {
         conversationId: toastData.conversationId,
-        recipientName: toastData.senderName,
+        recipientId: toastData.recipientId || conversationMeta?.recipientId,
+        recipientName: toastData.senderName || conversationMeta?.recipientName,
+        recipientPhoto: toastData.recipientPhoto || conversationMeta?.recipientPhoto,
+        jobTitle: toastData.jobTitle || conversationMeta?.jobTitle,
       });
     }
     setShowToast(false);
-  }, [navigation, toastData]);
+  }, [navigation, toastData, user?.uid]);
 
   return (
     <ChatNotificationContext.Provider

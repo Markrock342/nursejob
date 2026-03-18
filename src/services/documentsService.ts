@@ -13,6 +13,7 @@ import {
   where,
   serverTimestamp,
   Timestamp,
+  getDoc,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
@@ -30,6 +31,8 @@ export type DocumentType =
   | 'photo'               // รูปถ่าย
   | 'other';              // อื่นๆ
 
+export type DocumentReviewStatus = 'pending' | 'approved' | 'rejected';
+
 export interface Document {
   id: string;
   userId: string;
@@ -37,9 +40,13 @@ export interface Document {
   name: string;
   fileName: string;
   fileUrl: string;
+  storagePath?: string;
   fileSize: number;
   mimeType: string;
   isVerified: boolean;
+  status: DocumentReviewStatus;
+  rejectionReason?: string;
+  reviewedAt?: Date;
   verifiedAt?: Date;
   verifiedBy?: string;
   expiresAt?: Date;
@@ -62,7 +69,7 @@ export async function uploadDocument(
     // Generate unique file path
     const timestamp = Date.now();
     const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const filePath = `documents/${userId}/${type}/${timestamp}_${safeName}`;
+    const filePath = `users/${userId}/documents/${timestamp}_${type}_${safeName}`;
     
     // Upload to Firebase Storage
     const storageRef = ref(storage, filePath);
@@ -76,9 +83,11 @@ export async function uploadDocument(
       name,
       fileName,
       fileUrl,
+      storagePath: filePath,
       fileSize: file.size,
       mimeType,
       isVerified: false,
+      status: 'pending',
       createdAt: serverTimestamp(),
     };
     
@@ -109,8 +118,10 @@ export async function getUserDocuments(userId: string): Promise<Document[]> {
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
+      status: (doc.data().status as DocumentReviewStatus) || ((doc.data().isVerified as boolean) ? 'approved' : 'pending'),
       createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
       updatedAt: (doc.data().updatedAt as Timestamp)?.toDate(),
+      reviewedAt: (doc.data().reviewedAt as Timestamp)?.toDate(),
       verifiedAt: (doc.data().verifiedAt as Timestamp)?.toDate(),
       expiresAt: (doc.data().expiresAt as Timestamp)?.toDate(),
     })) as Document[];
@@ -135,6 +146,7 @@ export async function getDocumentsByType(userId: string, type: DocumentType): Pr
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
+      status: (doc.data().status as DocumentReviewStatus) || ((doc.data().isVerified as boolean) ? 'approved' : 'pending'),
       createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
     })) as Document[];
   } catch (error) {
@@ -160,11 +172,11 @@ export async function updateDocument(
 }
 
 // Delete document
-export async function deleteDocument(documentId: string, fileUrl: string): Promise<void> {
+export async function deleteDocument(documentId: string, fileUrl: string, storagePath?: string): Promise<void> {
   try {
     // Delete from Storage
     try {
-      const storageRef = ref(storage, fileUrl);
+      const storageRef = ref(storage, storagePath || fileUrl);
       await deleteObject(storageRef);
     } catch (storageError) {
       console.warn('Error deleting file from storage:', storageError);
@@ -186,12 +198,57 @@ export async function verifyDocument(
   try {
     await updateDoc(doc(db, DOCUMENTS_COLLECTION, documentId), {
       isVerified: true,
+      status: 'approved',
       verifiedAt: serverTimestamp(),
+      reviewedAt: serverTimestamp(),
       verifiedBy,
+      reviewedBy: verifiedBy,
+      rejectionReason: null,
     });
   } catch (error) {
     console.error('Error verifying document:', error);
     throw error;
+  }
+}
+
+export async function rejectDocument(
+  documentId: string,
+  reviewedBy: string,
+  rejectionReason: string
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, DOCUMENTS_COLLECTION, documentId), {
+      isVerified: false,
+      status: 'rejected',
+      rejectionReason,
+      reviewedAt: serverTimestamp(),
+      reviewedBy,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error rejecting document:', error);
+    throw error;
+  }
+}
+
+export async function getDocumentById(documentId: string): Promise<Document | null> {
+  try {
+    const snapshot = await getDoc(doc(db, DOCUMENTS_COLLECTION, documentId));
+    if (!snapshot.exists()) return null;
+    const data = snapshot.data();
+    return {
+      id: snapshot.id,
+      ...data,
+      status: (data.status as DocumentReviewStatus) || (data.isVerified ? 'approved' : 'pending'),
+      createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
+      updatedAt: (data.updatedAt as Timestamp)?.toDate(),
+      reviewedAt: (data.reviewedAt as Timestamp)?.toDate(),
+      verifiedAt: (data.verifiedAt as Timestamp)?.toDate(),
+      expiresAt: (data.expiresAt as Timestamp)?.toDate(),
+    } as Document;
+  } catch (error) {
+    console.error('Error getting document by id:', error);
+    return null;
   }
 }
 

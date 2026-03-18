@@ -14,6 +14,7 @@ import {
   ScrollView,
   TextInput,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +30,9 @@ import {
   getHospitalApplications,
   updateApplicationStatus,
 } from '../../services/applicantsService';
-import { getOrCreateConversation } from '../../services/chatService';
+import { getOrCreateConversationWithStatus } from '../../services/chatService';
+import { completeJobAssignment } from '../../services/jobCompletionService';
+import { consumeFeatureUsage, getFeatureUsageStatus } from '../../services/subscriptionService';
 import { formatDate, formatRelativeTime } from '../../utils/helpers';
 import {
   getCareTypeThaiLabel,
@@ -46,9 +49,9 @@ type ApplicantsRouteParams = {
 };
 
 const STATUS_META: Record<ContactStatus, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  interested: { label: 'สนใจ', icon: 'sparkles-outline' },
-  confirmed: { label: 'ยืนยันแล้ว', icon: 'checkmark-circle-outline' },
-  cancelled: { label: 'ยกเลิก', icon: 'close-circle-outline' },
+  interested: { label: 'รับงาน', icon: 'hand-left-outline' },
+  confirmed: { label: 'เลือกแล้ว', icon: 'checkmark-circle-outline' },
+  cancelled: { label: 'ปฏิเสธ', icon: 'close-circle-outline' },
 };
 
 export default function ApplicantsScreen() {
@@ -56,6 +59,7 @@ export default function ApplicantsScreen() {
   const route = useRoute();
   const { user } = useAuth();
   const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
 
   const routeParams = (route.params || {}) as ApplicantsRouteParams;
@@ -69,6 +73,7 @@ export default function ApplicantsScreen() {
   const [selectedContact, setSelectedContact] = useState<ApplicantDetails | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [isCompletingJob, setIsCompletingJob] = useState(false);
   const [alert, setAlert] = useState<AlertState>(initialAlertState);
 
   const pageBackground = isDark ? colors.background : '#F4F7FB';
@@ -218,6 +223,43 @@ export default function ApplicantsScreen() {
     }
   };
 
+  const handleCompleteJob = () => {
+    if (!selectedContact || isCompletingJob) return;
+
+    const applicantName = getApplicantName(selectedContact);
+    const jobTitle = selectedContact.job?.title || 'งานนี้';
+
+    Alert.alert(
+      'จบงานและเลือกผู้ถูกจ้าง',
+      `ระบบจะปิดประกาศ "${jobTitle}" เลือก ${applicantName} เป็นผู้ถูกจ้าง และอัปเดตผู้สมัครคนอื่นเป็นไม่ผ่านอัตโนมัติ`,
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'ยืนยันจบงาน',
+          onPress: async () => {
+            try {
+              setIsCompletingJob(true);
+              const result = await completeJobAssignment(selectedContact.jobId, selectedContact.id);
+              await loadApplicants();
+              setShowDetailModal(false);
+              navigation.navigate('Reviews', {
+                targetUserId: result.targetUserId,
+                targetName: result.targetUserName || applicantName,
+                completionId: result.completionId,
+                relatedJobId: result.jobId,
+              });
+            } catch (error: any) {
+              console.error('Error completing job:', error);
+              Alert.alert('จบงานไม่สำเร็จ', error?.message || 'ไม่สามารถปิดงานและเลือกผู้ถูกจ้างได้');
+            } finally {
+              setIsCompletingJob(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const handleCall = async (phone?: string) => {
     if (!phone) {
       setAlert(createAlert.warning('ไม่มีเบอร์โทร', 'ผู้สมัครรายนี้ไม่ได้ระบุเบอร์โทรศัพท์') as AlertState);
@@ -250,8 +292,14 @@ export default function ApplicantsScreen() {
     if (!selectedContact || !user?.uid) return;
 
     try {
+      const chatUsage = await getFeatureUsageStatus(user.uid, 'chat_start');
+      if (!chatUsage.canUse) {
+        setAlert(createAlert.info('ใช้สิทธิ์เริ่มแชทครบแล้ว', chatUsage.reason || 'บัญชีนี้ใช้สิทธิ์เริ่มแชทครบตามรอบเดือนนี้แล้ว') as AlertState);
+        return;
+      }
+
       const recipientName = getApplicantName(selectedContact);
-      const conversationId = await getOrCreateConversation(
+      const { conversationId, created } = await getOrCreateConversationWithStatus(
         user.uid,
         user.displayName || 'ไม่ระบุชื่อ',
         selectedContact.userId,
@@ -260,10 +308,14 @@ export default function ApplicantsScreen() {
         selectedContact.job?.title,
         user.displayName || 'ไม่ระบุชื่อ',
       );
+      if (created && chatUsage.limit != null) {
+        await consumeFeatureUsage(user.uid, 'chat_start');
+      }
 
       setShowDetailModal(false);
       navigation.navigate('ChatRoom', {
         conversationId,
+        recipientId: selectedContact.userId,
         recipientName,
         recipientPhoto: selectedContact.userProfile?.photoURL,
         jobTitle: selectedContact.job?.title,
@@ -428,7 +480,7 @@ export default function ApplicantsScreen() {
           </TouchableOpacity>
           <View style={styles.headerTextWrap}>
             <Text style={[styles.headerTitle, { color: colors.white }]}>จัดการผู้สมัคร</Text>
-            <Text style={[styles.headerSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.82)' }]}>กำลังโหลดข้อมูลผู้สนใจงาน</Text>
+            <Text style={[styles.headerSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.82)' }]}>กำลังโหลดข้อมูลผู้สมัครงาน</Text>
           </View>
           <View style={styles.headerSpacer} />
         </View>
@@ -474,12 +526,12 @@ export default function ApplicantsScreen() {
                 จัดการผู้สมัคร
               </Text>
               <Text style={[styles.heroTitle, { color: colors.white }]}> 
-                {focusedJob?.title || 'ผู้สนใจงานของคุณ'}
+                {focusedJob?.title || 'ผู้สมัครงานของคุณ'}
               </Text>
               <Text style={[styles.heroSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.88)' }]}>
                 {targetJobId
                   ? `ดูผู้สมัครเฉพาะประกาศนี้ ${stats.total} คน`
-                  : `รวมผู้สนใจทุกประกาศ ${stats.total} คน`}
+                  : `รวมผู้สมัครทุกประกาศ ${stats.total} คน`}
               </Text>
 
               <View style={styles.heroStatsRow}> 
@@ -508,7 +560,7 @@ export default function ApplicantsScreen() {
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}> 
                 <Chip label={`ทั้งหมด ${stats.total}`} selected={selectedFilter === 'all'} onPress={() => setSelectedFilter('all')} />
-                <Chip label={`สนใจ ${stats.interested}`} selected={selectedFilter === 'interested'} onPress={() => setSelectedFilter('interested')} />
+                <Chip label={`สนใจงาน ${stats.interested}`} selected={selectedFilter === 'interested'} onPress={() => setSelectedFilter('interested')} />
                 <Chip label={`ยืนยันแล้ว ${stats.confirmed}`} selected={selectedFilter === 'confirmed'} onPress={() => setSelectedFilter('confirmed')} />
                 <Chip label={`ยกเลิก ${stats.cancelled}`} selected={selectedFilter === 'cancelled'} onPress={() => setSelectedFilter('cancelled')} />
               </ScrollView>
@@ -523,8 +575,8 @@ export default function ApplicantsScreen() {
               searchQuery
                 ? 'ลองเปลี่ยนคำค้น หรือสลับสถานะที่กำลังกรอง'
                 : targetJobId
-                  ? 'เมื่อมีคนสนใจประกาศนี้ รายชื่อจะแสดงที่นี่'
-                  : 'เมื่อมีคนสนใจประกาศของคุณ รายชื่อจะแสดงที่นี่'
+                  ? 'เมื่อมีคนแสดงความสนใจในประกาศนี้ รายชื่อจะขึ้นที่นี่ทันที'
+                  : 'เมื่อมีคนสนใจประกาศของคุณ รายชื่อจะขึ้นที่นี่เพื่อให้ติดตามต่อได้ง่าย'
             }
           />
         }
@@ -594,7 +646,7 @@ export default function ApplicantsScreen() {
 
                 <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
                   {[
-                    { icon: 'briefcase-outline', label: 'งานที่สนใจ', value: selectedContact.job?.title || '-' },
+                    { icon: 'briefcase-outline', label: 'งานที่รับสมัคร', value: selectedContact.job?.title || '-' },
                     { icon: 'calendar-outline', label: 'วันที่งาน', value: selectedContact.job?.shiftDate ? formatDate(selectedContact.job.shiftDate) : '-' },
                     { icon: 'time-outline', label: 'เวลา', value: selectedContact.job?.shiftTime || '-' },
                     { icon: 'cash-outline', label: 'ค่าตอบแทน', value: `฿${selectedContact.job?.shiftRate?.toLocaleString?.() || 0}` },
@@ -722,33 +774,85 @@ export default function ApplicantsScreen() {
                   </View>
                 ) : null}
 
+                {/* Action buttons based on current status */}
+                {selectedContact.job?.status !== 'closed' && (
                 <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
-                  <Text style={[styles.detailBoxTitle, { color: colors.text }]}>อัปเดตสถานะผู้สมัคร</Text>
-                  <View style={styles.statusOptionWrap}> 
-                    {(Object.keys(STATUS_META) as ContactStatus[]).map((option) => {
-                      const optionTone = getStatusTone(option);
-                      const selected = status === option;
-                      return (
-                        <TouchableOpacity
-                          key={option}
-                          style={[
-                            styles.statusOptionBtn,
-                            {
-                              backgroundColor: selected ? optionTone.border : optionTone.background,
-                              borderColor: optionTone.border,
-                              opacity: statusUpdating ? 0.6 : 1,
-                            },
-                          ]}
-                          disabled={statusUpdating}
-                          onPress={() => handleStatusChange(option)}
-                        >
-                          <Ionicons name={STATUS_META[option].icon} size={16} color={selected ? colors.white : optionTone.text} />
-                          <Text style={[styles.statusOptionBtnText, { color: selected ? colors.white : optionTone.text }]}>{STATUS_META[option].label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
+                  <Text style={[styles.detailBoxTitle, { color: colors.text }]}>จัดการผู้สมัคร</Text>
+
+                  {status === 'interested' && (
+                    <View style={styles.statusOptionWrap}>
+                      <TouchableOpacity
+                        style={[styles.statusOptionBtn, { backgroundColor: colors.primary, borderColor: colors.primary, flex: 1, opacity: statusUpdating ? 0.6 : 1 }]}
+                        disabled={statusUpdating}
+                        onPress={() => handleStatusChange('confirmed')}
+                      >
+                        <Ionicons name="checkmark-circle-outline" size={16} color={colors.white} />
+                        <Text style={[styles.statusOptionBtnText, { color: colors.white }]}>เลือกคนนี้</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.statusOptionBtn, { backgroundColor: colors.surface, borderColor: colors.border, flex: 1, opacity: statusUpdating ? 0.6 : 1 }]}
+                        disabled={statusUpdating}
+                        onPress={() => handleStatusChange('cancelled')}
+                      >
+                        <Ionicons name="close-circle-outline" size={16} color={colors.textSecondary} />
+                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>ปฏิเสธ</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {status === 'confirmed' && (
+                    <View>
+                      <View style={[styles.statusBadgeRow, { backgroundColor: '#E8F5E9', borderRadius: BORDER_RADIUS.md, padding: SPACING.sm, marginBottom: SPACING.sm }]}>
+                        <Ionicons name="checkmark-circle" size={18} color="#2E7D32" />
+                        <Text style={{ color: '#2E7D32', fontWeight: '600', marginLeft: SPACING.xs }}>เลือกแล้ว — รอวันทำงานผ่านไปแล้วจึงจะปิดงานได้</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.statusOptionBtn, { backgroundColor: colors.surface, borderColor: colors.border, opacity: statusUpdating ? 0.6 : 1 }]}
+                        disabled={statusUpdating}
+                        onPress={() => handleStatusChange('interested')}
+                      >
+                        <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
+                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>ยกเลิกการเลือก</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {status === 'cancelled' && (
+                    <View>
+                      <View style={[styles.statusBadgeRow, { backgroundColor: '#FFEBEE', borderRadius: BORDER_RADIUS.md, padding: SPACING.sm, marginBottom: SPACING.sm }]}>
+                        <Ionicons name="close-circle" size={18} color="#C62828" />
+                        <Text style={{ color: '#C62828', fontWeight: '600', marginLeft: SPACING.xs }}>ปฏิเสธแล้ว</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.statusOptionBtn, { backgroundColor: colors.surface, borderColor: colors.border, opacity: statusUpdating ? 0.6 : 1 }]}
+                        disabled={statusUpdating}
+                        onPress={() => handleStatusChange('interested')}
+                      >
+                        <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
+                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>เปลี่ยนใจ — กลับมารับงาน</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
+                )}
+
+                {selectedContact.job?.status !== 'closed' && status === 'confirmed' ? (
+                  <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
+                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>จบงานและเปิดรีวิว</Text>
+                    <Text style={[styles.detailBoxBody, { color: colors.textSecondary }]}>ปิดงานได้หลังวันทำงานผ่านไปแล้ว ระบบจะปิดโพสต์ ปฏิเสธผู้สมัครอื่นอัตโนมัติ และเปิดให้ทั้งสองฝ่ายรีวิว</Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.primaryAction,
+                        { backgroundColor: isCompletingJob ? colors.border : colors.primary, marginTop: SPACING.md }
+                      ]}
+                      onPress={handleCompleteJob}
+                      disabled={isCompletingJob}
+                    >
+                      <Ionicons name="checkmark-done-outline" size={18} color={colors.white} />
+                      <Text style={styles.primaryActionText}>{isCompletingJob ? 'กำลังดำเนินการ...' : 'จบงานและรีวิว'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
               </ScrollView>
 
               <View style={[styles.detailFooterBar, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, SPACING.md) }]}> 
@@ -785,7 +889,7 @@ export default function ApplicantsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -1188,6 +1292,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: SPACING.sm,
     marginTop: SPACING.sm,
+  },
+  statusBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   statusOptionBtn: {
     flexDirection: 'row',

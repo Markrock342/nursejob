@@ -2,18 +2,21 @@
 // APP NAVIGATOR - Production Ready
 // ============================================
 
-import React, { useEffect, useRef } from 'react';
-import { NavigationContainer, NavigationContainerRef, DefaultTheme, LinkingOptions } from '@react-navigation/native';
+import React, { useEffect, useRef, useState } from 'react';
+import { NavigationContainer, NavigationContainerRef, DefaultTheme, LinkingOptions, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import * as ExpoLinking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Context
 import { useAuth } from '../context/AuthContext';
 import { ChatNotificationProvider, useChatNotification } from '../context/ChatNotificationContext';
+import { NotificationProvider } from '../context/NotificationContext';
 import { useTheme } from '../context/ThemeContext';
+import { useOnboardingSurveyEnabled } from '../hooks/useOnboardingSurveyEnabled';
 
 // Components
 import { ErrorBoundary } from '../components/common';
@@ -69,6 +72,14 @@ import NearbyJobAlertScreen from '../screens/notifications/NearbyJobAlertScreen'
 
 // Theme
 import { COLORS, SPACING, FONT_SIZES } from '../theme';
+import { trackScreenView } from '../services/analyticsService';
+
+function getActiveRouteName(state: any): string {
+  const route = state?.routes?.[state.index ?? 0];
+  if (!route) return 'Unknown';
+  if (route.state) return getActiveRouteName(route.state);
+  return route.name || 'Unknown';
+}
 
 // ============================================
 // Stack Navigators
@@ -76,9 +87,12 @@ import { COLORS, SPACING, FONT_SIZES } from '../theme';
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const expoPrefix = ExpoLinking.createURL('/');
+const PUBLIC_DOMAIN = 'nursego.co';
+const PUBLIC_WWW_DOMAIN = `www.${PUBLIC_DOMAIN}`;
 
 const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: ['nursego://', 'https://nursego.app', 'https://www.nursego.app'],
+  prefixes: [expoPrefix, 'nursego://', `https://${PUBLIC_DOMAIN}`, `https://${PUBLIC_WWW_DOMAIN}`],
   config: {
     screens: {
       Main: {
@@ -121,6 +135,98 @@ function AuthNavigator() {
       <AuthStack.Screen name="Privacy" component={PrivacyScreen} />
     </AuthStack.Navigator>
   );
+}
+
+function createGuardedScreen(
+  Component: React.ComponentType<any>,
+  options: {
+    requiresAuth?: boolean;
+    allowedRoles?: Array<'user' | 'nurse' | 'hospital' | 'admin'>;
+  } = {}
+) {
+  function GuardedScreen(props: any) {
+    const navigation = useNavigation<any>();
+    const { user, isInitialized } = useAuth();
+    const redirectedRef = useRef(false);
+
+    const requiresAuth = options.requiresAuth === true;
+    const roleAllowed = !user || !options.allowedRoles || user.role === 'admin' || options.allowedRoles.includes(user.role);
+
+    useEffect(() => {
+      if (!isInitialized || redirectedRef.current) return;
+
+      if (requiresAuth && !user) {
+        redirectedRef.current = true;
+        requestAnimationFrame(() => {
+          navigation.navigate('Auth');
+        });
+        return;
+      }
+
+      if (user && options.allowedRoles && !roleAllowed) {
+        redirectedRef.current = true;
+        requestAnimationFrame(() => {
+          navigation.navigate('Main', { screen: 'Home' });
+        });
+      }
+    }, [isInitialized, navigation, requiresAuth, roleAllowed, user]);
+
+    if (!isInitialized) {
+      return <LoadingScreen />;
+    }
+
+    if (requiresAuth && !user) {
+      return <LoadingScreen />;
+    }
+
+    if (user && options.allowedRoles && !roleAllowed) {
+      return <LoadingScreen />;
+    }
+
+    return <Component {...props} />;
+  }
+
+  GuardedScreen.displayName = `Guarded${Component.displayName || Component.name || 'Screen'}`;
+  return GuardedScreen;
+}
+
+const GuardedChatListScreen = createGuardedScreen(ChatListScreen, { requiresAuth: true });
+const GuardedPostJobScreen = createGuardedScreen(PostJobScreen, { requiresAuth: true });
+const GuardedProfileScreen = createGuardedScreen(ProfileScreen, { requiresAuth: true });
+const GuardedChatRoomScreen = createGuardedScreen(ChatRoomScreen, { requiresAuth: true });
+const GuardedFavoritesScreen = createGuardedScreen(FavoritesScreen, { requiresAuth: true });
+const GuardedSettingsScreen = createGuardedScreen(SettingsScreen, { requiresAuth: true });
+const GuardedVerificationScreen = createGuardedScreen(VerificationScreen, { requiresAuth: true });
+const GuardedNotificationsScreen = createGuardedScreen(NotificationsScreen, { requiresAuth: true });
+const GuardedDocumentsScreen = createGuardedScreen(DocumentsScreen, { requiresAuth: true });
+const GuardedMyPostsScreen = createGuardedScreen(MyPostsScreen, { requiresAuth: true });
+const GuardedShopScreen = createGuardedScreen(ShopScreen, { requiresAuth: true });
+const GuardedApplicantsScreen = createGuardedScreen(ApplicantsScreen, { requiresAuth: true, allowedRoles: ['hospital'] });
+const GuardedFeedbackScreen = createGuardedScreen(FeedbackScreen, { requiresAuth: true });
+const GuardedPaymentScreen = createGuardedScreen(PaymentScreen, { requiresAuth: true });
+const GuardedNearbyJobAlertScreen = createGuardedScreen(NearbyJobAlertScreen, { requiresAuth: true });
+
+function GuardedOnboardingSurveyScreen(props: any) {
+  const navigation = useNavigation<any>();
+  const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
+
+  useEffect(() => {
+    if (!onboardingSurveyEnabled) {
+      requestAnimationFrame(() => {
+        if (navigation.canGoBack?.()) {
+          navigation.goBack();
+          return;
+        }
+        navigation.navigate('Main', { screen: 'Home' });
+      });
+    }
+  }, [navigation, onboardingSurveyEnabled]);
+
+  if (!onboardingSurveyEnabled) {
+    return <LoadingScreen />;
+  }
+
+  return <OnboardingSurveyScreen {...props} />;
 }
 
 // ============================================
@@ -195,7 +301,7 @@ function MainTabNavigator() {
       />
       <Tab.Screen
         name="Chat"
-        component={ChatListScreen}
+        component={GuardedChatListScreen}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon focused={focused} iconName={focused ? 'chatbubbles' : 'chatbubbles-outline'} label="ข้อความ" badgeCount={unreadCount} />
@@ -204,7 +310,7 @@ function MainTabNavigator() {
       />
       <Tab.Screen
         name="PostJob"
-        component={PostJobScreen}
+        component={GuardedPostJobScreen}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon focused={focused} iconName={focused ? 'add-circle' : 'add-circle-outline'} label="โพสต์" />
@@ -213,7 +319,7 @@ function MainTabNavigator() {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        component={GuardedProfileScreen}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon focused={focused} iconName={focused ? 'person' : 'person-outline'} label="โปรไฟล์" />
@@ -252,7 +358,7 @@ function RootNavigator() {
       {/* Chat Room */}
       <RootStack.Screen 
         name="ChatRoom" 
-        component={ChatRoomScreen}
+        component={GuardedChatRoomScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -261,7 +367,7 @@ function RootNavigator() {
       {/* Favorites */}
       <RootStack.Screen 
         name="Favorites" 
-        component={FavoritesScreen}
+        component={GuardedFavoritesScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -270,7 +376,7 @@ function RootNavigator() {
       {/* Settings */}
       <RootStack.Screen 
         name="Settings" 
-        component={SettingsScreen}
+        component={GuardedSettingsScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -288,7 +394,7 @@ function RootNavigator() {
       {/* Verification - ยืนยันตัวตน */}
       <RootStack.Screen 
         name="Verification" 
-        component={VerificationScreen}
+        component={GuardedVerificationScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -297,7 +403,7 @@ function RootNavigator() {
       {/* Notifications */}
       <RootStack.Screen 
         name="Notifications" 
-        component={NotificationsScreen}
+        component={GuardedNotificationsScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -306,7 +412,7 @@ function RootNavigator() {
       {/* Documents */}
       <RootStack.Screen 
         name="Documents" 
-        component={DocumentsScreen}
+        component={GuardedDocumentsScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -315,7 +421,7 @@ function RootNavigator() {
       {/* My Posts - ประกาศของฉัน */}
       <RootStack.Screen 
         name="MyPosts" 
-        component={MyPostsScreen}
+        component={GuardedMyPostsScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -324,7 +430,7 @@ function RootNavigator() {
       {/* Shop - ร้านค้า */}
       <RootStack.Screen 
         name="Shop" 
-        component={ShopScreen}
+        component={GuardedShopScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -333,7 +439,7 @@ function RootNavigator() {
       {/* Applicants (Hospital only) */}
       <RootStack.Screen 
         name="Applicants" 
-        component={ApplicantsScreen}
+        component={GuardedApplicantsScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -418,16 +524,16 @@ function RootNavigator() {
       {/* User Feedback */}
       <RootStack.Screen 
         name="Feedback" 
-        component={FeedbackScreen}
+        component={GuardedFeedbackScreen}
         options={{
           animation: 'slide_from_right',
         }}
       />
 
-      {/* Payment (mock for testing) */}
+      {/* Payment / access status screen */}
       <RootStack.Screen
         name="Payment"
-        component={PaymentScreen}
+        component={GuardedPaymentScreen}
         options={{
           presentation: 'modal',
           animation: 'slide_from_bottom',
@@ -463,7 +569,7 @@ function RootNavigator() {
       {/* Nearby Job Alert - ตั้งค่าแจ้งเตือนงานใกล้ตัว */}
       <RootStack.Screen
         name="NearbyJobAlert"
-        component={NearbyJobAlertScreen}
+        component={GuardedNearbyJobAlertScreen}
         options={{
           animation: 'slide_from_right',
         }}
@@ -471,7 +577,7 @@ function RootNavigator() {
       {/* Onboarding Survey - แบบสำรวจหลังสมัคร */}
       <RootStack.Screen
         name="OnboardingSurvey"
-        component={OnboardingSurveyScreen}
+        component={GuardedOnboardingSurveyScreen}
         options={{
           animation: 'slide_from_right',
           gestureEnabled: false,
@@ -500,9 +606,12 @@ function LoadingScreen() {
 export default function AppNavigator() {
   const { isInitialized, user, isAdmin } = useAuth();
   const { colors } = useTheme();
+  const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
+  const [navigationReady, setNavigationReady] = useState(false);
   const navigationRef = useRef<NavigationContainerRef<any>>(null);
   const isNavigationReadyRef = useRef(false);
   const hasHandledOnboardingRef = useRef(false);
+  const routeNameRef = useRef('');
 
   const navigationTheme = {
     ...DefaultTheme,
@@ -520,7 +629,7 @@ export default function AppNavigator() {
   useEffect(() => {
     if (!isInitialized || !isNavigationReadyRef.current) return;
 
-    if (!user?.uid || isAdmin || user.onboardingCompleted) {
+    if (!onboardingSurveyEnabled || !user?.uid || isAdmin || user.onboardingCompleted) {
       hasHandledOnboardingRef.current = false;
       return;
     }
@@ -537,7 +646,7 @@ export default function AppNavigator() {
     requestAnimationFrame(() => {
       navigationRef.current?.navigate('OnboardingSurvey');
     });
-  }, [isInitialized, isAdmin, user?.uid, user?.onboardingCompleted]);
+  }, [isInitialized, isAdmin, onboardingSurveyEnabled, user?.uid, user?.onboardingCompleted]);
 
   if (!isInitialized) {
     return <LoadingScreen />;
@@ -551,11 +660,26 @@ export default function AppNavigator() {
         linking={linking}
         onReady={() => {
           isNavigationReadyRef.current = true;
+          setNavigationReady(true);
+          const currentRoute = navigationRef.current?.getCurrentRoute()?.name || 'Unknown';
+          routeNameRef.current = currentRoute;
+          trackScreenView(currentRoute);
+        }}
+        onStateChange={() => {
+          const currentRoute = navigationRef.current?.getCurrentRoute()?.name
+            || getActiveRouteName(navigationRef.current?.getRootState());
+
+          if (currentRoute && currentRoute !== routeNameRef.current) {
+            routeNameRef.current = currentRoute;
+            trackScreenView(currentRoute);
+          }
         }}
       >
-        <ChatNotificationProvider navigation={navigationRef.current}>
-          <RootNavigator />
-        </ChatNotificationProvider>
+        <NotificationProvider navigation={navigationRef} navigationReady={navigationReady}>
+          <ChatNotificationProvider navigation={navigationRef}>
+            <RootNavigator />
+          </ChatNotificationProvider>
+        </NotificationProvider>
       </NavigationContainer>
     </ErrorBoundary>
   );

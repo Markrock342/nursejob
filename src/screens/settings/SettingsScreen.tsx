@@ -2,7 +2,7 @@
 // SETTINGS SCREEN - Production Ready
 // ============================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,65 +13,51 @@ import {
   Alert,
   Linking,
   Platform,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, ThemeMode } from '../../context/ThemeContext';
+import { useNotifications } from '../../context/NotificationContext';
+import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
 import { deleteUserAccount, updateUserPrivacy } from '../../services/authService';
-import { getUserSubscription, getSubscriptionStatusDisplay, upgradeToPremium } from '../../services/subscriptionService';
+import { clearPushTokenForUser } from '../../services/notificationService';
+import { AppSettings, defaultAppSettings, loadAppSettings, mergeAppSettings, saveAppSettings } from '../../services/settingsService';
+import { getLaunchQuotaSummary, getUserSubscription, getSubscriptionStatusDisplay, LaunchQuotaSummary, upgradeToPremium } from '../../services/subscriptionService';
 import { Subscription, SUBSCRIPTION_PLANS } from '../../types';
+import {
+  CommerceAccessStatus,
+  CommerceAdminSettings,
+  getCommerceAccessStatus,
+  getCommerceAdminSettings,
+  getCommerceEntrySubtitle,
+  getCommerceEntryTitle,
+  updateCommerceMonetizationMode,
+} from '../../services/commerceService';
 import { ConfirmModal, SuccessModal, ErrorModal } from '../../components/common';
-
-interface Settings {
-  notifications: {
-    pushEnabled: boolean;
-    newJobs: boolean;
-    messages: boolean;
-    applications: boolean;
-    marketing: boolean;
-  };
-  privacy: {
-    profileVisible: boolean;
-    showOnlineStatus: boolean;
-  };
-  preferences: {
-    language: 'th' | 'en';
-    theme: 'light' | 'dark' | 'system';
-  };
-}
-
-const defaultSettings: Settings = {
-  notifications: {
-    pushEnabled: true,
-    newJobs: true,
-    messages: true,
-    applications: true,
-    marketing: false,
-  },
-  privacy: {
-    profileVisible: true,
-    showOnlineStatus: true,
-  },
-  preferences: {
-    language: 'th',
-    theme: 'light',
-  },
-};
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const { themeMode, setThemeMode, colors, isDark } = useTheme();
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
+  const { registerForNotifications, clearNotifications } = useNotifications();
+  const headerBackground = colors.surface;
+  const statusBarStyle = isDark ? 'light-content' : 'dark-content';
+  const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // Subscription state
   const [subscription, setSubscription] = useState<Subscription>({ plan: 'free' });
-  
+  const [commerceStatus, setCommerceStatus] = useState<CommerceAccessStatus | null>(null);
+  const [commerceAdminSettings, setCommerceAdminSettings] = useState<CommerceAdminSettings>({ monetizationMode: 'auto' });
+  const [launchQuotaSummary, setLaunchQuotaSummary] = useState<LaunchQuotaSummary | null>(null);
+  const [isUpdatingCommerceMode, setIsUpdatingCommerceMode] = useState(false);
+
   // Modal states
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -82,22 +68,55 @@ export default function SettingsScreen() {
   const [showThemeModal, setShowThemeModal] = useState(false);
 
   useEffect(() => {
-    loadSettings();
-    loadSubscription();
-  }, []);
+    void loadSettings();
+    void loadSubscription();
+  }, [user?.uid, themeMode]);
 
   const loadSubscription = async () => {
     if (!user?.uid) return;
-    const sub = await getUserSubscription(user.uid);
+
+    const [sub, commerce, adminSettings, quotaSummary] = await Promise.all([
+      getUserSubscription(user.uid),
+      getCommerceAccessStatus(),
+      getCommerceAdminSettings(),
+      getLaunchQuotaSummary(user.uid),
+    ]);
+
     setSubscription(sub);
+    setCommerceStatus(commerce);
+    setCommerceAdminSettings(adminSettings);
+    setLaunchQuotaSummary(quotaSummary);
+  };
+
+  const refreshCommerceState = async () => {
+    const [commerce, adminSettings] = await Promise.all([
+      getCommerceAccessStatus(),
+      getCommerceAdminSettings(),
+    ]);
+    setCommerceStatus(commerce);
+    setCommerceAdminSettings(adminSettings);
   };
 
   const loadSettings = async () => {
     try {
-      const saved = await AsyncStorage.getItem('settings');
-      if (saved) {
-        setSettings({ ...defaultSettings, ...JSON.parse(saved) });
-      }
+      const savedSettings = await loadAppSettings();
+      const nextSettings = mergeAppSettings({
+        ...savedSettings,
+        preferences: {
+          ...savedSettings.preferences,
+          theme: themeMode,
+        },
+        notifications: {
+          ...savedSettings.notifications,
+          ...(user?.notificationPreferences || {}),
+        },
+        privacy: {
+          ...savedSettings.privacy,
+          profileVisible: user?.privacy?.profileVisible ?? savedSettings.privacy.profileVisible,
+          showOnlineStatus: user?.privacy?.showOnlineStatus ?? savedSettings.privacy.showOnlineStatus,
+        },
+      });
+      setSettings(nextSettings);
     } catch (error) {
       console.error('Error loading settings:', error);
     } finally {
@@ -105,31 +124,58 @@ export default function SettingsScreen() {
     }
   };
 
-  const saveSettings = async (newSettings: Settings) => {
+  const saveSettings = async (newSettings: AppSettings) => {
     try {
-      await AsyncStorage.setItem('settings', JSON.stringify(newSettings));
-      setSettings(newSettings);
+      const mergedSettings = mergeAppSettings(newSettings);
+      await saveAppSettings(mergedSettings);
+      setSettings(mergedSettings);
     } catch (error) {
       console.error('Error saving settings:', error);
+      throw error;
     }
   };
 
-  const updateNotification = (key: keyof Settings['notifications'], value: boolean) => {
+  const updateNotification = async (key: keyof AppSettings['notifications'], value: boolean) => {
+    const previousSettings = settings;
     const newSettings = {
       ...settings,
       notifications: { ...settings.notifications, [key]: value },
     };
-    saveSettings(newSettings);
+    await saveSettings(newSettings);
+
+    try {
+      if (user?.uid) {
+        await updateUser({
+          notificationPreferences: newSettings.notifications,
+        });
+      }
+
+      if (key === 'pushEnabled') {
+        if (value) {
+          await registerForNotifications();
+        } else {
+          await clearNotifications();
+          if (user?.uid) {
+            await clearPushTokenForUser(user.uid);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error saving notification settings:', error);
+      await saveSettings(previousSettings);
+      setErrorMessage('บันทึกการตั้งค่าการแจ้งเตือนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      setShowErrorModal(true);
+    }
   };
 
-  const updatePrivacy = async (key: keyof Settings['privacy'], value: boolean) => {
+  const updatePrivacy = async (key: keyof AppSettings['privacy'], value: boolean) => {
+    const previousSettings = settings;
     const newSettings = {
       ...settings,
       privacy: { ...settings.privacy, [key]: value },
     };
-    saveSettings(newSettings);
-    
-    // บันทึกไป Firestore ด้วย
+    await saveSettings(newSettings);
+
     if (user?.uid) {
       try {
         await updateUserPrivacy(user.uid, {
@@ -138,6 +184,9 @@ export default function SettingsScreen() {
         });
       } catch (error) {
         console.error('Error saving privacy to Firestore:', error);
+        await saveSettings(previousSettings);
+        setErrorMessage('บันทึกค่าความเป็นส่วนตัวไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        setShowErrorModal(true);
       }
     }
   };
@@ -157,6 +206,22 @@ export default function SettingsScreen() {
 
   const handleDeleteAccount = () => {
     setShowDeleteModal(true);
+  };
+
+  const handleChangeCommerceMode = async (mode: CommerceAdminSettings['monetizationMode']) => {
+    if (!user?.uid || isUpdatingCommerceMode) return;
+
+    try {
+      setIsUpdatingCommerceMode(true);
+      await updateCommerceMonetizationMode(user.uid, mode);
+      await refreshCommerceState();
+      Alert.alert('อัปเดตแล้ว', 'บันทึกโหมดการเปิดชำระเงินเรียบร้อยแล้ว');
+    } catch (error) {
+      console.error('Error updating commerce mode:', error);
+      Alert.alert('อัปเดตไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsUpdatingCommerceMode(false);
+    }
   };
 
   const confirmDeleteAccount = async () => {
@@ -243,9 +308,10 @@ export default function SettingsScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
       {/* Header with Back Button */}
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      <View style={[styles.header, { backgroundColor: headerBackground, borderBottomColor: colors.border }]}> 
         <TouchableOpacity 
           style={styles.backButton} 
           onPress={() => navigation.goBack()}
@@ -261,58 +327,77 @@ export default function SettingsScreen() {
         <View style={styles.subscriptionSection}>
           {(() => {
             const status = getSubscriptionStatusDisplay(subscription);
+            const planKey = (subscription?.plan as keyof typeof SUBSCRIPTION_PLANS) || 'free';
+            const postExpiryDays = SUBSCRIPTION_PLANS[planKey]?.postExpiryDays ?? SUBSCRIPTION_PLANS.free.postExpiryDays;
+
             return (
-              <View style={[
-                styles.subscriptionCard,
-                subscription.plan !== 'free' && styles.subscriptionCardPremium
-              ]}>
-                <View style={styles.subscriptionInfo}>
-                  <Text style={styles.subscriptionPlan}>{status.planName}</Text>
-                  <Text style={styles.subscriptionStatus}>{status.statusText}</Text>
-                  {status.expiresText && (
-                    <Text style={styles.subscriptionExpires}>{status.expiresText}</Text>
+              <>
+                <View
+                  style={[
+                    styles.subscriptionCard,
+                    subscription.plan !== 'free' && styles.subscriptionCardPremium,
+                  ]}
+                >
+                  <View style={styles.subscriptionInfo}>
+                    <Text style={styles.subscriptionPlan}>{status.planName}</Text>
+                    <Text style={styles.subscriptionStatus}>{status.statusText}</Text>
+                    {status.expiresText ? (
+                      <Text style={styles.subscriptionExpires}>{status.expiresText}</Text>
+                    ) : null}
+                    {commerceStatus?.freeAccessEnabled ? (
+                      <Text style={styles.subscriptionExpires}>ช่วงเปิดตัวใช้งานได้โดยไม่เสียค่าใช้จ่าย แต่มีโควตารายเดือนตามประเภทบัญชี</Text>
+                    ) : null}
+                  </View>
+                  {subscription.plan === 'free' ? (
+                    <TouchableOpacity
+                      style={styles.upgradeBtn}
+                      onPress={() => (navigation as any).navigate('Shop')}
+                    >
+                      <Ionicons name="star" size={16} color="#FFD700" />
+                      <Text style={styles.upgradeBtnText}>{commerceStatus?.freeAccessEnabled ? 'ดูสิทธิ์ที่พร้อมใช้' : 'อัปเกรด'}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.premiumBadge}>
+                      <Ionicons name="checkmark-circle" size={20} color="#4ADE80" />
+                    </View>
                   )}
                 </View>
-                {subscription.plan === 'free' ? (
-                  <TouchableOpacity
-                    style={styles.upgradeBtn}
-                    onPress={() => (navigation as any).navigate('Shop')}
-                  >
-                    <Ionicons name="star" size={16} color="#FFD700" />
-                    <Text style={styles.upgradeBtnText}>อัพเกรด</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.premiumBadge}>
-                    <Ionicons name="checkmark-circle" size={20} color="#4ADE80" />
+
+                <View style={styles.planDetails}>
+                  <View style={styles.planDetailRow}>
+                    <Text style={styles.planDetailLabel}>โพสต์ต่อวัน</Text>
+                    <Text style={styles.planDetailValue}>{commerceStatus?.freeAccessEnabled ? 'ตามโควตารายเดือน' : subscription.plan === 'free' ? '2 ครั้ง' : 'ไม่จำกัด'}</Text>
+                  </View>
+                  <View style={styles.planDetailRow}>
+                    <Text style={styles.planDetailLabel}>อายุโพสต์</Text>
+                    <Text style={styles.planDetailValue}>{postExpiryDays} วัน</Text>
+                  </View>
+                </View>
+
+                {commerceStatus?.freeAccessEnabled && launchQuotaSummary && (
+                  <View style={styles.launchQuotaCard}>
+                    <Text style={styles.launchQuotaTitle}>{launchQuotaSummary.title}</Text>
+                    <Text style={styles.launchQuotaSubtitle}>{launchQuotaSummary.subtitle}</Text>
+                    {launchQuotaSummary.items.map((item) => (
+                      <View key={item.feature} style={styles.launchQuotaRow}>
+                        <View style={styles.launchQuotaContent}>
+                          <Text style={styles.launchQuotaLabel}>{item.label}</Text>
+                          <Text style={styles.launchQuotaMeta}>{item.description}</Text>
+                        </View>
+                        <Text style={styles.launchQuotaStatus}>{item.statusText}</Text>
+                      </View>
+                    ))}
+                    <Text style={styles.launchQuotaFootnote}>{launchQuotaSummary.footnote}</Text>
                   </View>
                 )}
-              </View>
+              </>
             );
           })()}
-          
-          {/* Plan Details */}
-            <View style={styles.planDetails}>
-            <View style={styles.planDetailRow}>
-              <Text style={styles.planDetailLabel}>โพสต์ต่อวัน</Text>
-              <Text style={styles.planDetailValue}>
-                {subscription.plan === 'free' ? '2 ครั้ง' : 'ไม่จำกัด'}
-              </Text>
-            </View>
-            <View style={styles.planDetailRow}>
-              <Text style={styles.planDetailLabel}>อายุโพสต์</Text>
-                <Text style={styles.planDetailValue}>
-                  {(() => {
-                    const planKey = (subscription?.plan as keyof typeof SUBSCRIPTION_PLANS) || 'free';
-                    return SUBSCRIPTION_PLANS[planKey]?.postExpiryDays ?? SUBSCRIPTION_PLANS.free.postExpiryDays;
-                  })()} วัน
-                </Text>
-            </View>
-          </View>
         </View>
 
         {/* Notifications */}
         <SectionHeader title="การแจ้งเตือน" />
-        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
           <SettingRow
             icon="notifications"
             title="การแจ้งเตือน Push"
@@ -337,21 +422,21 @@ export default function SettingsScreen() {
           <SettingRow
             icon="document-text"
             title="สถานะการสมัคร"
-            subtitle="แจ้งเตือนเมื่อมีการอัพเดทใบสมัคร"
+            subtitle="แจ้งเตือนเมื่อมีการอัปเดตใบสมัคร"
             value={settings.notifications.applications}
             onValueChange={(v) => updateNotification('applications', v)}
           />
           <SettingRow
             icon="megaphone"
             title="โปรโมชั่น"
-            subtitle="รับข่าวสารและโปรโมชั่น"
+            subtitle="รับข่าวสารและโปรโมชัน"
             value={settings.notifications.marketing}
             onValueChange={(v) => updateNotification('marketing', v)}
           />
           <SettingRow
             icon="location"
-            title="งานใกล้ฉัน"
-            subtitle="แจ้งเตือนเมื่อมีคนโพสต์งานในรัศมีที่กำหนด"
+            title="งานใกล้คุณ"
+            subtitle="รับแจ้งเตือนงานใกล้คุณได้รวดเร็วตามรัศมีที่ตั้งไว้"
             onPress={() => (navigation as any).navigate('NearbyJobAlert')}
             showArrow
           />
@@ -392,12 +477,21 @@ export default function SettingsScreen() {
         <SectionHeader title="ช่วยเหลือและสนับสนุน" />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SettingRow
-            icon="sparkles"
-            title="คู่มือเริ่มต้นใช้งาน"
-            subtitle="ดูวิธีใช้แอปและฟีเจอร์สำคัญอีกครั้ง"
-            onPress={() => (navigation as any).navigate('OnboardingSurvey')}
+            icon="sparkles-outline"
+            title={getCommerceEntryTitle(commerceStatus)}
+            subtitle={getCommerceEntrySubtitle(commerceStatus)}
+            onPress={() => (navigation as any).navigate('Shop')}
             showArrow
           />
+          {onboardingSurveyEnabled ? (
+            <SettingRow
+              icon="sparkles"
+              title="คู่มือใช้งานแบบเร็ว"
+              subtitle="ดูภาพรวมฟีเจอร์สำคัญและขั้นตอนใช้งานที่ช่วยให้ใช้งานได้คล่องขึ้น"
+              onPress={() => (navigation as any).navigate('OnboardingSurvey')}
+              showArrow
+            />
+          ) : null}
           <SettingRow
             icon="help-circle"
             title="คำถามที่พบบ่อย"
@@ -414,11 +508,78 @@ export default function SettingsScreen() {
           <SettingRow
             icon="mail"
             title="ติดต่อเรา"
-            subtitle="support@nursego.app"
-            onPress={() => Linking.openURL('mailto:support@nursego.app')}
+            subtitle="support@nursego.co"
+            onPress={() => Linking.openURL('mailto:support@nursego.co')}
             showArrow
           />
         </View>
+
+        {user?.role === 'admin' && (
+          <>
+            <SectionHeader title="ผู้ดูแลระบบ: การเปิดชำระเงิน" />
+            <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+              <View style={[styles.row, { backgroundColor: colors.surface, borderBottomColor: colors.borderLight }]}> 
+                <View style={[styles.rowIcon, { backgroundColor: colors.primaryBackground }]}> 
+                  <Ionicons name="hardware-chip" size={20} color={colors.primary} />
+                </View>
+                <View style={styles.rowContent}>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>สถานะปัจจุบัน</Text>
+                  <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}> 
+                    {commerceStatus?.monetizationEnabled
+                      ? 'เปิดระบบชำระเงินจริง'
+                      : commerceStatus?.transitionReviewRequired
+                        ? 'ถึงเกณฑ์ทบทวนและรออนุมัติ'
+                        : 'ช่วงใช้ฟรี'}
+                    {commerceStatus?.overrideMode === 'auto' ? ' • อัตโนมัติ' : commerceStatus?.overrideMode === 'enabled' ? ' • บังคับเปิด' : ' • บังคับปิด'}
+                    {commerceStatus?.billingActivationBlocked ? ' • ระบบชำระเงินยังไม่พร้อม' : ''}
+                  </Text>
+                </View>
+              </View>
+              {([
+                {
+                  mode: 'auto',
+                  title: 'อัตโนมัติตามเงื่อนไขระบบ',
+                  subtitle: 'ใช้ฟรีต่อ และให้ระบบเตือนเมื่อถึงเวลาทบทวนการเปิดชำระเงิน',
+                },
+                {
+                  mode: 'disabled',
+                  title: 'บังคับใช้ฟรีต่อ',
+                  subtitle: 'ยังไม่เปิดชำระเงินจริง แม้ระบบจะถึงเงื่อนไขแล้ว',
+                },
+                {
+                  mode: 'enabled',
+                  title: 'บังคับเปิดชำระเงิน',
+                  subtitle: 'เปิดใช้ได้ต่อเมื่อระบบชำระเงินพร้อมใช้งานแล้ว',
+                },
+              ] as const).map((option) => {
+                const isSelected = commerceAdminSettings.monetizationMode === option.mode;
+                const isDisabled = option.mode === 'enabled' && !(commerceStatus?.billingProviderReady);
+                return (
+                  <TouchableOpacity
+                    key={option.mode}
+                    style={[styles.row, { backgroundColor: colors.surface, borderBottomColor: colors.borderLight }]}
+                    onPress={() => handleChangeCommerceMode(option.mode)}
+                    disabled={isUpdatingCommerceMode || isDisabled}
+                  >
+                    <View style={[styles.rowIcon, { backgroundColor: isSelected ? colors.primaryBackground : colors.backgroundSecondary }]}> 
+                      <Ionicons
+                        name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                        size={20}
+                        color={isSelected ? colors.primary : colors.textMuted}
+                      />
+                    </View>
+                    <View style={styles.rowContent}>
+                      <Text style={[styles.rowTitle, { color: colors.text }]}>{option.title}</Text>
+                      <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                        {isDisabled ? 'ยังใช้งานไม่ได้จนกว่าช่องทางชำระเงินจริงจะพร้อมใช้งาน' : option.subtitle}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         {/* Legal */}
         <SectionHeader title="ข้อมูลทางกฎหมาย" />
@@ -470,9 +631,9 @@ export default function SettingsScreen() {
       {/* Theme Selection Modal */}
       {showThemeModal && (
         <View style={styles.modalOverlay}>
-          <View style={[styles.themeModal, { backgroundColor: colors.surface }]}>
+          <View style={[styles.themeModal, { backgroundColor: colors.surface }]}> 
             <Text style={[styles.themeModalTitle, { color: colors.text }]}>เลือกธีม</Text>
-            
+
             <TouchableOpacity
               style={[
                 styles.themeOption,
@@ -484,17 +645,17 @@ export default function SettingsScreen() {
                 setShowThemeModal(false);
               }}
             >
-              <Ionicons name="sunny" size={24} color={themeMode === 'light' ? colors.primary : colors.textSecondary} />
-              <Text style={[
-                styles.themeOptionText,
-                { color: colors.text },
-                themeMode === 'light' && { color: colors.primary },
-              ]}>
+              <Ionicons name="sunny-outline" size={24} color={themeMode === 'light' ? colors.primary : colors.textSecondary} />
+              <Text
+                style={[
+                  styles.themeOptionText,
+                  { color: colors.text },
+                  themeMode === 'light' && styles.themeOptionTextSelected,
+                ]}
+              >
                 สว่าง
               </Text>
-              {themeMode === 'light' && (
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              )}
+              {themeMode === 'light' ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -508,17 +669,17 @@ export default function SettingsScreen() {
                 setShowThemeModal(false);
               }}
             >
-              <Ionicons name="moon" size={24} color={themeMode === 'dark' ? colors.primary : colors.textSecondary} />
-              <Text style={[
-                styles.themeOptionText,
-                { color: colors.text },
-                themeMode === 'dark' && { color: colors.primary },
-              ]}>
+              <Ionicons name="moon-outline" size={24} color={themeMode === 'dark' ? colors.primary : colors.textSecondary} />
+              <Text
+                style={[
+                  styles.themeOptionText,
+                  { color: colors.text },
+                  themeMode === 'dark' && styles.themeOptionTextSelected,
+                ]}
+              >
                 มืด
               </Text>
-              {themeMode === 'dark' && (
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              )}
+              {themeMode === 'dark' ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -532,17 +693,17 @@ export default function SettingsScreen() {
                 setShowThemeModal(false);
               }}
             >
-              <Ionicons name="phone-portrait" size={24} color={themeMode === 'system' ? colors.primary : colors.textSecondary} />
-              <Text style={[
-                styles.themeOptionText,
-                { color: colors.text },
-                themeMode === 'system' && { color: colors.primary },
-              ]}>
+              <Ionicons name="phone-portrait-outline" size={24} color={themeMode === 'system' ? colors.primary : colors.textSecondary} />
+              <Text
+                style={[
+                  styles.themeOptionText,
+                  { color: colors.text },
+                  themeMode === 'system' && styles.themeOptionTextSelected,
+                ]}
+              >
                 ตามระบบ
               </Text>
-              {themeMode === 'system' && (
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              )}
+              {themeMode === 'system' ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -598,7 +759,7 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -743,7 +904,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.backgroundSecondary,
     borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
     borderWidth: 1,
@@ -809,6 +970,54 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.sm,
     fontWeight: '600',
     color: COLORS.text,
+  },
+  launchQuotaCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginTop: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  launchQuotaTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  launchQuotaSubtitle: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    marginBottom: SPACING.sm,
+    lineHeight: 20,
+  },
+  launchQuotaRow: {
+    paddingVertical: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  launchQuotaContent: {
+    marginBottom: 4,
+  },
+  launchQuotaLabel: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  launchQuotaMeta: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  launchQuotaStatus: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.primary,
+    lineHeight: 18,
+  },
+  launchQuotaFootnote: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textMuted,
+    marginTop: SPACING.sm,
   },
   
   // Theme Modal Styles

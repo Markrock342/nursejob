@@ -155,7 +155,7 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
       >
         <View style={styles.convAvatarWrap}>
           <Avatar uri={other?.photoURL} name={other?.displayName || other?.name || '?'} size={52} />
-          {isUnread && <View style={[styles.onlineDot, { backgroundColor: colors.primary }]} />}
+          {isUnread && <View style={[styles.onlineDot, { backgroundColor: colors.primary, borderColor: colors.card }]} />}
         </View>
 
         <View style={styles.convContent}>
@@ -1253,7 +1253,7 @@ const styles = StyleSheet.create({
   onlineDot: {
     position: 'absolute', bottom: 0, right: 0,
     width: 13, height: 13, borderRadius: 7,
-    borderWidth: 2, borderColor: '#FFF',
+    borderWidth: 2, borderColor: '#FFF', // overridden inline when needed
   },
   convContent: { flex: 1, minWidth: 0 },
   convTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },

@@ -6,6 +6,7 @@ import { storage } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // ============================================
 // Image Picker Functions
@@ -86,9 +87,22 @@ export async function pickDocument(): Promise<{ uri: string; name: string; type:
 // ============================================
 
 // Convert URI to blob
-async function uriToBlob(uri: string): Promise<Blob> {
-  const response = await fetch(uri);
-  return await response.blob();
+export async function readUriAsBlob(uri: string, mimeType = 'application/octet-stream'): Promise<Blob> {
+  try {
+    const response = await fetch(uri);
+    return await response.blob();
+  } catch (error) {
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+    const response = await fetch(dataUrl);
+    return await response.blob();
+  }
+}
+
+async function uriToBlob(uri: string, mimeType?: string): Promise<Blob> {
+  return readUriAsBlob(uri, mimeType);
 }
 
 // Generate unique filename
@@ -101,7 +115,7 @@ function generateFileName(prefix: string, extension: string): string {
 // Upload profile photo
 export async function uploadProfilePhoto(userId: string, imageUri: string): Promise<string> {
   try {
-    const blob = await uriToBlob(imageUri);
+    const blob = await uriToBlob(imageUri, 'image/jpeg');
     const fileName = generateFileName('profile', 'jpg');
     const storageRef = ref(storage, `users/${userId}/profile/${fileName}`);
     
@@ -122,8 +136,9 @@ export async function uploadLicenseDocument(
   documentName: string
 ): Promise<string> {
   try {
-    const blob = await uriToBlob(documentUri);
     const extension = documentName.split('.').pop() || 'pdf';
+    const mimeType = extension.toLowerCase() === 'pdf' ? 'application/pdf' : `image/${extension.toLowerCase() === 'jpg' ? 'jpeg' : extension.toLowerCase()}`;
+    const blob = await uriToBlob(documentUri, mimeType);
     const fileName = generateFileName('license', extension);
     const storageRef = ref(storage, `users/${userId}/documents/${fileName}`);
     
@@ -137,10 +152,33 @@ export async function uploadLicenseDocument(
   }
 }
 
+export async function uploadVerificationDocument(
+  userId: string,
+  documentUri: string,
+  prefix: string,
+  documentName = 'document.jpg'
+): Promise<string> {
+  try {
+    const extension = documentName.split('.').pop() || 'jpg';
+    const mimeType = extension.toLowerCase() === 'pdf' ? 'application/pdf' : `image/${extension.toLowerCase() === 'jpg' ? 'jpeg' : extension.toLowerCase()}`;
+    const blob = await uriToBlob(documentUri, mimeType);
+    const fileName = generateFileName(prefix, extension);
+    const storageRef = ref(storage, `users/${userId}/documents/${fileName}`);
+
+    await uploadBytes(storageRef, blob);
+    const downloadUrl = await getDownloadURL(storageRef);
+
+    return downloadUrl;
+  } catch (error) {
+    console.error('Error uploading verification document:', error);
+    throw new Error('ไม่สามารถอัพโหลดเอกสารยืนยันตัวตนได้');
+  }
+}
+
 // Upload ID card (บัตรประชาชน)
 export async function uploadIdCard(userId: string, imageUri: string): Promise<string> {
   try {
-    const blob = await uriToBlob(imageUri);
+    const blob = await uriToBlob(imageUri, 'image/jpeg');
     const fileName = generateFileName('idcard', 'jpg');
     const storageRef = ref(storage, `users/${userId}/documents/${fileName}`);
     

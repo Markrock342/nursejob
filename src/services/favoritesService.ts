@@ -10,15 +10,17 @@ import {
   getDocs,
   query,
   where,
+  documentId,
   serverTimestamp,
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { JobPost } from '../types';
-import { getJobById } from './jobService';
 import { assertAuthUser, isAuthUser } from './security/authGuards';
+import { beginTrackedSubscription, PerformanceMetricOptions, recordQueryRead } from './performanceMetrics';
 
 const FAVORITES_COLLECTION = 'favorites';
+const FAVORITES_JOB_BATCH_SIZE = 10;
 
 export interface Favorite {
   id: string;
@@ -26,6 +28,64 @@ export interface Favorite {
   jobId: string;
   createdAt: Date;
   job?: JobPost;
+}
+
+async function getJobsByIds(jobIds: string[], metrics?: PerformanceMetricOptions): Promise<Map<string, JobPost>> {
+  const jobMap = new Map<string, JobPost>();
+  const uniqueJobIds = [...new Set(jobIds.filter(Boolean))];
+
+  for (let index = 0; index < uniqueJobIds.length; index += FAVORITES_JOB_BATCH_SIZE) {
+    const batchIds = uniqueJobIds.slice(index, index + FAVORITES_JOB_BATCH_SIZE);
+    if (batchIds.length === 0) continue;
+
+    const snapshot = await getDocs(
+      query(collection(db, 'shifts'), where(documentId(), 'in', batchIds))
+    );
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: `${metrics?.source || 'favorites'}:jobs_batch`,
+    });
+
+    snapshot.docs.forEach((jobDoc) => {
+      const data = jobDoc.data();
+      jobMap.set(jobDoc.id, {
+        id: jobDoc.id,
+        ...data,
+        createdAt: data.createdAt?.toDate?.() || new Date(),
+        updatedAt: data.updatedAt?.toDate?.(),
+        shiftDate: data.shiftDate?.toDate?.() || data.shiftDate,
+        expiresAt: data.expiresAt?.toDate?.() || data.expiresAt,
+      } as JobPost);
+    });
+  }
+
+  return jobMap;
+}
+
+async function buildFavorites(snapshot: any, metrics?: PerformanceMetricOptions): Promise<Favorite[]> {
+  recordQueryRead(snapshot.size, {
+    screenName: metrics?.screenName,
+    source: `${metrics?.source || 'favorites'}:favorites_docs`,
+  });
+
+  const docs = snapshot.docs;
+  const jobMap = await getJobsByIds(
+    docs.map((docSnap: any) => docSnap.data().jobId),
+    metrics,
+  );
+
+  return docs
+    .map((docSnap: any) => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        userId: data.userId,
+        jobId: data.jobId,
+        createdAt: data.createdAt?.toDate() || new Date(),
+        job: jobMap.get(data.jobId),
+      } as Favorite;
+    })
+    .sort((a: Favorite, b: Favorite) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 // Add job to favorites
@@ -116,7 +176,7 @@ export async function toggleFavorite(userId: string, jobId: string): Promise<boo
 }
 
 // Get all user favorites with job details
-export async function getUserFavorites(userId: string): Promise<Favorite[]> {
+export async function getUserFavorites(userId: string, metrics?: PerformanceMetricOptions): Promise<Favorite[]> {
   if (!isAuthUser(userId)) return [];
   try {
     const q = query(
@@ -124,23 +184,8 @@ export async function getUserFavorites(userId: string): Promise<Favorite[]> {
       where('userId', '==', userId)
     );
     const snapshot = await getDocs(q);
-    
-    const favorites: Favorite[] = [];
-    
-    for (const docSnap of snapshot.docs) {
-      const data = docSnap.data();
-      const job = await getJobById(data.jobId);
-      
-      favorites.push({
-        id: docSnap.id,
-        userId: data.userId,
-        jobId: data.jobId,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        job: job || undefined,
-      });
-    }
-    
-    return favorites.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    return buildFavorites(snapshot, metrics);
   } catch (error) {
     console.error('Error getting favorites:', error);
     return [];
@@ -150,7 +195,8 @@ export async function getUserFavorites(userId: string): Promise<Favorite[]> {
 // Subscribe to favorites changes
 export function subscribeToFavorites(
   userId: string,
-  callback: (favorites: Favorite[]) => void
+  callback: (favorites: Favorite[]) => void,
+  metrics?: PerformanceMetricOptions
 ): () => void {
   if (!isAuthUser(userId)) {
     callback([]);
@@ -161,26 +207,21 @@ export function subscribeToFavorites(
     where('userId', '==', userId)
   );
   
-  return onSnapshot(q, async (snapshot) => {
-    const favorites: Favorite[] = [];
-    
-    for (const docSnap of snapshot.docs) {
-      const data = docSnap.data();
-      const job = await getJobById(data.jobId);
-      
-      favorites.push({
-        id: docSnap.id,
-        userId: data.userId,
-        jobId: data.jobId,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        job: job || undefined,
-      });
-    }
-    
-    callback(favorites.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+  const endMetric = beginTrackedSubscription({
+    screenName: metrics?.screenName,
+    source: metrics?.source || 'favorites:subscription',
+  });
+
+  const unsubscribe = onSnapshot(q, async (snapshot) => {
+    callback(await buildFavorites(snapshot, metrics));
   }, (error) => {
     console.warn('Favorites listener error (auth not ready?):', error.code);
   });
+
+  return () => {
+    endMetric();
+    unsubscribe();
+  };
 }
 
 // Get favorites count

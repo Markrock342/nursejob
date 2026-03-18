@@ -184,65 +184,70 @@ export const lightColors: ThemeColors = {
 };
 
 // ============================================
-// Dark Theme Colors
+// Dark Theme Colors — Facebook-style neutral dark
 // ============================================
 export const darkColors: ThemeColors = {
-  primary: '#8AC5FF',
-  primaryLight: '#C6E0FF',
-  primaryDark: '#4EA1F3',
-  primaryBackground: 'rgba(138, 197, 255, 0.14)',
+  // Facebook-style blue that pops on dark surfaces
+  primary: '#4599FF',
+  primaryLight: '#7DB8FF',
+  primaryDark: '#2374E1',
+  primaryBackground: 'rgba(69, 153, 255, 0.12)',
 
-  background: '#090C14',
-  backgroundSecondary: '#101522',
-  surface: '#151B28',
-  card: '#1A2232',
+  // Facebook dark backgrounds — warm neutral grays
+  background: '#18191A',
+  backgroundSecondary: '#242526',
+  surface: '#242526',
+  card: '#2F3031',
 
-  text: '#F3F6FC',
-  textSecondary: '#B7C0D4',
-  textMuted: '#8792A8',
-  textLight: '#657087',
-  textInverse: '#090C14',
+  // Facebook text — high-contrast on dark
+  text: '#E4E6EB',
+  textSecondary: '#B0B3B8',
+  textMuted: '#8A8D91',
+  textLight: '#606770',
+  textInverse: '#18191A',
 
-  border: '#2A3447',
-  borderLight: '#202938',
-  divider: '#202938',
+  // Facebook borders
+  border: '#3E4042',
+  borderLight: '#3A3B3C',
+  divider: '#3A3B3C',
 
-  success: '#4ADE80',
-  successLight: 'rgba(74, 222, 128, 0.16)',
-  warning: '#FBBF24',
-  warningLight: 'rgba(251, 191, 36, 0.16)',
-  error: '#FB7185',
-  errorLight: 'rgba(251, 113, 133, 0.16)',
-  danger: '#FB7185',
-  dangerLight: 'rgba(251, 113, 133, 0.16)',
-  info: '#60A5FA',
-  infoLight: 'rgba(96, 165, 250, 0.16)',
-  
+  // Status — slightly softer for dark
+  success: '#42B883',
+  successLight: 'rgba(66, 184, 131, 0.15)',
+  warning: '#E7A33E',
+  warningLight: 'rgba(231, 163, 62, 0.15)',
+  error: '#F15B5B',
+  errorLight: 'rgba(241, 91, 91, 0.15)',
+  danger: '#F15B5B',
+  dangerLight: 'rgba(241, 91, 91, 0.15)',
+  info: '#4599FF',
+  infoLight: 'rgba(69, 153, 255, 0.15)',
+
   // Special
-  urgent: '#FF6B6B',
-  verified: '#4ADE80',
-  premium: '#FCD34D',
-  online: '#4ADE80',
-  offline: '#64748B',
-  
+  urgent: '#F15B5B',
+  verified: '#42B883',
+  premium: '#E7A33E',
+  online: '#31A24C',
+  offline: '#606770',
+
   // Social
   google: '#EA4335',
-  facebook: '#1877F2',
+  facebook: '#2374E1',
   line: '#06C755',
-  
+
   // Secondary
-  secondary: '#67E8D2',
-  secondaryDark: '#2FBFA9',
-  secondaryLight: 'rgba(103, 232, 210, 0.16)',
-  
+  secondary: '#42B883',
+  secondaryDark: '#36A374',
+  secondaryLight: 'rgba(66, 184, 131, 0.15)',
+
   // Accent
-  accent: '#E7C26A',
-  accentDark: '#C9962E',
-  accentLight: 'rgba(231, 194, 106, 0.16)',
-  
+  accent: '#E7A33E',
+  accentDark: '#C48A2A',
+  accentLight: 'rgba(231, 163, 62, 0.15)',
+
   white: '#FFFFFF',
   black: '#000000',
-  overlay: 'rgba(0, 0, 0, 0.7)',
+  overlay: 'rgba(0, 0, 0, 0.75)',
   overlayLight: 'rgba(0, 0, 0, 0.5)',
 };
 

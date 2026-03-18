@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Loading, EmptyState } from '../../components/common';
+import { Loading, EmptyState, Avatar, StickyInboxPanel } from '../../components/common';
 import {
   getUserNotifications,
   subscribeToNotifications,
@@ -25,7 +26,11 @@ import {
   NotificationType,
 } from '../../services/notificationsService';
 import { formatRelativeTime } from '../../utils/helpers';
-import { getJobById } from '../../services/jobService';
+import { setBroadcastAttribution, trackEvent } from '../../services/analyticsService';
+import { recordBroadcastOpen } from '../../services/adminService';
+import { navigateFromNotification } from '../../services/notificationNavigation';
+import { StickyInboxItem, subscribeStickyInboxItems } from '../../services/communicationsService';
+import { useScreenPerformance } from '../../hooks/useScreenPerformance';
 
 // ============================================
 // Helper Functions
@@ -40,10 +45,16 @@ const getNotificationIcon = (type: NotificationType): string => {
     application_rejected: 'close-circle',
     new_message: 'chatbubble',
     new_applicant: 'person-add',
+    new_application: 'person-add',
+    nearby_job: 'location',
     job_expired: 'time',
+    job_expiring: 'alarm',
     profile_reminder: 'person',
+    job_completed_review: 'star',
+    new_review: 'chatbox-ellipses',
     license_approved: 'shield-checkmark',
     license_rejected: 'shield-outline',
+    admin_verification_request: 'document-text',
     system: 'information-circle',
   };
   return icons[type] || 'notifications';
@@ -58,10 +69,16 @@ const getNotificationColor = (type: NotificationType): string => {
     application_rejected: COLORS.error,
     new_message: COLORS.primary,
     new_applicant: COLORS.secondary,
+    new_application: COLORS.secondary,
+    nearby_job: COLORS.primary,
     job_expired: COLORS.warning,
+    job_expiring: COLORS.warning,
     profile_reminder: COLORS.info,
+    job_completed_review: COLORS.warning,
+    new_review: COLORS.primary,
     license_approved: COLORS.success,
     license_rejected: COLORS.error,
+    admin_verification_request: COLORS.info,
     system: COLORS.textSecondary,
   };
   return colorMap[type] || COLORS.primary;
@@ -117,6 +134,7 @@ const isThisWeek = (date: Date) => {
 };
 
 export default function NotificationsScreen() {
+  useScreenPerformance('Notifications');
   // ============================================
   // 1. ALL HOOKS MUST BE AT THE TOP - ALWAYS CALLED UNCONDITIONALLY
   // ============================================
@@ -124,13 +142,17 @@ export default function NotificationsScreen() {
   // Context hooks
   const navigation = useNavigation();
   const { user, requireAuth } = useAuth();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const panelBackground = colors.surface;
   const sectionBackground = colors.backgroundSecondary;
   const unreadBackground = colors.primaryBackground;
+  const headerBackground = isDark ? colors.surface : colors.primary;
+  const headerTextColor = isDark ? colors.text : colors.white;
   
   // State hooks
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [stickyInboxItems, setStickyInboxItems] = useState<StickyInboxItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -138,7 +160,10 @@ export default function NotificationsScreen() {
   const loadNotifications = useCallback(async () => {
     if (!user?.uid) return;
     try {
-      const data = await getUserNotifications(user.uid);
+      const data = await getUserNotifications(user.uid, {
+        screenName: 'Notifications',
+        source: 'notifications:screen_load',
+      });
       setNotifications(data);
     } catch (error) {
       console.error('Error loading notifications:', error);
@@ -154,40 +179,67 @@ export default function NotificationsScreen() {
   }, [loadNotifications]);
 
   const handleNotificationPress = useCallback(async (notification: Notification) => {
+    if (notification.data?.broadcastId) {
+      setBroadcastAttribution({
+        broadcastId: String(notification.data.broadcastId),
+        variantId: notification.data?.variantId ? String(notification.data.variantId) : undefined,
+        targetScreen: notification.data?.targetScreen ? String(notification.data.targetScreen) : undefined,
+      });
+      await recordBroadcastOpen({
+        broadcastId: String(notification.data.broadcastId),
+        variantId: notification.data?.variantId ? String(notification.data.variantId) : undefined,
+        targetScreen: notification.data?.targetScreen ? String(notification.data.targetScreen) : undefined,
+      });
+    }
+
+    await trackEvent({
+      eventName: 'notification_opened',
+      screenName: 'Notifications',
+      subjectType: 'notification',
+      subjectId: notification.id,
+      jobId: notification.data?.jobId,
+      conversationId: notification.data?.conversationId,
+      props: {
+        notificationType: notification.type,
+        wasRead: notification.isRead,
+        broadcastId: notification.data?.broadcastId,
+        variantId: notification.data?.variantId,
+      },
+    });
+
     if (!notification.isRead) {
       await markAsRead(notification.id);
       setNotifications(prev =>
         prev.map(n => (n.id === notification.id ? { ...n, isRead: true } : n))
       );
     }
-    const { type, data } = notification;
-    if (type === 'new_message' && data?.conversationId) {
-      (navigation as any).navigate('ChatRoom', {
-        conversationId: data.conversationId,
-      });
-    } else if ((type === 'new_job' || type === 'application_accepted' || type === 'application_rejected') && data?.jobId) {
-      try {
-        const job = await getJobById(data.jobId);
-        if (job) {
-          (navigation as any).navigate('JobDetail', { job });
-        }
-      } catch (e) {
-        // job may have been deleted, skip navigation
-      }
-    } else if (type === 'new_applicant' && data?.applicationId) {
-      (navigation as any).navigate('Applicants');
-    }
-  }, [navigation]);
+    await navigateFromNotification({ current: navigation as any }, notification, user?.uid);
+  }, [navigation, user?.uid]);
+
+  const unreadCount = useMemo(() => {
+    return notifications.filter(n => !n.isRead).length;
+  }, [notifications]);
 
   const handleMarkAllRead = useCallback(async () => {
     if (!user?.uid) return;
     try {
+      await trackEvent({
+        eventName: 'notification_opened',
+        screenName: 'Notifications',
+        subjectType: 'notification_batch',
+        subjectId: user.uid,
+        props: {
+          action: 'mark_all_read',
+          unreadCount,
+        },
+      });
+
       await markAllAsRead(user.uid);
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     } catch (error) {
       Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถอ่านทั้งหมดได้');
     }
-  }, [user?.uid]);
+  }, [unreadCount, user?.uid]);
 
   const handleDelete = useCallback((notification: Notification) => {
     Alert.alert(
@@ -213,6 +265,11 @@ export default function NotificationsScreen() {
 
   // Effect hooks
   useEffect(() => {
+    const unsubscribe = subscribeStickyInboxItems('notifications', setStickyInboxItems);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!user?.uid) {
       setIsLoading(false);
       return;
@@ -221,6 +278,9 @@ export default function NotificationsScreen() {
       setNotifications(newNotifications);
       setIsLoading(false);
       setIsRefreshing(false);
+    }, {
+      screenName: 'Notifications',
+      source: 'notifications:screen_subscription',
     });
     return () => unsubscribe();
   }, [user?.uid]);
@@ -228,10 +288,6 @@ export default function NotificationsScreen() {
   // Memo hooks - MUST be before any conditional returns
   const groupedNotifications = useMemo(() => {
     return groupNotificationsByDate(notifications);
-  }, [notifications]);
-
-  const unreadCount = useMemo(() => {
-    return notifications.filter(n => !n.isRead).length;
   }, [notifications]);
 
   // Render function callbacks
@@ -251,18 +307,28 @@ export default function NotificationsScreen() {
       onLongPress={() => handleDelete(item)}
       activeOpacity={0.7}
     >
-      <View
-        style={[
-          styles.iconContainer,
-          { backgroundColor: getNotificationColor(item.type) + '20' },
-        ]}
-      >
-        <Ionicons
-          name={getNotificationIcon(item.type) as any}
-          size={24}
-          color={getNotificationColor(item.type)}
-        />
-      </View>
+      {(item.type === 'new_message' || item.data?.senderPhotoURL || item.data?.targetUserPhoto) ? (
+        <View style={styles.iconContainer}>
+          <Avatar
+            uri={item.data?.senderPhotoURL || item.data?.targetUserPhoto}
+            name={item.data?.senderName || item.data?.targetName || item.title || 'ผู้ใช้'}
+            size={48}
+          />
+        </View>
+      ) : (
+        <View
+          style={[
+            styles.iconContainer,
+            { backgroundColor: getNotificationColor(item.type) + '20' },
+          ]}
+        >
+          <Ionicons
+            name={getNotificationIcon(item.type) as any}
+            size={24}
+            color={getNotificationColor(item.type)}
+          />
+        </View>
+      )}
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.text }, !item.isRead && styles.titleUnread]}>
           {item.title}
@@ -283,12 +349,13 @@ export default function NotificationsScreen() {
   // Early return for unauthenticated users
   if (!user) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-        <View style={[styles.header, { backgroundColor: colors.surface }]}> 
+      <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+        <StatusBar barStyle="light-content" backgroundColor={headerBackground} translucent={false} />
+        <View style={[styles.header, { backgroundColor: headerBackground, borderBottomColor: 'transparent' }]}> 
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <Ionicons name="arrow-back" size={24} color={headerTextColor} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>การแจ้งเตือน</Text>
+          <Text style={[styles.headerTitle, { color: headerTextColor }]}>การแจ้งเตือน</Text>
           <View style={{ width: 80 }} />
         </View>
         <EmptyState
@@ -312,20 +379,25 @@ export default function NotificationsScreen() {
   // ============================================
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[styles.header, { backgroundColor: colors.surface }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor={headerBackground} translucent={false} />
+      <View style={[styles.header, { backgroundColor: headerBackground, borderBottomColor: 'transparent' }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+          <Ionicons name="arrow-back" size={24} color={headerTextColor} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>การแจ้งเตือน</Text>
+        <Text style={[styles.headerTitle, { color: headerTextColor }]}>การแจ้งเตือน</Text>
         {unreadCount > 0 ? (
           <TouchableOpacity onPress={handleMarkAllRead} style={styles.markAllButton}>
-            <Text style={[styles.markAllRead, { color: colors.primary }]}>อ่านทั้งหมด</Text>
+            <Text style={[styles.markAllRead, { color: isDark ? colors.primary : 'rgba(255,255,255,0.9)' }]}>อ่านทั้งหมด</Text>
           </TouchableOpacity>
         ) : (
           <View style={{ width: 80 }} />
         )}
       </View>
+
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+
+      <StickyInboxPanel items={stickyInboxItems} maxItems={3} containerStyle={styles.announcementWrap} />
 
       <SectionList
         sections={groupedNotifications}
@@ -349,6 +421,7 @@ export default function NotificationsScreen() {
           />
         }
       />
+      </View>
     </SafeAreaView>
   );
 }
@@ -357,7 +430,7 @@ export default function NotificationsScreen() {
 // STYLES
 // ============================================
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -392,6 +465,10 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 100,
+  },
+  announcementWrap: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
   },
   sectionHeader: {
     backgroundColor: COLORS.background,

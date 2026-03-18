@@ -19,9 +19,11 @@ import {
   QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { JobPost, ShiftContact, JobFilters, PostShift } from '../types';
+import { JobPost, ShiftContact, JobFilters, PostShift, UserAdminTag } from '../types';
 import { getQueryGeohashes, getDistanceKm, encodeGeohash } from '../utils/geohash';
+import { detectExternalContactSignals } from '../utils/jobPostIntelligence';
 import { assertAuthUser, isAuthUser } from './security/authGuards';
+import { beginTrackedSubscription, PerformanceMetricOptions, recordQueryRead } from './performanceMetrics';
 
 // Re-export types for backward compatibility
 export type { JobPost, ShiftContact };
@@ -29,14 +31,36 @@ export type { JobPost, ShiftContact };
 const JOBS_COLLECTION = 'shifts';
 const CONTACTS_COLLECTION = 'shift_contacts';
 const PAGE_SIZE = 20;
+const POSTER_METADATA_CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Production mode: never fall back to mock jobs.
-const SHOW_MOCK_DATA = false;
+type PosterMetadata = {
+  role?: string;
+  orgType?: string;
+  staffType?: string;
+  staffTypes?: string[];
+  isVerified: boolean;
+  plan?: string;
+  adminTags?: UserAdminTag[];
+  adminWarningTag?: string;
+};
+
+const posterMetadataCache = new Map<string, { value: PosterMetadata | null; expiresAt: number }>();
 
 // Sync poster snapshot fields on already-created posts.
 export async function syncPosterSnapshotToMyPosts(
   userId: string,
-  profile: { displayName?: string; photoURL?: string | null }
+  profile: {
+    displayName?: string;
+    photoURL?: string | null;
+    role?: string;
+    orgType?: string;
+    staffType?: string;
+    staffTypes?: string[];
+    isVerified?: boolean;
+    posterPlan?: string;
+    adminTags?: string[];
+    adminWarningTag?: string | null;
+  }
 ): Promise<number> {
   if (!isAuthUser(userId)) return 0;
 
@@ -56,6 +80,14 @@ export async function syncPosterSnapshotToMyPosts(
       updateDoc(d.ref, {
         posterName: newName,
         posterPhoto: newPhoto,
+        ...(profile.role !== undefined ? { posterRole: profile.role } : {}),
+        ...(profile.orgType !== undefined ? { posterOrgType: profile.orgType } : {}),
+        ...(profile.staffType !== undefined ? { posterStaffType: profile.staffType } : {}),
+        ...(profile.staffTypes !== undefined ? { posterStaffTypes: profile.staffTypes } : {}),
+        ...(profile.isVerified !== undefined ? { posterVerified: profile.isVerified } : {}),
+        ...(profile.posterPlan !== undefined ? { posterPlan: profile.posterPlan } : {}),
+        ...(profile.adminTags !== undefined ? { posterAdminTags: profile.adminTags } : {}),
+        ...(profile.adminWarningTag !== undefined ? { posterWarningTag: profile.adminWarningTag || null } : {}),
         updatedAt: serverTimestamp(),
       })
     );
@@ -82,7 +114,10 @@ function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
     posterRole: data.posterRole,
     posterOrgType: data.posterOrgType,
     posterStaffType: data.posterStaffType,
+    posterStaffTypes: Array.isArray(data.posterStaffTypes) ? data.posterStaffTypes : [],
     posterPlan: data.posterPlan,
+    posterAdminTags: Array.isArray(data.posterAdminTags) ? data.posterAdminTags : [],
+    posterWarningTag: data.posterWarningTag,
     department: data.department || 'ทั่วไป',
     description: data.description || '',
     benefits: Array.isArray(data.benefits) ? data.benefits : [],
@@ -95,6 +130,9 @@ function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
     salaryType: data.salaryType,
     shiftDate: data.shiftDate?.toDate?.() ?? new Date(),
     shiftTime: data.shiftTime || '',
+    shiftDates: Array.isArray(data.shiftDates) ? data.shiftDates : undefined,
+    shiftTimeSlots: data.shiftTimeSlots || undefined,
+    scheduleNote: data.scheduleNote,
     location: {
       province: data.location?.province || 'กรุงเทพมหานคร',
       district: data.location?.district || '',
@@ -110,8 +148,15 @@ function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
     shifts: data.shifts || [],
     totalShifts: data.totalShifts || 0,
     filledShifts: data.filledShifts || 0,
+    slotsNeeded: data.slotsNeeded || undefined,
+    campaignTitle: data.campaignTitle || undefined,
+    campaignSummary: data.campaignSummary || undefined,
+    contactMode: data.contactMode || ((data.contactPhone || data.contactLine) ? 'phone_or_line' : 'in_app'),
+    sourceText: data.sourceText || undefined,
+    sourceChannel: data.sourceChannel || undefined,
     createdAt: data.createdAt?.toDate?.() ?? new Date(),
     updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
+    boostedAt: data.boostedAt?.toDate?.() ?? null,
     expiresAt: data.expiresAt?.toDate?.() ?? null,
     status: data.status || 'active',
     isUrgent: data.isUrgent || false,
@@ -120,29 +165,65 @@ function mapDocToJob(docSnap: QueryDocumentSnapshot): JobPost {
   } as JobPost;
 }
 
+function getJobSortTime(job: JobPost): number {
+  const updatedAt = job.updatedAt instanceof Date ? job.updatedAt : job.updatedAt ? new Date(job.updatedAt as any) : null;
+  const createdAt = job.createdAt instanceof Date ? job.createdAt : new Date(job.createdAt as any);
+  return (updatedAt?.getTime() || 0) || createdAt.getTime();
+}
+
+function sortJobsByVisibility(jobs: JobPost[]): JobPost[] {
+  return [...jobs].sort((a, b) => {
+    const aTime = getJobSortTime(a);
+    const bTime = getJobSortTime(b);
+    if (bTime !== aTime) return bTime - aTime;
+    const aUrgent = a.status === 'urgent' || a.isUrgent ? 1 : 0;
+    const bUrgent = b.status === 'urgent' || b.isUrgent ? 1 : 0;
+    return bUrgent - aUrgent;
+  });
+}
+
 async function enrichJobsWithPosterMetadata(jobs: JobPost[]): Promise<JobPost[]> {
-  const posterIds = [...new Set(
-    jobs
-      .filter((job) => job.posterId && (!job.posterRole || !job.posterStaffType || job.posterVerified === undefined))
-      .map((job) => job.posterId)
-  )];
+  const posterIds = [...new Set(jobs.filter((job) => job.posterId).map((job) => job.posterId))];
 
   if (posterIds.length === 0) return jobs;
 
   const posterEntries = await Promise.all(
     posterIds.map(async (posterId) => {
+      const cached = posterMetadataCache.get(posterId);
+      if (cached && cached.expiresAt > Date.now()) {
+        return [posterId, cached.value] as const;
+      }
+
       try {
         const posterDoc = await getDoc(doc(db, 'users', posterId));
-        if (!posterDoc.exists()) return [posterId, null] as const;
+        if (!posterDoc.exists()) {
+          posterMetadataCache.set(posterId, {
+            value: null,
+            expiresAt: Date.now() + POSTER_METADATA_CACHE_TTL_MS,
+          });
+          return [posterId, null] as const;
+        }
         const posterData = posterDoc.data();
-        return [posterId, {
+        const metadata: PosterMetadata = {
           role: posterData.role,
           orgType: posterData.orgType,
           staffType: posterData.staffType,
+          staffTypes: Array.isArray(posterData.staffTypes) ? posterData.staffTypes : [],
           isVerified: Boolean(posterData.isVerified),
           plan: posterData.subscription?.plan,
-        }] as const;
+          adminTags: Array.isArray(posterData.adminTags) ? posterData.adminTags : [],
+          adminWarningTag: typeof posterData.adminWarningTag === 'string' ? posterData.adminWarningTag : undefined,
+        };
+        posterMetadataCache.set(posterId, {
+          value: metadata,
+          expiresAt: Date.now() + POSTER_METADATA_CACHE_TTL_MS,
+        });
+        return [posterId, metadata] as const;
       } catch {
+        posterMetadataCache.set(posterId, {
+          value: null,
+          expiresAt: Date.now() + 30_000,
+        });
         return [posterId, null] as const;
       }
     })
@@ -159,10 +240,38 @@ async function enrichJobsWithPosterMetadata(jobs: JobPost[]): Promise<JobPost[]>
       posterRole: job.posterRole || poster.role,
       posterOrgType: job.posterOrgType || poster.orgType,
       posterStaffType: job.posterStaffType || poster.staffType,
+      posterStaffTypes: job.posterStaffTypes?.length ? job.posterStaffTypes : poster.staffTypes,
       posterVerified: job.posterVerified ?? poster.isVerified,
       posterPlan: job.posterPlan || poster.plan,
+      posterAdminTags: poster.adminTags,
+      posterWarningTag: poster.adminWarningTag,
     };
   });
+}
+
+async function getPosterPostingState(posterId: string): Promise<{ canPost: boolean; reason?: string }> {
+  try {
+    const posterDoc = await getDoc(doc(db, 'users', posterId));
+    if (!posterDoc.exists()) {
+      return { canPost: false, reason: 'ไม่พบบัญชีผู้โพสต์' };
+    }
+
+    const posterData = posterDoc.data();
+    if (posterData.isActive === false) {
+      return { canPost: false, reason: 'บัญชีนี้ถูกระงับการใช้งานโดยผู้ดูแลระบบ' };
+    }
+
+    if (posterData.postingSuspended === true) {
+      return {
+        canPost: false,
+        reason: posterData.postingSuspendedReason || 'บัญชีนี้ถูกระงับการโพสต์โดยผู้ดูแลระบบ',
+      };
+    }
+
+    return { canPost: true };
+  } catch {
+    return { canPost: false, reason: 'ไม่สามารถตรวจสอบสิทธิ์การโพสต์ได้ กรุณาลองใหม่' };
+  }
 }
 
 /** ตรวจว่าโพสต์ active และยังไม่หมดอายุ */
@@ -180,31 +289,36 @@ function isActivePost(job: JobPost): boolean {
 // ==========================================
 
 // Subscribe to real-time jobs updates
-export function subscribeToJobs(callback: (jobs: JobPost[]) => void): () => void {
+export function subscribeToJobs(
+  callback: (jobs: JobPost[]) => void,
+  metrics?: PerformanceMetricOptions,
+): () => void {
   const jobsQuery = query(
     collection(db, JOBS_COLLECTION),
-    where('status', 'in', ['active', 'urgent']),
     orderBy('createdAt', 'desc'),
-    limit(PAGE_SIZE)
+    limit(PAGE_SIZE * 3)
   );
 
-  return onSnapshot(jobsQuery, (snapshot) => {
-    const now = new Date();
+  const endMetric = beginTrackedSubscription({
+    screenName: metrics?.screenName,
+    source: metrics?.source || 'jobs:feed',
+  });
+
+  const unsubscribe = onSnapshot(jobsQuery, (snapshot) => {
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: `${metrics?.source || 'jobs:feed'}:snapshot`,
+    });
+
     const jobs = snapshot.docs
       .map(mapDocToJob)
       .filter(isActivePost);
 
     console.log(`[subscribeToJobs] ${jobs.length} active jobs from Firestore`);
 
-    // แสดง mock เฉพาะใน dev mode และเมื่อ feature flag เปิดอยู่เท่านั้น
-    if (SHOW_MOCK_DATA && jobs.length === 0) {
-      callback(getMockJobs());
-      return;
-    }
-
     enrichJobsWithPosterMetadata(jobs)
-      .then(callback)
-      .catch(() => callback(jobs));
+      .then((enrichedJobs) => callback(sortJobsByVisibility(enrichedJobs)))
+      .catch(() => callback(sortJobsByVisibility(jobs)));
   }, (error) => {
     // ถ้า permission-denied → ไม่ต้อง callback และไม่ต้อง log error spam
     if ((error as any)?.code === 'permission-denied') {
@@ -214,6 +328,11 @@ export function subscribeToJobs(callback: (jobs: JobPost[]) => void): () => void
     console.error('[subscribeToJobs] Firestore error:', error);
     callback([]);
   });
+
+  return () => {
+    endMetric();
+    unsubscribe();
+  };
 }
 
 // Get active jobs with optional filters + pagination cursor
@@ -221,13 +340,13 @@ export async function getJobs(
   filters?: JobFilters,
   cursor?: DocumentSnapshot,
   pageSize = PAGE_SIZE,
+  metrics?: PerformanceMetricOptions,
 ): Promise<{ jobs: JobPost[]; lastDoc: DocumentSnapshot | null }> {
   try {
     let jobsQuery = query(
       collection(db, JOBS_COLLECTION),
-      where('status', 'in', ['active', 'urgent']),
       orderBy('createdAt', 'desc'),
-      limit(pageSize),
+      limit(pageSize * 3),
     );
 
     if (cursor) {
@@ -235,8 +354,12 @@ export async function getJobs(
     }
 
     const snapshot = await getDocs(jobsQuery);
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: metrics?.source || 'jobs:get',
+    });
     let jobs = snapshot.docs.map(mapDocToJob).filter(isActivePost);
-    jobs = await enrichJobsWithPosterMetadata(jobs);
+    jobs = sortJobsByVisibility(await enrichJobsWithPosterMetadata(jobs));
 
     // Client-side filters
     if (filters) {
@@ -254,7 +377,9 @@ export async function getJobs(
       }
     }
 
-    const lastDoc = snapshot.docs.length === pageSize
+    jobs = jobs.slice(0, pageSize);
+
+    const lastDoc = snapshot.docs.length > 0
       ? snapshot.docs[snapshot.docs.length - 1] as DocumentSnapshot
       : null;
 
@@ -312,17 +437,20 @@ export async function getJobsNearby(
   lat: number,
   lng: number,
   radiusKm = 10,
+  metrics?: PerformanceMetricOptions,
 ): Promise<JobPost[]> {
   try {
     const geohashes = getQueryGeohashes(lat, lng, radiusKm);
     const jobsQuery = query(
       collection(db, JOBS_COLLECTION),
-      where('status', 'in', ['active', 'urgent']),
       where('geohash', 'in', geohashes),
-      orderBy('createdAt', 'desc'),
-      limit(PAGE_SIZE),
+      limit(PAGE_SIZE * 4),
     );
     const snapshot = await getDocs(jobsQuery);
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: metrics?.source || 'jobs:nearby',
+    });
     let jobs = snapshot.docs.map(mapDocToJob).filter(isActivePost);
     jobs = jobs.filter((job) => {
       if (job.lat == null || job.lng == null) return false;
@@ -332,12 +460,14 @@ export async function getJobsNearby(
 
     // เรียงตามระยะทางจริงโดยใช้ Haversine
     jobs.sort((a, b) => {
+      const boostedDiff = getJobSortTime(b) - getJobSortTime(a);
+      if (boostedDiff !== 0) return boostedDiff;
       const da = a.lat && a.lng ? getDistanceKm(lat, lng, a.lat, a.lng) : 9999;
       const db2 = b.lat && b.lng ? getDistanceKm(lat, lng, b.lat, b.lng) : 9999;
       return da - db2;
     });
 
-    return jobs;
+    return jobs.slice(0, PAGE_SIZE);
   } catch (error) {
     console.error('[getJobsNearby] error:', error);
     throw error;
@@ -398,6 +528,16 @@ export function validateJobPost(jobData: Partial<JobPost>): PostValidationResult
     warnings.push('หัวข้อสั้นเกินไป กรุณาระบุรายละเอียดเพิ่มเติม');
   }
 
+  const externalSignals = detectExternalContactSignals(`${jobData.title || ''}\n${jobData.description || ''}\n${jobData.sourceText || ''}`);
+  if (externalSignals.hasExternalContact) {
+    warnings.push('พบเบอร์โทร, LINE หรือ link ในเนื้อหาโพสต์ แนะนำย้ายไปไว้ในช่องติดต่อเพื่อให้ประกาศอ่านง่ายขึ้น');
+  }
+
+  if (jobData.contactMode === 'in_app' && externalSignals.hasExternalContact) {
+    blocked = true;
+    reason = 'โพสต์นี้เลือกเริ่มคุยผ่านแอปก่อน กรุณาย้ายเบอร์หรือ LINE ไปไว้ในช่องติดต่อ แล้วลองโพสต์อีกครั้ง';
+  }
+
   return { valid: !blocked, warnings, blocked, reason };
 }
 
@@ -405,6 +545,10 @@ export function validateJobPost(jobData: Partial<JobPost>): PostValidationResult
 export async function createJob(jobData: Partial<JobPost>): Promise<string> {
   try {
     const currentUser = assertAuthUser(jobData.posterId, 'ไม่สามารถยืนยันตัวตนผู้โพสต์ได้ กรุณาเข้าสู่ระบบใหม่');
+    const postingState = await getPosterPostingState(jobData.posterId || currentUser.uid);
+    if (!postingState.canPost) {
+      throw new Error(postingState.reason || 'บัญชีนี้ถูกระงับการโพสต์');
+    }
 
     // Rate limit check
     if (jobData.posterId) {
@@ -471,6 +615,15 @@ export async function updateJob(jobId: string, updates: Partial<JobPost>): Promi
     if (data.posterId !== currentUser.uid) {
       throw new Error('ไม่มีสิทธิ์แก้ไขประกาศนี้');
     }
+
+    const targetStatus = updates.status || data.status;
+    if (targetStatus === 'active' || targetStatus === 'urgent') {
+      const postingState = await getPosterPostingState(currentUser.uid);
+      if (!postingState.canPost) {
+        throw new Error(postingState.reason || 'บัญชีนี้ถูกระงับการโพสต์');
+      }
+    }
+
     await updateDoc(docRef, updates);
   } catch (error) {
     console.error('Error updating job:', error);
@@ -510,7 +663,7 @@ export async function deleteJob(jobId: string): Promise<void> {
 }
 
 // Get jobs by user ID (ประกาศของฉัน)
-export async function getUserPosts(userId: string): Promise<JobPost[]> {
+export async function getUserPosts(userId: string, metrics?: PerformanceMetricOptions): Promise<JobPost[]> {
   try {
     const jobsQuery = query(
       collection(db, JOBS_COLLECTION),
@@ -518,8 +671,12 @@ export async function getUserPosts(userId: string): Promise<JobPost[]> {
       orderBy('createdAt', 'desc'),
     );
     const snapshot = await getDocs(jobsQuery);
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: metrics?.source || 'jobs:user_posts',
+    });
     const jobs = snapshot.docs.map(mapDocToJob);
-    return enrichJobsWithPosterMetadata(jobs);
+    return sortJobsByVisibility(await enrichJobsWithPosterMetadata(jobs));
   } catch (error) {
     console.error('[getUserPosts] error:', error);
     return [];
@@ -530,6 +687,7 @@ export async function getUserPosts(userId: string): Promise<JobPost[]> {
 export function subscribeToUserPosts(
   userId: string,
   callback: (posts: JobPost[]) => void,
+  metrics?: PerformanceMetricOptions,
 ): () => void {
   const postsQuery = query(
     collection(db, JOBS_COLLECTION),
@@ -537,15 +695,29 @@ export function subscribeToUserPosts(
     orderBy('createdAt', 'desc'),
   );
 
-  return onSnapshot(postsQuery, (snapshot) => {
+  const endMetric = beginTrackedSubscription({
+    screenName: metrics?.screenName,
+    source: metrics?.source || 'jobs:user_posts_subscription',
+  });
+
+  const unsubscribe = onSnapshot(postsQuery, (snapshot) => {
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: `${metrics?.source || 'jobs:user_posts_subscription'}:snapshot`,
+    });
     const jobs = snapshot.docs.map(mapDocToJob);
     enrichJobsWithPosterMetadata(jobs)
-      .then(callback)
-      .catch(() => callback(jobs));
+      .then((enrichedJobs) => callback(sortJobsByVisibility(enrichedJobs)))
+      .catch(() => callback(sortJobsByVisibility(jobs)));
   }, (error) => {
     console.error('[subscribeToUserPosts] error:', error);
     callback([]);
   });
+
+  return () => {
+    endMetric();
+    unsubscribe();
+  };
 }
 
 // Update job status
@@ -560,12 +732,43 @@ export async function updateJobStatus(jobId: string, status: 'active' | 'urgent'
     if (data.posterId !== currentUser.uid) {
       throw new Error('ไม่มีสิทธิ์แก้ไขสถานะประกาศนี้');
     }
+    if (status === 'active' || status === 'urgent') {
+      const postingState = await getPosterPostingState(currentUser.uid);
+      if (!postingState.canPost) {
+        throw new Error(postingState.reason || 'บัญชีนี้ถูกระงับการโพสต์');
+      }
+    }
     await updateDoc(docRef, {
       status,
+      isUrgent: status === 'urgent',
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
     console.error('Error updating job status:', error);
+    throw error;
+  }
+}
+
+export async function boostJobPost(jobId: string): Promise<Date> {
+  try {
+    const currentUser = assertAuthUser();
+    const docRef = doc(db, JOBS_COLLECTION, jobId);
+    const currentDoc = await getDoc(docRef);
+    if (!currentDoc.exists()) throw new Error('ไม่พบประกาศนี้');
+
+    const data = currentDoc.data();
+    if (data.posterId !== currentUser.uid) {
+      throw new Error('ไม่มีสิทธิ์ดันประกาศนี้');
+    }
+
+    const boostedAt = new Date();
+    await updateDoc(docRef, {
+      boostedAt,
+      updatedAt: boostedAt,
+    });
+    return boostedAt;
+  } catch (error) {
+    console.error('Error boosting job:', error);
     throw error;
   }
 }
@@ -743,157 +946,3 @@ export async function updateShiftContactStatus(
   }
 }
 
-// ==========================================
-// Mock Data (Fallback when Firebase unavailable)
-// ==========================================
-function getMockJobs(): JobPost[] {
-  const today = new Date();
-  const tomorrow = new Date(today.getTime() + 86400000);
-  const nextWeek = new Date(today.getTime() + 604800000);
-  
-  return [
-    {
-      id: '1',
-      title: '🔥 หาคนแทนเวรดึก ICU ด่วนมาก!',
-      posterName: 'พี่หมิว RN',
-      posterId: 'u1',
-      posterPhoto: 'https://randomuser.me/api/portraits/women/44.jpg',
-      department: 'ICU',
-      description: 'ติดธุระกะทันหัน หาคนแทนด่วนค่ะ ผู้ป่วย 6 เตียง มี NA ช่วย',
-      shiftRate: 2000,
-      rateType: 'shift',
-      shiftDate: tomorrow,
-      shiftTime: '00:00-08:00',
-      location: {
-        province: 'กรุงเทพมหานคร',
-        district: 'วัฒนา',
-        hospital: 'รพ.บำรุงราษฎร์',
-      },
-      contactPhone: '089-123-4567',
-      contactLine: '@mew_nurse',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      status: 'urgent',
-      viewsCount: 45,
-      tags: ['ด่วน', 'ICU', 'เวรดึก'],
-    },
-    {
-      id: '2',
-      title: 'รับสมัครงาน OR หัวหิน',
-      posterName: 'นุ่น พยาบาล',
-      posterId: 'u2',
-      posterPhoto: 'https://randomuser.me/api/portraits/women/68.jpg',
-      department: 'OR',
-      description: 'ไปทำ Part time ที่หัวหิน ค่าตอบแทนดี รับหลายวันได้',
-      shiftRate: 350,
-      rateType: 'hour',
-      shiftDate: nextWeek,
-      shiftTime: '08:00-20:00',
-      location: {
-        province: 'ประจวบคีรีขันธ์',
-        district: 'หัวหิน',
-        hospital: 'รพ.หัวหิน',
-      },
-      contactPhone: '081-234-5678',
-      createdAt: new Date(Date.now() - 3600000),
-      updatedAt: new Date(),
-      status: 'active',
-      viewsCount: 28,
-    },
-    {
-      id: '3',
-      title: 'หาคนแทนเวรเช้า ER',
-      posterName: 'อาร์ม RN',
-      posterId: 'u3',
-      posterPhoto: 'https://randomuser.me/api/portraits/men/32.jpg',
-      department: 'ER',
-      description: 'ติดสอบ หาคนแทนเวรเช้าครับ ER busy มาก',
-      shiftRate: 1800,
-      rateType: 'shift',
-      shiftDate: tomorrow,
-      shiftTime: '08:00-16:00',
-      location: {
-        province: 'กรุงเทพมหานคร',
-        district: 'ห้วยขวาง',
-        hospital: 'รพ.กรุงเทพ',
-      },
-      contactPhone: '082-345-6789',
-      contactLine: 'arm_nurse',
-      createdAt: new Date(Date.now() - 7200000),
-      updatedAt: new Date(),
-      status: 'active',
-      viewsCount: 15,
-    },
-    {
-      id: '4',
-      title: 'รับงาน Part time วอร์ด Med',
-      posterName: 'เจน พยาบาล',
-      posterId: 'u4',
-      posterPhoto: 'https://randomuser.me/api/portraits/women/22.jpg',
-      department: 'Med',
-      description: 'วอร์ดอายุรกรรม ผู้ป่วยไม่หนัก รับได้หลายวัน',
-      shiftRate: 1500,
-      rateType: 'shift',
-      shiftDate: nextWeek,
-      shiftTime: '16:00-00:00',
-      location: {
-        province: 'นนทบุรี',
-        district: 'เมืองนนทบุรี',
-        hospital: 'รพ.นนทเวช',
-      },
-      contactPhone: '083-456-7890',
-      createdAt: new Date(Date.now() - 86400000),
-      updatedAt: new Date(),
-      status: 'active',
-      viewsCount: 32,
-    },
-    {
-      id: '5',
-      title: '🔥 ด่วน! หาคนแทนเวรบ่าย Pedia',
-      posterName: 'มิ้นท์ RN',
-      posterId: 'u5',
-      posterPhoto: 'https://randomuser.me/api/portraits/women/55.jpg',
-      department: 'Pediatric',
-      description: 'วอร์ดเด็ก ผู้ป่วย 10 เตียง มี NA 2 คน ช่วยงาน',
-      shiftRate: 1700,
-      rateType: 'shift',
-      shiftDate: today,
-      shiftTime: '16:00-00:00',
-      location: {
-        province: 'กรุงเทพมหานคร',
-        district: 'บางกะปิ',
-        hospital: 'รพ.เปาโล เมโมเรียล',
-      },
-      contactPhone: '084-567-8901',
-      contactLine: '@mint_pedia',
-      createdAt: new Date(Date.now() - 1800000),
-      updatedAt: new Date(),
-      status: 'urgent',
-      viewsCount: 67,
-      tags: ['ด่วน', 'เด็ก', 'เวรบ่าย'],
-    },
-    {
-      id: '6',
-      title: 'รับสมัครเวรดึก OPD คลินิก',
-      posterName: 'ก้อย พยาบาล',
-      posterId: 'u6',
-      posterPhoto: 'https://randomuser.me/api/portraits/women/33.jpg',
-      department: 'OPD',
-      description: 'คลินิกเปิด 24 ชม. งานไม่หนัก มีหมอ 1 คน',
-      shiftRate: 250,
-      rateType: 'hour',
-      shiftDate: tomorrow,
-      shiftTime: '00:00-08:00',
-      location: {
-        province: 'สมุทรปราการ',
-        district: 'บางพลี',
-        hospital: 'คลินิกสุขภาพ 24 ชม.',
-      },
-      contactPhone: '085-678-9012',
-      createdAt: new Date(Date.now() - 172800000),
-      updatedAt: new Date(),
-      status: 'active',
-      viewsCount: 18,
-    },
-  ];
-}

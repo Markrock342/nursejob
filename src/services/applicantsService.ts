@@ -244,10 +244,12 @@ export async function updateApplicationStatus(
       throw new Error('ไม่มีสิทธิ์อัปเดตสถานะใบสมัครนี้');
     }
 
-    await updateDoc(docRef, { 
+    await updateDoc(docRef, {
       status,
       updatedAt: serverTimestamp(),
       updatedBy: updatedBy || currentUser.uid,
+      confirmedAt: status === 'confirmed' ? serverTimestamp() : null,
+      cancelledAt: status === 'cancelled' ? serverTimestamp() : null,
     });
 
     if (status === 'confirmed' || status === 'cancelled') {

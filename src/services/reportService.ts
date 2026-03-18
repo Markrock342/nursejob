@@ -20,7 +20,7 @@ import { db } from '../config/firebase';
 // ============================================
 // Types
 // ============================================
-export type ReportType = 'job' | 'user' | 'message';
+export type ReportType = 'job' | 'user' | 'message' | 'review';
 export type ReportReason = 
   | 'spam'
   | 'inappropriate'
@@ -63,6 +63,32 @@ export interface Report {
 // ============================================
 const REPORTS_COLLECTION = 'reports';
 
+const REPORT_STATUSES: ReportStatus[] = ['pending', 'reviewed', 'resolved', 'dismissed'];
+const REPORT_TYPES: ReportType[] = ['job', 'user', 'message', 'review'];
+
+function mapTimestampToDate(value?: Date | Timestamp): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  return typeof value.toDate === 'function' ? value.toDate() : undefined;
+}
+
+function sanitizeReportPayload<T extends Record<string, any>>(payload: T): T {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
+  ) as T;
+}
+
+function isModerationReportRecord(data: any): data is Report {
+  return Boolean(
+    data &&
+    REPORT_TYPES.includes(data.type) &&
+    REPORT_TYPES.includes(data.targetType) &&
+    REPORT_STATUSES.includes(data.status) &&
+    typeof data.reporterId === 'string' &&
+    typeof data.targetId === 'string'
+  );
+}
+
 export const REPORT_REASONS: { value: ReportReason; label: string; description: string }[] = [
   { value: 'spam', label: 'สแปม', description: 'ข้อความหรือประกาศที่ส่งซ้ำๆ' },
   { value: 'inappropriate', label: 'เนื้อหาไม่เหมาะสม', description: 'เนื้อหาหยาบคาย รุนแรง หรือลามก' },
@@ -84,11 +110,11 @@ export const REPORT_STATUS_LABELS: Record<ReportStatus, string> = {
 // ============================================
 export async function createReport(report: Omit<Report, 'id' | 'createdAt' | 'status'>): Promise<string> {
   try {
-    const docRef = await addDoc(collection(db, REPORTS_COLLECTION), {
+    const docRef = await addDoc(collection(db, REPORTS_COLLECTION), sanitizeReportPayload({
       ...report,
       status: 'pending',
       createdAt: serverTimestamp(),
-    });
+    }));
     
     return docRef.id;
   } catch (error) {
@@ -110,15 +136,14 @@ export async function getAllReports(maxLimit = 50): Promise<Report[]> {
     
     const snapshot = await getDocs(q);
     
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
+    return snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((data) => isModerationReportRecord(data))
+      .map((data) => ({
         ...data,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        reviewedAt: data.reviewedAt?.toDate(),
-      } as Report;
-    });
+        createdAt: mapTimestampToDate(data.createdAt) || new Date(),
+        reviewedAt: mapTimestampToDate(data.reviewedAt),
+      } as Report));
   } catch (error) {
     console.error('Error getting reports:', error);
     return [];
@@ -138,14 +163,13 @@ export async function getPendingReports(): Promise<Report[]> {
     
     const snapshot = await getDocs(q);
     
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
+    return snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((data) => isModerationReportRecord(data))
+      .map((data) => ({
         ...data,
-        createdAt: data.createdAt?.toDate() || new Date(),
-      } as Report;
-    });
+        createdAt: mapTimestampToDate(data.createdAt) || new Date(),
+      } as Report));
   } catch (error) {
     console.error('Error getting pending reports:', error);
     return [];
@@ -191,15 +215,14 @@ export async function getReportsByTarget(targetId: string, targetType: ReportTyp
     
     const snapshot = await getDocs(q);
     
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
+    return snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((data) => isModerationReportRecord(data))
+      .map((data) => ({
         ...data,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        reviewedAt: data.reviewedAt?.toDate(),
-      } as Report;
-    });
+        createdAt: mapTimestampToDate(data.createdAt) || new Date(),
+        reviewedAt: mapTimestampToDate(data.reviewedAt),
+      } as Report));
   } catch (error) {
     console.error('Error getting reports by target:', error);
     return [];

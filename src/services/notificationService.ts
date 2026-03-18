@@ -26,6 +26,7 @@ function getNotificationsSync() {
 import { doc, updateDoc } from 'firebase/firestore';
 import app, { db } from '../config/firebase';
 import { isAuthUser } from './security/authGuards';
+import { isNotificationSettingEnabled } from './settingsService';
 
 // Ensure Firebase is initialized (for push notification context)
 if (!app) {
@@ -148,7 +149,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
     await N.setNotificationChannelAsync('applications', {
       name: 'ผู้สมัครงาน',
-      description: 'การแจ้งเตือนเมื่อมีผู้สนใจงาน',
+      description: 'การแจ้งเตือนเมื่อมีคนสนใจประกาศของคุณ',
       importance: N.AndroidImportance?.HIGH ?? 3,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#45B7D1',
@@ -176,6 +177,23 @@ export async function savePushTokenToUser(userId: string, token: string): Promis
     console.log('Push token saved to user profile');
   } catch (error) {
     console.error('Error saving push token:', error);
+  }
+}
+
+export async function clearPushTokenForUser(userId: string): Promise<void> {
+  try {
+    if (!isAuthUser(userId)) {
+      console.warn('[clearPushTokenForUser] skipped: uid mismatch or not authenticated');
+      return;
+    }
+
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      pushToken: null,
+      pushTokenUpdatedAt: new Date(),
+    });
+  } catch (error) {
+    console.error('Error clearing push token:', error);
   }
 }
 
@@ -209,6 +227,7 @@ export async function sendMessageNotification(
   messagePreview: string,
   conversationId: string
 ): Promise<void> {
+  if (!(await isNotificationSettingEnabled('messages'))) return;
   await sendLocalNotification(
     `ข้อความจาก ${senderName}`,
     messagePreview,
@@ -225,6 +244,7 @@ export async function sendNewJobNotification(
   location: string,
   jobId: string
 ): Promise<void> {
+  if (!(await isNotificationSettingEnabled('newJobs'))) return;
   await sendLocalNotification(
     'งานใหม่',
     `${jobTitle} - ${location}`,
@@ -241,9 +261,10 @@ export async function sendApplicationNotification(
   jobTitle: string,
   applicationId: string
 ): Promise<void> {
+  if (!(await isNotificationSettingEnabled('applications'))) return;
   await sendLocalNotification(
-    'มีผู้สนใจงาน',
-    `${applicantName} สนใจงาน "${jobTitle}"`,
+    'มีคนสนใจประกาศของคุณ',
+    `${applicantName} แสดงความสนใจใน "${jobTitle}"`,
     { type: 'application', applicationId },
     'applications'
   );
@@ -266,6 +287,18 @@ export function addNotificationResponseListener(
   const N = getNotificationsSync();
   if (!N) return { remove: () => {} };
   return N.addNotificationResponseReceivedListener(callback);
+}
+
+export async function getLastNotificationResponseAsync(): Promise<any | null> {
+  const N = getNotificationsSync();
+  if (!N?.getLastNotificationResponseAsync) return null;
+  return await N.getLastNotificationResponseAsync();
+}
+
+export async function clearLastNotificationResponseAsync(): Promise<void> {
+  const N = getNotificationsSync();
+  if (!N?.clearLastNotificationResponseAsync) return;
+  await N.clearLastNotificationResponseAsync();
 }
 
 // ==========================================

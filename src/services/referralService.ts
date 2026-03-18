@@ -17,10 +17,16 @@ import {
   increment,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { ReferralInfo, ReferralRecord } from '../types';
+import { ReferralInfo, ReferralRecord, SubscriptionPlan } from '../types';
 
 const USERS_COL = 'users';
 const REFERRALS_COL = 'referrals';
+
+function getReferralRewardPlan(role?: string | null): SubscriptionPlan {
+  if (role === 'hospital' || role === 'admin') return 'hospital_pro';
+  if (role === 'nurse') return 'nurse_pro';
+  return 'premium';
+}
 
 // ============================================
 // GENERATE REFERRAL CODE
@@ -154,7 +160,7 @@ export async function applyReferralCode(
 // ============================================
 // GRANT REFERRAL REWARD
 // เรียกเมื่อ referee upgrade เป็น paid plan
-// → ผู้แนะนำได้ Pro ฟรี 1 เดือน
+// → ผู้แนะนำได้สิทธิ์พรีเมียมฟรี 1 เดือนตามประเภทบัญชี
 // ============================================
 export async function grantReferralReward(refereeUid: string): Promise<void> {
   try {
@@ -198,8 +204,10 @@ export async function grantReferralReward(refereeUid: string): Promise<void> {
     if (currentExpiry < new Date()) currentExpiry = new Date();
     currentExpiry.setMonth(currentExpiry.getMonth() + 1);
 
-    // ถ้า referrer ยังเป็น free → upgrade เป็น nurse_pro ฟรี 1 เดือน
-    const newPlan = sub.plan === 'free' || !sub.plan ? 'nurse_pro' : sub.plan;
+    // ถ้า referrer ยังเป็น free → upgrade เป็นแผนพรีเมียมตามประเภทบัญชีฟรี 1 เดือน
+    const newPlan = sub.plan === 'free' || !sub.plan
+      ? getReferralRewardPlan(referrerData.role)
+      : sub.plan;
 
     await updateDoc(doc(db, USERS_COL, referrerUid), {
       'subscription.plan': newPlan,

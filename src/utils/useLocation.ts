@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
+import * as ExpoLocation from 'expo-location';
 
 // Guard geolocation import so app doesn't crash in Expo Go where
 // `react-native-geolocation-service` (native module) may not be available.
@@ -29,6 +30,16 @@ export function useLocation() {
   const watchIdRef = useRef<number | null>(null);
 
   const clearLocationWatch = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      if (watchIdRef.current != null) {
+        try {
+          ExpoLocation.stopLocationUpdatesAsync(`nursego-watch-${watchIdRef.current}`).catch(() => {});
+        } catch (_) {}
+        watchIdRef.current = null;
+      }
+      return;
+    }
+
     const G = getGeolocationSync();
     if (!G || watchIdRef.current == null) return;
     try {
@@ -38,6 +49,8 @@ export function useLocation() {
   }, []);
 
   const startWatching = useCallback(() => {
+    if (Platform.OS === 'ios') return;
+
     const G = getGeolocationSync();
     if (!G || watchIdRef.current != null) return;
 
@@ -64,6 +77,11 @@ export function useLocation() {
   }, []);
 
   const requestPermission = useCallback(async () => {
+    if (Platform.OS === 'ios') {
+      const status = await ExpoLocation.requestForegroundPermissionsAsync();
+      return status.status === 'granted';
+    }
+
     if (Platform.OS === 'android') {
       // Check first — avoids showing the OS popup when permission is already granted
       const alreadyGranted = await PermissionsAndroid.check(
@@ -81,7 +99,6 @@ export function useLocation() {
       );
       return granted === PermissionsAndroid.RESULTS.GRANTED;
     }
-    // iOS: handled by geolocation lib
     return true;
   }, []);
 
@@ -95,6 +112,21 @@ export function useLocation() {
         setLoading(false);
         return null;
       }
+
+      if (Platform.OS === 'ios') {
+        const pos = await ExpoLocation.getCurrentPositionAsync({
+          accuracy: ExpoLocation.Accuracy.Balanced,
+        });
+        const nextLocation = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? undefined,
+        };
+        setLocation(nextLocation);
+        setLoading(false);
+        return nextLocation;
+      }
+
       const G = getGeolocationSync();
       if (!G) {
         setError('Geolocation native module not available (Expo Go). Use a development build or run on a device with the native module installed.');

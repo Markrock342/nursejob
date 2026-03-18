@@ -1,236 +1,253 @@
-// ============================================
-// VERIFICATION SCREEN - ยืนยันตัวตนพยาบาล
-// ============================================
-
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { KittenButton as Button, Card, Input, ModalContainer } from '../../components/common';
+import CalendarPicker from '../../components/common/CalendarPicker';
+import CustomAlert, { AlertState, createAlert, initialAlertState } from '../../components/common/CustomAlert';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { 
-  pickImage, 
-  takePhoto, 
-  pickDocument,
-  uploadLicenseDocument,
+import { BORDER_RADIUS, COLORS, FONT_SIZES, SPACING } from '../../theme';
+import {
+  pickImage,
+  takePhoto,
   uploadIdCard,
-  uploadProfilePhoto,
+  uploadLicenseDocument,
+  uploadVerificationDocument,
 } from '../../services/storageService';
 import {
-  submitVerificationRequest,
-  getUserVerificationStatus,
+  getLicenseTypeLabel,
   getPendingVerificationRequest,
+  getUserVerificationStatus,
+  getVerificationFlowConfig,
   LICENSE_TYPES,
+  submitVerificationRequest,
+  validateLicenseNumber,
   UserVerificationStatus,
   VerificationRequest,
 } from '../../services/verificationService';
-import { CalendarPicker } from '../../components/common';
-import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
+import { getSurveySelectionTags } from '../../utils/verificationTag';
 
 interface Props {
   navigation: any;
 }
 
+type DocumentKey = 'license' | 'employeeCard' | 'idCard' | 'declaration';
+
 export default function VerificationScreen({ navigation }: Props) {
   const { user, isInitialized } = useAuth();
-  const { colors } = useTheme();
-  
-  // State
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const headerBackground = colors.surface;
+  const statusBarStyle = isDark ? 'light-content' : 'dark-content';
+
+  const flow = useMemo(
+    () => getVerificationFlowConfig(user?.role, (user as any)?.orgType),
+    [user?.role, (user as any)?.orgType]
+  );
+  const surveyTags = useMemo(
+    () => getSurveySelectionTags({
+      role: user?.role,
+      orgType: (user as any)?.orgType,
+      staffType: (user as any)?.staffType,
+      staffTypes: (user as any)?.staffTypes,
+    }),
+    [user?.role, (user as any)?.orgType, (user as any)?.staffType, (user as any)?.staffTypes]
+  );
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<UserVerificationStatus | null>(null);
   const [pendingRequest, setPendingRequest] = useState<VerificationRequest | null>(null);
-  
-  // Form state
   const [firstName, setFirstName] = useState((user as any)?.firstName || '');
   const [lastName, setLastName] = useState((user as any)?.lastName || '');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseType, setLicenseType] = useState<string>('nurse');
   const [licenseExpiry, setLicenseExpiry] = useState(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000));
-  const [licenseDocUri, setLicenseDocUri] = useState<string | null>(null);
-  const [idCardUri, setIdCardUri] = useState<string | null>(null);
-  const [selfieUri, setSelfieUri] = useState<string | null>(null);
-  
-  // Modals
+  const [documentUris, setDocumentUris] = useState<Record<DocumentKey, string | null>>({
+    license: null,
+    employeeCard: null,
+    idCard: null,
+    declaration: null,
+  });
   const [showLicenseTypeModal, setShowLicenseTypeModal] = useState(false);
   const [showImagePickerModal, setShowImagePickerModal] = useState(false);
-  const [currentImageType, setCurrentImageType] = useState<'license' | 'idcard' | 'selfie'>('license');
+  const [currentDocumentKey, setCurrentDocumentKey] = useState<DocumentKey>('license');
   const [alert, setAlert] = useState<AlertState>(initialAlertState);
+
   const closeAlert = () => setAlert(initialAlertState);
 
   useEffect(() => {
-    if (user?.uid && isInitialized) {
-      loadVerificationStatus();
-    }
-  }, [user?.uid, isInitialized]);
+    if (!user?.uid || !isInitialized) return;
 
-  useEffect(() => {
-    if ((user as any)?.firstName && !firstName) {
-      setFirstName((user as any).firstName);
-    }
-    if ((user as any)?.lastName && !lastName) {
-      setLastName((user as any).lastName);
-    }
-  }, [user, firstName, lastName]);
-
-  const loadVerificationStatus = async () => {
-    if (!user?.uid) return;
-    
-    setIsLoading(true);
-    try {
-      const status = await getUserVerificationStatus(user.uid);
-      setVerificationStatus(status);
-      
-      if (status.pendingRequest) {
-        const pending = await getPendingVerificationRequest(user.uid);
-        setPendingRequest(pending);
+    const loadVerificationStatus = async () => {
+      setIsLoading(true);
+      try {
+        const status = await getUserVerificationStatus(user.uid);
+        setVerificationStatus(status);
+        if (status.pendingRequest) {
+          const pending = await getPendingVerificationRequest(user.uid);
+          setPendingRequest(pending);
+        } else {
+          setPendingRequest(null);
+        }
+      } catch (error) {
+        console.error('Error loading verification status:', error);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Error loading verification status:', error);
-    } finally {
-      setIsLoading(false);
-    }
+    };
+
+    void loadVerificationStatus();
+  }, [isInitialized, user?.uid]);
+
+  const openDocumentPicker = (key: DocumentKey) => {
+    setCurrentDocumentKey(key);
+    setShowImagePickerModal(true);
   };
 
-  const handlePickImage = async (type: 'license' | 'idcard' | 'selfie') => {
-    setCurrentImageType(type);
-    setShowImagePickerModal(true);
+  const assignDocumentUri = (uri: string | null) => {
+    if (!uri) return;
+    setDocumentUris((prev) => ({ ...prev, [currentDocumentKey]: uri }));
   };
 
   const selectFromGallery = async () => {
     setShowImagePickerModal(false);
     try {
-      const uri = await pickImage();
-      if (uri) {
-        switch (currentImageType) {
-          case 'license':
-            setLicenseDocUri(uri);
-            break;
-          case 'idcard':
-            setIdCardUri(uri);
-            break;
-          case 'selfie':
-            setSelfieUri(uri);
-            break;
-        }
-      }
+      assignDocumentUri(await pickImage());
     } catch (error: any) {
-      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
+      setAlert(createAlert.error('ข้อผิดพลาด', error.message) as AlertState);
     }
   };
 
   const takePhotoCamera = async () => {
     setShowImagePickerModal(false);
     try {
-      const uri = await takePhoto();
-      if (uri) {
-        switch (currentImageType) {
-          case 'license':
-            setLicenseDocUri(uri);
-            break;
-          case 'idcard':
-            setIdCardUri(uri);
-            break;
-          case 'selfie':
-            setSelfieUri(uri);
-            break;
-        }
-      }
+      assignDocumentUri(await takePhoto());
     } catch (error: any) {
-      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
+      setAlert(createAlert.error('ข้อผิดพลาด', error.message) as AlertState);
     }
   };
 
-  const handlePickDocument = async () => {
-    try {
-      const doc = await pickDocument();
-      if (doc) {
-        setLicenseDocUri(doc.uri);
-      }
-    } catch (error: any) {
-      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
+  const validateForm = () => {
+    if (!firstName.trim()) return 'กรุณากรอกชื่อจริง';
+    if (!lastName.trim()) return 'กรุณากรอกนามสกุล';
+    if (flow.requiresLicenseInfo) {
+      if (!licenseNumber.trim()) return 'กรุณากรอกเลขที่ใบอนุญาต';
+      const licenseValidation = validateLicenseNumber(licenseNumber, licenseType);
+      if (!licenseValidation.valid) return licenseValidation.error || 'รูปแบบเลขใบอนุญาตไม่ถูกต้อง';
+      if (!documentUris.license) return 'กรุณาอัปโหลดใบประกอบวิชาชีพ';
     }
+    if (flow.requiresEmployeeCard && !documentUris.employeeCard) return 'กรุณาอัปโหลดบัตรพนักงาน';
+    if (flow.requiresIdCard && !documentUris.idCard) return 'กรุณาอัปโหลดบัตรประชาชน';
+    if (flow.requiresDeclaration && !documentUris.declaration) return 'กรุณาอัปโหลดเอกสารเซ็นกำกับว่าใช้กับ NurseGo';
+    return null;
+  };
+
+  const uploadDocuments = async () => {
+    if (!user?.uid) return {};
+
+    const results: Record<string, string | undefined> = {};
+    if (documentUris.license) {
+      results.licenseDocumentUrl = await uploadLicenseDocument(user.uid, documentUris.license, 'license.jpg');
+    }
+    if (documentUris.employeeCard) {
+      results.employeeCardUrl = await uploadVerificationDocument(user.uid, documentUris.employeeCard, 'employee_card', 'employee-card.jpg');
+    }
+    if (documentUris.idCard) {
+      results.idCardUrl = await uploadIdCard(user.uid, documentUris.idCard);
+    }
+    if (documentUris.declaration) {
+      results.declarationDocumentUrl = await uploadVerificationDocument(user.uid, documentUris.declaration, 'declaration', 'declaration.jpg');
+    }
+    return results;
   };
 
   const handleSubmit = async () => {
     if (!user) return;
-    
-    // Validation
-    if (!firstName.trim()) {
-      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณากรอกชื่อจริง') } as AlertState);
+
+    const validationError = validateForm();
+    if (validationError) {
+      setAlert(createAlert.warning('ข้อมูลไม่ครบ', validationError) as AlertState);
       return;
     }
-    if (!lastName.trim()) {
-      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณากรอกนามสกุล') } as AlertState);
-      return;
-    }
-    if (!licenseNumber.trim()) {
-      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณากรอกเลขที่ใบอนุญาต') } as AlertState);
-      return;
-    }
-    if (!licenseDocUri) {
-      setAlert({ ...createAlert.warning('ข้อผิดพลาด', 'กรุณาอัพโหลดรูปใบประกอบวิชาชีพ') } as AlertState);
-      return;
-    }
-    
+
     setIsSubmitting(true);
     try {
-      // Upload documents
-      const licenseUrl = await uploadLicenseDocument(user.uid, licenseDocUri, 'license.jpg');
-      
-      let idCardUrl: string | undefined;
-      if (idCardUri) {
-        idCardUrl = await uploadIdCard(user.uid, idCardUri);
-      }
-      
-      let selfieUrl: string | undefined;
-      if (selfieUri) {
-        selfieUrl = await uploadProfilePhoto(user.uid, selfieUri);
-      }
-      
-      // Submit request
-      const verificationPayload: Parameters<typeof submitVerificationRequest>[0] = {
+      const uploadedDocuments = await uploadDocuments();
+      const normalizedLicenseNumber = flow.requiresLicenseInfo
+        ? validateLicenseNumber(licenseNumber, licenseType).normalizedNumber || licenseNumber.trim()
+        : undefined;
+      const payload: Parameters<typeof submitVerificationRequest>[0] = {
         userId: user.uid,
         userName: user.displayName || 'ไม่ระบุชื่อ',
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         userEmail: user.email || '',
-        licenseNumber: licenseNumber.trim(),
-        licenseType: licenseType as any,
-        licenseExpiry,
-        licenseDocumentUrl: licenseUrl,
+        userPhone: user.phone || undefined,
+        role: user.role,
+        orgType: (user as any)?.orgType,
+        staffType: (user as any)?.staffType,
+        staffTypes: (user as any)?.staffTypes || ((user as any)?.staffType ? [(user as any).staffType] : []),
+        verificationType: flow.type,
+        ...(flow.requiresLicenseInfo
+          ? {
+              licenseNumber: normalizedLicenseNumber,
+              licenseType: licenseType as any,
+              licenseExpiry,
+            }
+          : {}),
+        ...uploadedDocuments,
       };
-      // only include optional fields when they have real values (Firestore rejects undefined)
-      if (user.phone) verificationPayload.userPhone = user.phone;
-      if (idCardUrl) verificationPayload.idCardUrl = idCardUrl;
-      if (selfieUrl) verificationPayload.selfieUrl = selfieUrl;
 
-      await submitVerificationRequest(verificationPayload);
-      
+      await submitVerificationRequest(payload);
       setAlert({
         ...createAlert.success('ส่งคำขอสำเร็จ', 'คำขอยืนยันตัวตนของคุณถูกส่งแล้ว ทีมงานจะตรวจสอบภายใน 1-3 วันทำการ'),
-        onConfirm: () => { closeAlert(); navigation.goBack(); },
+        onConfirm: () => {
+          closeAlert();
+          navigation.goBack();
+        },
       } as AlertState);
     } catch (error: any) {
-      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
+      setAlert(createAlert.error('ข้อผิดพลาด', error.message || 'ไม่สามารถส่งคำขอยืนยันตัวตนได้') as AlertState);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const renderDocumentPicker = (key: DocumentKey, label: string, description: string) => {
+    const uri = documentUris[key];
+    return (
+      <View style={styles.documentWrapper}>
+        <Text style={styles.inputLabel}>{label}</Text>
+        <Text style={styles.helperText}>{description}</Text>
+        <TouchableOpacity style={styles.uploadButton} onPress={() => openDocumentPicker(key)}>
+          {uri ? (
+            <Image source={{ uri }} style={styles.uploadPreview} />
+          ) : (
+            <View style={styles.uploadPlaceholder}>
+              <Ionicons name="document-outline" size={32} color={colors.textMuted} />
+              <Text style={styles.uploadText}>แตะเพื่ออัปโหลด</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+        <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>กำลังโหลด...</Text>
@@ -239,297 +256,158 @@ export default function VerificationScreen({ navigation }: Props) {
     );
   }
 
-  if (user?.role !== 'nurse') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
-          <View style={{ width: 24 }} />
-        </View>
-
-        <View style={styles.pendingContainer}>
-          <View style={styles.pendingBadge}>
-            <Ionicons name="lock-closed-outline" size={80} color={colors.textSecondary} />
-          </View>
-          <Text style={styles.pendingTitle}>ฟีเจอร์นี้สำหรับพยาบาลเท่านั้น</Text>
-          <Text style={styles.pendingSubtitle}>
-            การยื่นใบประกอบวิชาชีพเพื่อยืนยันตัวตน ใช้สำหรับบัญชี role พยาบาลเท่านั้น
-          </Text>
-
-          <Button
-            title="กลับ"
-            onPress={() => navigation.goBack()}
-            variant="outline"
-            style={{ marginTop: SPACING.lg }}
-          />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // Already verified
   if (verificationStatus?.isVerified) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+        <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
-          <View style={{ width: 24 }} />
+          <Text style={styles.headerTitle}>{flow.title}</Text>
+          <View style={styles.headerSpacer} />
         </View>
-        
-        <View style={styles.verifiedContainer}>
-          <View style={styles.verifiedBadge}>
-            <Ionicons name="checkmark-circle" size={80} color="#4ADE80" />
-          </View>
-          <Text style={styles.verifiedTitle}>ยืนยันตัวตนแล้ว ✓</Text>
-          <Text style={styles.verifiedSubtitle}>
-            บัญชีของคุณได้รับการยืนยันเป็นพยาบาลวิชาชีพแล้ว
-          </Text>
-          
-          <Card style={styles.licenseCard}>
-            <View style={styles.licenseRow}>
-              <Text style={styles.licenseLabel}>ประเภท:</Text>
-              <Text style={styles.licenseValue}>
-                {LICENSE_TYPES.find(t => t.value === verificationStatus.licenseType)?.label || verificationStatus.licenseType}
-              </Text>
+
+        <View style={styles.stateContainer}>
+          <Ionicons name="checkmark-circle" size={84} color={colors.success} />
+          <Text style={styles.stateTitle}>{flow.verifiedTitle}</Text>
+          <Text style={styles.stateSubtitle}>{flow.verifiedSubtitle}</Text>
+
+          <Card style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>ประเภทการยืนยัน</Text>
+              <Text style={styles.summaryValue}>{flow.menuLabel}</Text>
             </View>
-            <View style={styles.licenseRow}>
-              <Text style={styles.licenseLabel}>เลขที่ใบอนุญาต:</Text>
-              <Text style={styles.licenseValue}>{verificationStatus.licenseNumber}</Text>
-            </View>
-            {verificationStatus.licenseExpiry && (
-              <View style={styles.licenseRow}>
-                <Text style={styles.licenseLabel}>วันหมดอายุ:</Text>
-                <Text style={styles.licenseValue}>
-                  {verificationStatus.licenseExpiry.toLocaleDateString('th-TH')}
-                </Text>
+            {verificationStatus.licenseType ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>ประเภทใบอนุญาต</Text>
+                <Text style={styles.summaryValue}>{getLicenseTypeLabel(verificationStatus.licenseType)}</Text>
               </View>
-            )}
+            ) : null}
+            {verificationStatus.licenseNumber ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>เลขที่เอกสาร</Text>
+                <Text style={styles.summaryValue}>{verificationStatus.licenseNumber}</Text>
+              </View>
+            ) : null}
           </Card>
-          
-          <Button
-            title="กลับ"
-            onPress={() => navigation.goBack()}
-            variant="outline"
-            style={{ marginTop: SPACING.lg }}
-          />
         </View>
       </SafeAreaView>
     );
   }
 
-  // Pending request
   if (pendingRequest) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+        <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
-          <View style={{ width: 24 }} />
+          <Text style={styles.headerTitle}>{flow.title}</Text>
+          <View style={styles.headerSpacer} />
         </View>
-        
-        <View style={styles.pendingContainer}>
-          <View style={styles.pendingBadge}>
-            <Ionicons name="time-outline" size={80} color={colors.warning} />
-          </View>
-          <Text style={styles.pendingTitle}>รอการตรวจสอบ</Text>
-          <Text style={styles.pendingSubtitle}>
-            คำขอยืนยันตัวตนของคุณอยู่ระหว่างการตรวจสอบ{'\n'}
-            โดยปกติจะใช้เวลา 1-3 วันทำการ
-          </Text>
-          
-          <Card style={styles.pendingCard}>
-            <Text style={styles.pendingCardTitle}>รายละเอียดคำขอ</Text>
-            <View style={styles.licenseRow}>
-              <Text style={styles.licenseLabel}>ชื่อ-นามสกุล:</Text>
-              <Text style={styles.licenseValue}>{pendingRequest.firstName} {pendingRequest.lastName}</Text>
+
+        <View style={styles.stateContainer}>
+          <Ionicons name="time-outline" size={84} color={colors.warning} />
+          <Text style={styles.stateTitle}>รอการตรวจสอบ</Text>
+          <Text style={styles.stateSubtitle}>คำขอยืนยันตัวตนของคุณอยู่ระหว่างการตรวจสอบ ทีมงานจะตรวจสอบภายใน 1-3 วันทำการ</Text>
+
+          <Card style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>ประเภทการยืนยัน</Text>
+              <Text style={styles.summaryValue}>{flow.menuLabel}</Text>
             </View>
-            <View style={styles.licenseRow}>
-              <Text style={styles.licenseLabel}>เลขที่ใบอนุญาต:</Text>
-              <Text style={styles.licenseValue}>{pendingRequest.licenseNumber}</Text>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>ชื่อผู้ยื่น</Text>
+              <Text style={styles.summaryValue}>{pendingRequest.firstName} {pendingRequest.lastName}</Text>
             </View>
-            <View style={styles.licenseRow}>
-              <Text style={styles.licenseLabel}>ส่งเมื่อ:</Text>
-              <Text style={styles.licenseValue}>
-                {pendingRequest.submittedAt.toLocaleDateString('th-TH')}
-              </Text>
-            </View>
+            {pendingRequest.licenseNumber ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>เลขที่เอกสาร</Text>
+                <Text style={styles.summaryValue}>{pendingRequest.licenseNumber}</Text>
+              </View>
+            ) : null}
           </Card>
-          
-          <Button
-            title="กลับ"
-            onPress={() => navigation.goBack()}
-            variant="outline"
-            style={{ marginTop: SPACING.lg }}
-          />
         </View>
       </SafeAreaView>
     );
   }
 
-  // Show form
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
       <CustomAlert {...alert} onClose={closeAlert} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ยืนยันตัวตน</Text>
-        <View style={{ width: 24 }} />
+        <Text style={styles.headerTitle}>{flow.title}</Text>
+        <View style={styles.headerSpacer} />
       </View>
-      
+
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Info Banner */}
         <Card style={styles.infoBanner}>
           <View style={styles.infoBannerContent}>
-            <Ionicons name="shield-checkmark" size={40} color={colors.primary} />
-            <View style={styles.infoBannerText}>
-              <Text style={styles.infoBannerTitle}>ยืนยันตัวตนเพื่อเพิ่มความน่าเชื่อถือ</Text>
-              <Text style={styles.infoBannerSubtitle}>
-                โปรไฟล์ที่ได้รับการยืนยันจะแสดง ✓ หลังชื่อ{'\n'}
-                ทำให้ผู้ว่าจ้างมั่นใจมากขึ้น
-              </Text>
+            <Ionicons name="shield-checkmark" size={36} color={colors.primary} />
+            <View style={styles.infoBannerTextWrap}>
+              <Text style={styles.infoBannerTitle}>{flow.menuLabel}</Text>
+              <Text style={styles.infoBannerSubtitle}>{flow.subtitle}</Text>
             </View>
           </View>
         </Card>
 
+        {surveyTags.length > 0 ? (
+          <Card style={styles.tagsCard}>
+            <Text style={styles.sectionTitle}>Tag จาก role / survey</Text>
+            <View style={styles.tagWrap}>
+              {surveyTags.map((tag) => (
+                <View key={tag} style={styles.tagChip}>
+                  <Text style={styles.tagChipText}>{tag}</Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
+
         <Card style={styles.section}>
           <Text style={styles.sectionTitle}>ข้อมูลผู้ยื่นคำขอ</Text>
-
-          <Input
-            label="ชื่อจริง *"
-            placeholder="กรอกชื่อจริง"
-            value={firstName}
-            onChangeText={setFirstName}
-          />
-
-          <Input
-            label="นามสกุล *"
-            placeholder="กรอกนามสกุล"
-            value={lastName}
-            onChangeText={setLastName}
-          />
+          <Input label="ชื่อจริง" value={firstName} onChangeText={setFirstName} placeholder="กรอกชื่อจริง" required />
+          <Input label="นามสกุล" value={lastName} onChangeText={setLastName} placeholder="กรอกนามสกุล" required />
         </Card>
 
-        {/* License Number */}
+        {flow.requiresLicenseInfo ? (
+          <Card style={styles.section}>
+            <Text style={styles.sectionTitle}>ข้อมูลใบอนุญาต</Text>
+            <Input label="เลขที่ใบอนุญาต" value={licenseNumber} onChangeText={setLicenseNumber} placeholder="เช่น ว.12345" required />
+            <Text style={styles.inputLabel}>ประเภทใบอนุญาต</Text>
+            <TouchableOpacity style={styles.selectButton} onPress={() => setShowLicenseTypeModal(true)}>
+              <Text style={styles.selectButtonText}>{LICENSE_TYPES.find((item) => item.value === licenseType)?.label || 'เลือกประเภท'}</Text>
+              <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+            <CalendarPicker label="วันหมดอายุใบอนุญาต" value={licenseExpiry} onChange={setLicenseExpiry} minDate={new Date()} />
+          </Card>
+        ) : null}
+
         <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>ข้อมูลใบอนุญาต</Text>
-          
-          <Input
-            label="เลขที่ใบประกอบวิชาชีพ *"
-            placeholder="เช่น ก.12345"
-            value={licenseNumber}
-            onChangeText={setLicenseNumber}
-          />
-          
-          {/* License Type */}
-          <Text style={styles.inputLabel}>ประเภทใบอนุญาต *</Text>
-          <TouchableOpacity
-            style={styles.selectButton}
-            onPress={() => setShowLicenseTypeModal(true)}
-          >
-            <Text style={styles.selectButtonText}>
-              {LICENSE_TYPES.find(t => t.value === licenseType)?.label || 'เลือกประเภท'}
-            </Text>
-            <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-          
-          {/* License Expiry */}
-          <CalendarPicker
-            label="วันหมดอายุใบอนุญาต *"
-            value={licenseExpiry}
-            onChange={setLicenseExpiry}
-            minDate={new Date()}
-          />
+          <Text style={styles.sectionTitle}>เอกสารประกอบ</Text>
+          {flow.requiresLicenseInfo ? renderDocumentPicker('license', 'ใบประกอบวิชาชีพ', 'อัปโหลดรูปใบประกอบวิชาชีพที่ใช้ตรวจสอบ') : null}
+          {flow.requiresEmployeeCard ? renderDocumentPicker('employeeCard', 'บัตรพนักงาน / เอกสารสังกัด', 'ใช้ยืนยันว่าคุณเป็นผู้แทนของหน่วยงานนี้จริง') : null}
+          {flow.requiresIdCard ? renderDocumentPicker('idCard', 'บัตรประชาชน', 'อัปโหลดเฉพาะข้อมูลที่ใช้ยืนยันตัวตนได้ชัดเจน') : null}
+          {flow.requiresDeclaration ? renderDocumentPicker('declaration', 'เอกสารเซ็นกำกับว่าใช้กับ NurseGo', 'เช่น เขียนกำกับบนเอกสารว่า ใช้ยืนยันตัวตนกับ NurseGo พร้อมลายเซ็น') : null}
         </Card>
 
-        {/* Document Upload */}
-        <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>อัพโหลดเอกสาร</Text>
-          
-          {/* License Document */}
-          <Text style={styles.inputLabel}>รูปใบประกอบวิชาชีพ *</Text>
-          <TouchableOpacity
-            style={styles.uploadButton}
-            onPress={() => handlePickImage('license')}
-          >
-            {licenseDocUri ? (
-              <Image source={{ uri: licenseDocUri }} style={styles.uploadPreview} />
-            ) : (
-              <View style={styles.uploadPlaceholder}>
-                <Ionicons name="document-outline" size={40} color={colors.textMuted} />
-                <Text style={styles.uploadText}>แตะเพื่ออัพโหลด</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          
-          {/* ID Card (optional) */}
-          <Text style={styles.inputLabel}>รูปบัตรประชาชน (ไม่บังคับ)</Text>
-          <TouchableOpacity
-            style={styles.uploadButton}
-            onPress={() => handlePickImage('idcard')}
-          >
-            {idCardUri ? (
-              <Image source={{ uri: idCardUri }} style={styles.uploadPreview} />
-            ) : (
-              <View style={styles.uploadPlaceholder}>
-                <Ionicons name="card-outline" size={40} color={colors.textMuted} />
-                <Text style={styles.uploadText}>แตะเพื่ออัพโหลด</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          
-          {/* Selfie (optional) */}
-          <Text style={styles.inputLabel}>รูปถ่ายหน้าตรง (ไม่บังคับ)</Text>
-          <TouchableOpacity
-            style={styles.uploadButton}
-            onPress={() => handlePickImage('selfie')}
-          >
-            {selfieUri ? (
-              <Image source={{ uri: selfieUri }} style={styles.uploadPreview} />
-            ) : (
-              <View style={styles.uploadPlaceholder}>
-                <Ionicons name="person-circle-outline" size={40} color={colors.textMuted} />
-                <Text style={styles.uploadText}>แตะเพื่ออัพโหลด</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </Card>
-
-        {/* Privacy Notice */}
-        <Card style={{...styles.section, ...styles.privacyCard}}>
+        <Card style={styles.privacyCard}>
           <View style={styles.privacyContent}>
             <Ionicons name="lock-closed-outline" size={24} color={colors.primary} />
-            <Text style={styles.privacyText}>
-              ข้อมูลและเอกสารของคุณจะถูกเก็บรักษาอย่างปลอดภัย
-              และใช้เพื่อการตรวจสอบเท่านั้น
-            </Text>
+            <Text style={styles.privacyText}>เอกสารทั้งหมดใช้เพื่อการตรวจสอบตัวตนและความน่าเชื่อถือของผู้โพสต์งานเท่านั้น</Text>
           </View>
         </Card>
 
-        {/* Submit Button */}
-        <Button
-          title={isSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอยืนยัน'}
-          onPress={handleSubmit}
-          loading={isSubmitting}
-          style={{ marginVertical: SPACING.lg }}
-        />
+        <Button title={isSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอยืนยัน'} onPress={handleSubmit} loading={isSubmitting} style={styles.submitButton} />
       </ScrollView>
 
-      {/* License Type Modal */}
-      <ModalContainer
-        visible={showLicenseTypeModal}
-        onClose={() => setShowLicenseTypeModal(false)}
-        title="เลือกประเภทใบอนุญาต"
-      >
+      <ModalContainer visible={showLicenseTypeModal} onClose={() => setShowLicenseTypeModal(false)} title="เลือกประเภทใบอนุญาต">
         {LICENSE_TYPES.map((type) => (
           <TouchableOpacity
             key={type.value}
@@ -539,25 +417,13 @@ export default function VerificationScreen({ navigation }: Props) {
               setShowLicenseTypeModal(false);
             }}
           >
-            <Text style={[
-              styles.modalItemText,
-              licenseType === type.value && styles.modalItemTextSelected
-            ]}>
-              {type.label}
-            </Text>
-            {licenseType === type.value && (
-              <Ionicons name="checkmark" size={20} color={colors.primary} />
-            )}
+            <Text style={[styles.modalItemText, licenseType === type.value ? styles.modalItemTextSelected : null]}>{type.label}</Text>
+            {licenseType === type.value ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
           </TouchableOpacity>
         ))}
       </ModalContainer>
 
-      {/* Image Picker Modal */}
-      <ModalContainer
-        visible={showImagePickerModal}
-        onClose={() => setShowImagePickerModal(false)}
-        title="เลือกรูปภาพ"
-      >
+      <ModalContainer visible={showImagePickerModal} onClose={() => setShowImagePickerModal(false)} title="เลือกรูปเอกสาร">
         <TouchableOpacity style={styles.modalItem} onPress={selectFromGallery}>
           <Ionicons name="images-outline" size={24} color={colors.primary} />
           <Text style={styles.modalItemText}>เลือกจากคลังรูปภาพ</Text>
@@ -566,18 +432,12 @@ export default function VerificationScreen({ navigation }: Props) {
           <Ionicons name="camera-outline" size={24} color={colors.primary} />
           <Text style={styles.modalItemText}>ถ่ายรูป</Text>
         </TouchableOpacity>
-        {currentImageType === 'license' && (
-          <TouchableOpacity style={styles.modalItem} onPress={handlePickDocument}>
-            <Ionicons name="document-outline" size={24} color={colors.primary} />
-            <Text style={styles.modalItemText}>เลือกไฟล์ PDF</Text>
-          </TouchableOpacity>
-        )}
       </ModalContainer>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -594,8 +454,11 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZES.lg,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
+  },
+  headerSpacer: {
+    width: 24,
   },
   content: {
     flex: 1,
@@ -611,23 +474,21 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.md,
     color: COLORS.textSecondary,
   },
-  
-  // Info Banner
   infoBanner: {
-    backgroundColor: COLORS.primaryLight,
     marginBottom: SPACING.md,
+    backgroundColor: COLORS.primaryLight,
   },
   infoBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.md,
   },
-  infoBannerText: {
+  infoBannerTextWrap: {
     flex: 1,
   },
   infoBannerTitle: {
     fontSize: FONT_SIZES.md,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.primary,
     marginBottom: 4,
   },
@@ -636,23 +497,45 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     lineHeight: 20,
   },
-  
-  // Section
+  tagsCard: {
+    marginBottom: SPACING.md,
+  },
   section: {
     marginBottom: SPACING.md,
   },
   sectionTitle: {
     fontSize: FONT_SIZES.lg,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
     marginBottom: SPACING.md,
   },
+  tagWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tagChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: '#E0E7FF',
+  },
+  tagChipText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
   inputLabel: {
     fontSize: FONT_SIZES.sm,
-    fontWeight: '500',
+    fontWeight: '600',
     color: COLORS.textSecondary,
-    marginBottom: SPACING.xs,
-    marginTop: SPACING.sm,
+    marginBottom: 6,
+  },
+  helperText: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textMuted,
+    lineHeight: 18,
+    marginBottom: 8,
   },
   selectButton: {
     flexDirection: 'row',
@@ -670,15 +553,15 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.md,
     color: COLORS.text,
   },
-  
-  // Upload
+  documentWrapper: {
+    marginBottom: SPACING.md,
+  },
   uploadButton: {
     borderWidth: 2,
     borderColor: COLORS.border,
     borderStyle: 'dashed',
     borderRadius: BORDER_RADIUS.lg,
     overflow: 'hidden',
-    marginBottom: SPACING.md,
   },
   uploadPlaceholder: {
     paddingVertical: SPACING.xl,
@@ -693,13 +576,11 @@ const styles = StyleSheet.create({
   },
   uploadPreview: {
     width: '100%',
-    height: 200,
+    height: 180,
     resizeMode: 'cover',
   },
-  
-  // Privacy
   privacyCard: {
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundSecondary,
   },
   privacyContent: {
     flexDirection: 'row',
@@ -712,97 +593,15 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     lineHeight: 20,
   },
-  
-  // Verified State
-  verifiedContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.lg,
+  submitButton: {
+    marginVertical: SPACING.lg,
   },
-  verifiedBadge: {
-    marginBottom: SPACING.lg,
-  },
-  verifiedTitle: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: '700',
-    color: '#4ADE80',
-    marginBottom: SPACING.sm,
-  },
-  verifiedSubtitle: {
-    fontSize: FONT_SIZES.md,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: SPACING.lg,
-  },
-  licenseCard: {
-    width: '100%',
-    backgroundColor: COLORS.surface,
-  },
-  licenseRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  licenseLabel: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  licenseValue: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  
-  // Pending State
-  pendingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.lg,
-  },
-  pendingBadge: {
-    marginBottom: SPACING.lg,
-  },
-  pendingTitle: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: '700',
-    color: COLORS.warning,
-    marginBottom: SPACING.sm,
-  },
-  pendingSubtitle: {
-    fontSize: FONT_SIZES.md,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: SPACING.lg,
-    lineHeight: 24,
-  },
-  pendingCard: {
-    width: '100%',
-    backgroundColor: COLORS.surface,
-  },
-  pendingCardTitle: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
-    paddingBottom: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  
-  // Modal
   modalItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    gap: SPACING.md,
+    paddingVertical: 14,
+    gap: 10,
   },
   modalItemText: {
     flex: 1,
@@ -811,7 +610,49 @@ const styles = StyleSheet.create({
   },
   modalItemTextSelected: {
     color: COLORS.primary,
+    fontWeight: '700',
+  },
+  stateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.lg,
+  },
+  stateTitle: {
+    marginTop: SPACING.lg,
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: SPACING.sm,
+    textAlign: 'center',
+  },
+  stateSubtitle: {
+    fontSize: FONT_SIZES.md,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: SPACING.lg,
+  },
+  summaryCard: {
+    width: '100%',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  summaryLabel: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    flex: 1,
+  },
+  summaryValue: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.text,
     fontWeight: '600',
+    flex: 1,
+    textAlign: 'right',
   },
 });
 

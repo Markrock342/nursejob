@@ -21,11 +21,70 @@ service cloud.firestore {
       );
     }
 
+    function isPostingAllowed() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isActive', true) == true
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('postingSuspended', false) != true;
+    }
+
     function isShiftPoster(jobId) {
       return isSignedIn()
         && jobId is string
         && exists(/databases/$(database)/documents/shifts/$(jobId))
         && get(/databases/$(database)/documents/shifts/$(jobId)).data.posterId == request.auth.uid;
+    }
+
+    function hasNonEmptyStringValue(data, field) {
+      return data.get(field, '') is string && data.get(field, '').size() > 0;
+    }
+
+    function textHasExternalContact(text) {
+      return text is string && (
+        text.matches('.*((\\+66|0)[0-9][0-9\\- ]{7,12}).*')
+        || text.matches('.*(https?://[^ ]+|www\\.[^ ]+).*')
+        || text.matches('.*([Ll][Ii][Nn][Ee][ ]?[Ii][Dd]|ไลน์|@[A-Za-z0-9._-]{3,}).*')
+      );
+    }
+
+    function postHasExternalContact(data) {
+      return textHasExternalContact(data.get('title', ''))
+        || textHasExternalContact(data.get('description', ''))
+        || textHasExternalContact(data.get('sourceText', ''));
+    }
+
+    function resolvedContactMode(data) {
+      return data.get('contactMode', '') in ['in_app', 'phone', 'line', 'phone_or_line']
+        ? data.get('contactMode', '')
+        : ((hasNonEmptyStringValue(data, 'contactPhone') || hasNonEmptyStringValue(data, 'contactLine'))
+          ? 'phone_or_line'
+          : 'in_app');
+    }
+
+    function shouldEnforceShiftPublishingPolicy(data) {
+      return data.get('status', 'active') in ['active', 'urgent'];
+    }
+
+    function isValidShiftContactPolicy(data) {
+      return !shouldEnforceShiftPublishingPolicy(data) || (
+        (
+          resolvedContactMode(data) == 'in_app'
+          && !hasNonEmptyStringValue(data, 'contactPhone')
+          && !hasNonEmptyStringValue(data, 'contactLine')
+          && !postHasExternalContact(data)
+        )
+        || (
+          resolvedContactMode(data) == 'phone'
+          && hasNonEmptyStringValue(data, 'contactPhone')
+        )
+        || (
+          resolvedContactMode(data) == 'line'
+          && hasNonEmptyStringValue(data, 'contactLine')
+        )
+        || (
+          resolvedContactMode(data) == 'phone_or_line'
+          && (hasNonEmptyStringValue(data, 'contactPhone') || hasNonEmptyStringValue(data, 'contactLine'))
+        )
+      );
     }
 
     // ==========================================
@@ -41,7 +100,14 @@ service cloud.firestore {
         && request.resource.data.get('isAdmin', false) == false;
       allow update: if isAdmin() || (
         isOwner(userId)
-        && !request.resource.data.diff(resource.data).changedKeys().hasAny(['role', 'isAdmin'])
+        && !request.resource.data.diff(resource.data).changedKeys().hasAny([
+          'role',
+          'isAdmin',
+          'adminTags',
+          'adminWarningTag',
+          'postingSuspended',
+          'postingSuspendedReason'
+        ])
       );
       allow delete: if isAdmin();
 
@@ -59,17 +125,33 @@ service cloud.firestore {
       allow read: if true;
 
       allow create: if isSignedIn()
+        && isPostingAllowed()
         && request.resource.data.posterId == request.auth.uid
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.status in ['active', 'urgent']
         && request.resource.data.shiftRate is number
-        && request.resource.data.shiftRate >= 0;
+        && request.resource.data.shiftRate >= 0
+        && isValidShiftContactPolicy(request.resource.data);
 
       allow update: if (
         // Owner/admin can update their own posts as before
         isSignedIn() && (
-          resource.data.posterId == request.auth.uid || isAdmin()
+          (resource.data.posterId == request.auth.uid
+            && (
+              !request.resource.data.diff(resource.data).changedKeys().hasAny([
+                'completedAt',
+                'completedBy',
+                'selectedApplicationId',
+                'selectedApplicantId'
+              ])
+              && (
+              request.resource.data.status in ['closed', 'deleted', 'expired']
+              || isPostingAllowed()
+              )
+              && isValidShiftContactPolicy(request.resource.data)
+            ))
+          || isAdmin()
         )
       ) || (
         // Public-safe view counter: allow only +1 on viewsCount and nothing else
@@ -95,9 +177,14 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.interestedUserId == request.auth.uid;
       allow update: if isSignedIn() && (
-        resource.data.interestedUserId == request.auth.uid ||
-        resource.data.posterId == request.auth.uid ||
-        isShiftPoster(resource.data.jobId) ||
+        (
+          (
+            resource.data.interestedUserId == request.auth.uid ||
+            resource.data.posterId == request.auth.uid ||
+            isShiftPoster(resource.data.jobId)
+          )
+          && !request.resource.data.diff(resource.data).changedKeys().hasAny(['completionOutcome'])
+        ) ||
         isAdmin()
       );
       allow delete: if isSignedIn() && (
@@ -165,11 +252,51 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.reviewerId == request.auth.uid
         && request.resource.data.rating >= 1
-        && request.resource.data.rating <= 5;
-      allow update: if isSignedIn() && resource.data.reviewerId == request.auth.uid;
+        && request.resource.data.rating <= 5
+        && request.resource.data.completionId is string
+        && exists(/databases/$(database)/documents/job_completions/$(request.resource.data.completionId))
+        && get(/databases/$(database)/documents/job_completions/$(request.resource.data.completionId)).data.status == 'completed'
+        && request.auth.uid in get(/databases/$(database)/documents/job_completions/$(request.resource.data.completionId)).data.participantIds
+        && request.resource.data.relatedJobId == get(/databases/$(database)/documents/job_completions/$(request.resource.data.completionId)).data.jobId
+        && (
+          (
+            request.resource.data.targetType == 'user'
+            && request.resource.data.revieweeId is string
+            && request.resource.data.revieweeId != request.auth.uid
+            && request.resource.data.revieweeId in get(/databases/$(database)/documents/job_completions/$(request.resource.data.completionId)).data.participantIds
+          )
+          || (
+            request.resource.data.targetType == 'hospital'
+            && request.resource.data.hospitalId is string
+            && request.resource.data.hospitalId != request.auth.uid
+            && request.resource.data.hospitalId in get(/databases/$(database)/documents/job_completions/$(request.resource.data.completionId)).data.participantIds
+          )
+        );
+      allow update: if isSignedIn() && (
+        resource.data.reviewerId == request.auth.uid
+        || (
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['helpful', 'helpfulVoterIds'])
+          && resource.data.reviewerId != request.auth.uid
+          && !(request.auth.uid in resource.data.get('helpfulVoterIds', []))
+          && request.auth.uid in request.resource.data.get('helpfulVoterIds', [])
+          && request.resource.data.helpful == resource.data.helpful + 1
+          && request.resource.data.get('helpfulVoterIds', []).size() == resource.data.get('helpfulVoterIds', []).size() + 1
+        )
+      );
       allow delete: if isSignedIn() && (
         resource.data.reviewerId == request.auth.uid || isAdmin()
       );
+    }
+
+    // ==========================================
+    // JOB COMPLETIONS
+    // ==========================================
+    match /job_completions/{completionId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid in resource.data.participantIds || isAdmin()
+      );
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     // ==========================================
@@ -280,6 +407,31 @@ service cloud.firestore {
     }
 
     // ==========================================
+    // CAMPAIGN CODES
+    // Signed-in users can validate a specific code.
+    // Admin can list and manage all codes.
+    // ==========================================
+    match /campaign_codes/{codeId} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // CAMPAIGN CODE REDEMPTIONS
+    // Users can record and read their own redemptions.
+    // Admin can audit all records.
+    // ==========================================
+    match /campaign_code_redemptions/{redemptionId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ==========================================
     // OTP CODES — Cloud Function Admin SDK only
     // No client read/write allowed
     // ==========================================
@@ -289,6 +441,29 @@ service cloud.firestore {
 
     match /otpRateLimit/{phone} {
       allow read, write: if false;
+    }
+
+    // ==========================================
+    // ANALYTICS EVENTS
+    // Client must write through Cloud Functions only.
+    // ==========================================
+    match /analytics_events/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /analytics_reports/{reportId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ==========================================
+    // APP CONFIG
+    // Shared runtime configuration such as monetization override.
+    // ==========================================
+    match /app_config/{configId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
 
   }

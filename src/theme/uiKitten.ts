@@ -20,8 +20,8 @@ export function getEvaTheme(paletteId: string, isDark: boolean) {
     'color-accent-500': palette.accent,
 
     // Backgrounds
-    'background-basic-color-1': isDark ? base['color-basic-800'] ?? '#0F172A' : base['color-basic-100'] ?? '#FFFFFF',
-    'background-basic-color-2': isDark ? base['color-basic-700'] ?? '#1E293B' : base['color-basic-200'] ?? '#F7F9FC',
+    'background-basic-color-1': isDark ? '#18191A' : base['color-basic-100'] ?? '#FFFFFF',
+    'background-basic-color-2': isDark ? '#242526' : base['color-basic-200'] ?? '#F7F9FC',
 
     // Keep a variable for a lighter primary background if provided
     'color-primary-background': palette.primaryBackground,

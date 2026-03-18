@@ -7,9 +7,23 @@ export interface VerificationTagInput {
   staffType?: string | null;
 }
 
+export interface IdentityTagInput {
+  role?: string | null;
+  orgType?: string | null;
+  staffType?: string | null;
+  staffTypes?: string[] | null;
+  adminTags?: string[] | null;
+  adminWarningTag?: string | null;
+}
+
 export interface RoleTagColors {
   backgroundColor: string;
   textColor: string;
+}
+
+export interface AdminDisplayTag {
+  label: string;
+  tone: 'info' | 'warning';
 }
 
 export function getVerificationTagText(input: VerificationTagInput): string | null {
@@ -97,11 +111,11 @@ export function hasPremiumTag(plan?: string | null): boolean {
 export function getPremiumTagText(plan?: string | null): string | null {
   if (!plan || plan === 'free') return null;
 
+  if (plan === 'premium') return 'Premium';
   if (plan === 'nurse_pro') return 'Nurse Pro';
   if (plan === 'hospital_starter') return 'Starter';
   if (plan === 'hospital_pro') return 'Hospital Pro';
   if (plan === 'hospital_enterprise') return 'Enterprise';
-  if (plan === 'premium') return 'Premium';
   return 'Premium';
 }
 
@@ -109,5 +123,77 @@ export function getPremiumTagColors(): RoleTagColors {
   return {
     backgroundColor: '#FEF3C7',
     textColor: '#92400E',
+  };
+}
+
+export function getAdminDisplayTags(adminTags?: string[] | null, adminWarningTag?: string | null): AdminDisplayTag[] {
+  const uniqueLabels = [...new Set((adminTags || []).map((tag) => String(tag || '').trim()).filter(Boolean))];
+  const tags: AdminDisplayTag[] = uniqueLabels.map((label) => ({ label, tone: 'info' }));
+  const warningLabel = String(adminWarningTag || '').trim();
+
+  if (warningLabel) {
+    tags.unshift({ label: warningLabel, tone: 'warning' });
+  }
+
+  return tags;
+}
+
+function normalizeSurveyTagLabel(tag: string): string {
+  switch (tag) {
+    case 'SITTER':
+      return 'เฝ้าไข้';
+    case 'public_hospital':
+    case 'private_hospital':
+      return 'HR';
+    case 'clinic':
+      return 'CLINIC';
+    case 'agency':
+      return 'AGENCY';
+    default:
+      return tag;
+  }
+}
+
+export function getSurveySelectionTags(input: Pick<IdentityTagInput, 'role' | 'orgType' | 'staffType' | 'staffTypes'>): string[] {
+  if (input.role === 'nurse') {
+    const selections = input.staffTypes?.length ? input.staffTypes : input.staffType ? [input.staffType] : [];
+    return [...new Set(selections.map((tag) => normalizeSurveyTagLabel(String(tag))))];
+  }
+
+  if (input.role === 'hospital') {
+    const orgTag = normalizeSurveyTagLabel(String(input.orgType || ''));
+    return orgTag ? [orgTag] : ['HR'];
+  }
+
+  return [];
+}
+
+export function getIdentityDisplayTags(input: IdentityTagInput): AdminDisplayTag[] {
+  const surveyTags = getSurveySelectionTags(input).map((label) => ({ label, tone: 'info' as const }));
+  const manualTags = getAdminDisplayTags(input.adminTags, input.adminWarningTag);
+  const merged: AdminDisplayTag[] = [];
+  const seen = new Set<string>();
+
+  for (const tag of [...manualTags, ...surveyTags]) {
+    const key = `${tag.tone}:${tag.label}`;
+    if (!tag.label || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(tag);
+  }
+
+  return merged;
+}
+
+export function getAdminDisplayTagColors(tone: 'info' | 'warning'): RoleTagColors {
+  if (tone === 'warning') {
+    return {
+      backgroundColor: '#FEE2E2',
+      textColor: '#B91C1C',
+    };
+  }
+
+  return {
+    backgroundColor: '#E0E7FF',
+    textColor: '#4338CA',
   };
 }

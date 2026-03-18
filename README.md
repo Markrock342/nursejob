@@ -176,4 +176,4 @@ npx tsc --noEmit
 ## 📄 Notes
 
 - โปรเจกต์นี้ใช้งาน Firebase หลายส่วน ควรตั้งค่า auth, firestore rules, storage rules และ functions ให้ครบก่อนรันเต็มระบบ
-- Deep link หลักของแอปถูกตั้งไว้ผ่าน `nursego://` และ URL ของ `nursego.app`
+- Deep link หลักของแอปถูกตั้งไว้ผ่าน `nursego://` และ URL ของ `nursego.co`

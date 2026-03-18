@@ -6,12 +6,14 @@ import {
   collection,
   doc,
   addDoc,
+  getDoc,
   updateDoc,
   deleteDoc,
   getDocs,
   query,
   where,
   orderBy,
+  limit,
   serverTimestamp,
   onSnapshot,
   writeBatch,
@@ -20,8 +22,10 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../config/firebase';
 import { assertAuthUser, isAuthUser } from './security/authGuards';
+import { beginTrackedSubscription, PerformanceMetricOptions, recordQueryRead } from './performanceMetrics';
 
 const NOTIFICATIONS_COLLECTION = 'notifications';
+const NOTIFICATION_WINDOW_SIZE = 100;
 
 export type NotificationType = 
   | 'new_job'           // งานใหม่ที่ตรงกับที่สนใจ
@@ -31,11 +35,17 @@ export type NotificationType =
   | 'application_rejected' // ไม่ได้รับการตอบรับ
   | 'new_message'       // ข้อความใหม่
   | 'new_applicant'     // มีคนสมัครงาน (สำหรับโรงพยาบาล)
+  | 'new_application'   // legacy: มีคนสนใจงาน
+  | 'nearby_job'        // งานใกล้คุณ
   | 'job_expired'       // งานหมดอายุ
+  | 'job_expiring'      // งานกำลังจะหมดอายุ
   | 'profile_reminder'  // เตือนให้อัพเดทโปรไฟล์
+  | 'job_completed_review' // งานจบแล้วพร้อมรีวิว
+  | 'new_review'       // มีคนรีวิวคุณใหม่
   | 'system'            // ข้อความจากระบบ
   | 'license_approved'  // ใบประกอบวิชาชีพผ่าน
-  | 'license_rejected'; // ใบประกอบวิชาชีพไม่ผ่าน
+  | 'license_rejected'  // ใบประกอบวิชาชีพไม่ผ่าน
+  | 'admin_verification_request'; // แจ้งเตือนแอดมินตรวจเอกสาร
 
 export interface Notification {
   id: string;
@@ -45,12 +55,57 @@ export interface Notification {
   body: string;
   data?: {
     jobId?: string;
+    shiftId?: string;
     applicationId?: string;
     conversationId?: string;
+    senderName?: string;
+    senderPhotoURL?: string;
+    recipientName?: string;
+    recipientPhoto?: string;
+    jobTitle?: string;
     [key: string]: any;
   };
   isRead: boolean;
   createdAt: Date;
+}
+
+function mapNotificationSnapshot(snapshot: any): Notification[] {
+  return snapshot.docs.map((docSnap: any) => ({
+    id: docSnap.id,
+    ...docSnap.data(),
+    createdAt: (docSnap.data().createdAt as Timestamp)?.toDate() || new Date(),
+  })) as Notification[];
+}
+
+function sortAndCapNotifications(notifications: Notification[]): Notification[] {
+  return notifications
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, NOTIFICATION_WINDOW_SIZE);
+}
+
+function getBaseNotificationsQuery(userId: string) {
+  return query(
+    collection(db, NOTIFICATIONS_COLLECTION),
+    where('userId', '==', userId),
+    limit(NOTIFICATION_WINDOW_SIZE)
+  );
+}
+
+function getPreferredNotificationsQuery(userId: string) {
+  return query(
+    collection(db, NOTIFICATIONS_COLLECTION),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc'),
+    limit(NOTIFICATION_WINDOW_SIZE)
+  );
+}
+
+async function getNotificationsSnapshotWithFallback(userId: string) {
+  try {
+    return await getDocs(getPreferredNotificationsQuery(userId));
+  } catch {
+    return await getDocs(getBaseNotificationsQuery(userId));
+  }
 }
 
 // Create notification
@@ -87,28 +142,112 @@ export async function createNotification(
 }
 
 // Get user notifications
-export async function getUserNotifications(userId: string): Promise<Notification[]> {
+export async function getUserNotifications(userId: string, metrics?: PerformanceMetricOptions): Promise<Notification[]> {
   try {
     if (!isAuthUser(userId)) return [];
 
-    // Simple query without orderBy (sorted client-side to avoid index requirement)
-    const q = query(
-      collection(db, NOTIFICATIONS_COLLECTION),
-      where('userId', '==', userId)
-    );
-    const snapshot = await getDocs(q);
-    
-    const notifications = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
-    })) as Notification[];
-
-    // Sort client-side (newest first)
-    return notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const snapshot = await getNotificationsSnapshotWithFallback(userId);
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: metrics?.source || 'notifications:get',
+    });
+    return sortAndCapNotifications(mapNotificationSnapshot(snapshot));
   } catch (error) {
     console.error('Error getting notifications:', error);
     return [];
+  }
+}
+
+export async function enrichNotificationsWithChatMetadata(
+  notifications: Notification[],
+  currentUserId: string
+): Promise<Notification[]> {
+  try {
+    if (!isAuthUser(currentUserId)) return notifications;
+
+    const targetNotifications = notifications.filter(
+      (notification) =>
+        notification.type === 'new_message' &&
+        notification.data?.conversationId &&
+        (!notification.data?.senderName || !notification.data?.senderPhotoURL)
+    );
+
+    if (targetNotifications.length === 0) {
+      return notifications;
+    }
+
+    const conversationIds = [...new Set(
+      targetNotifications
+        .map((notification) => notification.data?.conversationId)
+        .filter(Boolean)
+    )] as string[];
+
+    const conversationEntries = await Promise.all(
+      conversationIds.map(async (conversationId) => {
+        try {
+          const conversationSnap = await getDoc(doc(db, 'conversations', conversationId));
+          if (!conversationSnap.exists()) {
+            return [conversationId, null] as const;
+          }
+
+          const conversationData = conversationSnap.data();
+          const participants = Array.isArray(conversationData.participantDetails)
+            ? conversationData.participantDetails
+            : [];
+
+          const otherParticipant = participants.find(
+            (participant: any) => participant?.id && participant.id !== currentUserId
+          );
+
+          if (!otherParticipant?.id) {
+            return [conversationId, null] as const;
+          }
+
+          let senderName = otherParticipant.displayName || otherParticipant.name || '';
+          let senderPhotoURL = otherParticipant.photoURL || '';
+
+          if (!senderName || !senderPhotoURL) {
+            const userSnap = await getDoc(doc(db, 'users', otherParticipant.id));
+            if (userSnap.exists()) {
+              const userData = userSnap.data();
+              senderName = senderName || userData.displayName || '';
+              senderPhotoURL = senderPhotoURL || userData.photoURL || '';
+            }
+          }
+
+          return [conversationId, {
+            senderName: senderName || 'ผู้ใช้',
+            senderPhotoURL: senderPhotoURL || undefined,
+          }] as const;
+        } catch {
+          return [conversationId, null] as const;
+        }
+      })
+    );
+
+    const conversationMap = new Map(conversationEntries);
+
+    return notifications.map((notification) => {
+      if (notification.type !== 'new_message' || !notification.data?.conversationId) {
+        return notification;
+      }
+
+      const enriched = conversationMap.get(notification.data.conversationId);
+      if (!enriched) {
+        return notification;
+      }
+
+      return {
+        ...notification,
+        data: {
+          ...notification.data,
+          senderName: notification.data.senderName || enriched.senderName,
+          senderPhotoURL: notification.data.senderPhotoURL || enriched.senderPhotoURL,
+        },
+      };
+    });
+  } catch {
+    return notifications;
   }
 }
 
@@ -117,13 +256,18 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
   try {
     if (!isAuthUser(userId)) return 0;
 
-    const q = query(
-      collection(db, NOTIFICATIONS_COLLECTION),
-      where('userId', '==', userId)
-    );
-    const snapshot = await getDocs(q);
-    // Filter client-side
-    return snapshot.docs.filter(doc => doc.data().isRead === false).length;
+    try {
+      const unreadQuery = query(
+        collection(db, NOTIFICATIONS_COLLECTION),
+        where('userId', '==', userId),
+        where('isRead', '==', false)
+      );
+      const snapshot = await getDocs(unreadQuery);
+      return snapshot.size;
+    } catch {
+      const snapshot = await getNotificationsSnapshotWithFallback(userId);
+      return mapNotificationSnapshot(snapshot).filter((item) => item.isRead === false).length;
+    }
   } catch (error) {
     console.error('Error getting unread count:', error);
     return 0;
@@ -133,39 +277,58 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
 // Subscribe to notifications
 export function subscribeToNotifications(
   userId: string,
-  callback: (notifications: Notification[]) => void
+  callback: (notifications: Notification[]) => void,
+  metrics?: PerformanceMetricOptions
 ): () => void {
   if (!isAuthUser(userId)) {
     callback([]);
     return () => {};
   }
-  // Simple query without orderBy (sorted client-side to avoid index requirement)
-  const q = query(
-    collection(db, NOTIFICATIONS_COLLECTION),
-    where('userId', '==', userId)
-  );
-  
-  return onSnapshot(q, (snapshot) => {
-    const notifications = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
-    })) as Notification[];
-    
-    // Sort client-side (newest first)
-    notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    
-    callback(notifications);
-  }, (error: any) => {
+  const baseQuery = getBaseNotificationsQuery(userId);
+  const preferredQuery = getPreferredNotificationsQuery(userId);
+  let fallbackUnsubscribe: (() => void) | null = null;
+  const endMetric = beginTrackedSubscription({
+    screenName: metrics?.screenName,
+    source: metrics?.source || 'notifications:subscription',
+  });
+
+  const emitSnapshot = (snapshot: any) => {
+    recordQueryRead(snapshot.size, {
+      screenName: metrics?.screenName,
+      source: `${metrics?.source || 'notifications:subscription'}:snapshot`,
+    });
+    callback(sortAndCapNotifications(mapNotificationSnapshot(snapshot)));
+  };
+
+  const preferredUnsubscribe = onSnapshot(preferredQuery, emitSnapshot, (error: any) => {
     if (error?.code === 'permission-denied') {
       // Silently ignore — triggered when auth token not yet active (cached user race)
       console.warn('[subscribeToNotifications] permission-denied, will retry on next auth');
       callback([]);
       return;
     }
+    if (!fallbackUnsubscribe) {
+      fallbackUnsubscribe = onSnapshot(baseQuery, emitSnapshot, (fallbackError: any) => {
+        if (fallbackError?.code === 'permission-denied') {
+          callback([]);
+          return;
+        }
+        console.error('Notification fallback subscription error:', fallbackError);
+        callback([]);
+      });
+      return;
+    }
     console.error('Notification subscription error:', error);
     callback([]);
   });
+
+  return () => {
+    endMetric();
+    preferredUnsubscribe();
+    if (fallbackUnsubscribe) {
+      fallbackUnsubscribe();
+    }
+  };
 }
 
 // Mark notification as read
@@ -238,13 +401,18 @@ export async function getUnreadNotificationsCount(userId: string): Promise<numbe
   try {
     if (!isAuthUser(userId)) return 0;
 
-    const q = query(
-      collection(db, NOTIFICATIONS_COLLECTION),
-      where('userId', '==', userId),
-      where('isRead', '==', false)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.size;
+    try {
+      const q = query(
+        collection(db, NOTIFICATIONS_COLLECTION),
+        where('userId', '==', userId),
+        where('isRead', '==', false)
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.size;
+    } catch {
+      const snapshot = await getNotificationsSnapshotWithFallback(userId);
+      return mapNotificationSnapshot(snapshot).filter((item) => item.isRead === false).length;
+    }
   } catch (error: any) {
     if (error?.code === 'permission-denied') return 0; // auth not ready yet
     console.error('Error getting unread count:', error);

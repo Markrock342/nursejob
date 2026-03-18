@@ -1367,23 +1367,23 @@ export default function HomeScreen({ navigation }: Props) {
       {/* Onboarding Banner — แสดงตอนเข้าแอปครั้งแรก */}
       {user && !user.onboardingCompleted && onboardingSurveyEnabled && (
         <TouchableOpacity
-          style={styles.onboardingBanner}
+          style={[styles.onboardingBanner, isDark && { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.primary }]}
           onPress={() => (navigation as any).navigate('OnboardingSurvey')}
           activeOpacity={0.88}
         >
           {/* Left accent stripe */}
-          <View style={styles.onboardingBannerStripe} />
+          <View style={[styles.onboardingBannerStripe, { backgroundColor: colors.primary }]} />
 
           {/* Content */}
           <View style={styles.onboardingBannerContent}>
             <View style={styles.onboardingBannerRow}>
-              <View style={styles.onboardingBannerIcon}>
+              <View style={[styles.onboardingBannerIcon, { backgroundColor: colors.primary }]}>
                 <Ionicons name="sparkles" size={16} color="#FFF" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.onboardingBannerTag}>เริ่มใช้งานได้เร็ว</Text>
-                <Text style={styles.onboardingBannerTitle}>{onboardingTitle}</Text>
-                <Text style={styles.onboardingBannerSub}>{onboardingSub}</Text>
+                <Text style={[styles.onboardingBannerTag, { color: colors.primary }]}>เริ่มใช้งานได้เร็ว</Text>
+                <Text style={[styles.onboardingBannerTitle, { color: colors.text }]}>{onboardingTitle}</Text>
+                <Text style={[styles.onboardingBannerSub, { color: colors.textSecondary }]}>{onboardingSub}</Text>
               </View>
             </View>
             {/* Progress dots + CTA row */}
@@ -1393,7 +1393,7 @@ export default function HomeScreen({ navigation }: Props) {
                   <View key={i} style={[styles.onboardingDot, i === 0 && styles.onboardingDotActive]} />
                 ))}
               </View>
-              <View style={styles.onboardingBannerCTA}>
+              <View style={[styles.onboardingBannerCTA, { backgroundColor: colors.primary }]}>
                 <Text style={styles.onboardingBannerCTAText}>เริ่มเลย</Text>
                 <Ionicons name="arrow-forward" size={13} color="#FFF" />
               </View>
@@ -1405,23 +1405,23 @@ export default function HomeScreen({ navigation }: Props) {
       {/* Nearby Job Alert Banner — always visible until user sets up */}
       {user && !user.nearbyJobAlert?.enabled && (
         <TouchableOpacity
-          style={styles.nearbyBanner}
+          style={[styles.nearbyBanner, isDark && { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={openNearbySettings}
           activeOpacity={0.85}
         >
           <View style={styles.nearbyBannerLeft}>
-            <View style={styles.nearbyBannerIcon}>
+            <View style={[styles.nearbyBannerIcon, { backgroundColor: colors.primary }]}>
               <Ionicons name="location" size={20} color="#FFF" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.nearbyBannerTitle}>งานใกล้คุณ</Text>
-              <Text style={styles.nearbyBannerSub}>
+              <Text style={[styles.nearbyBannerTitle, { color: colors.text }]}>งานใกล้คุณ</Text>
+              <Text style={[styles.nearbyBannerSub, { color: colors.textSecondary }]}>
                 ตั้งค่าตำแหน่งและรัศมี เพื่อให้ระบบเรียงงานใกล้ตัวและแจ้งเตือนได้เร็วขึ้น
               </Text>
             </View>
           </View>
-          <View style={styles.nearbyBannerCTA}>
-            <Text style={styles.nearbyBannerCTAText}>ตั้งค่า</Text>
+          <View style={[styles.nearbyBannerCTA, isDark && { backgroundColor: colors.surface, borderColor: colors.primary }]}>
+            <Text style={[styles.nearbyBannerCTAText, { color: colors.primary }]}>ตั้งค่า</Text>
             <Ionicons name="chevron-forward" size={14} color={colors.primary} />
           </View>
         </TouchableOpacity>
@@ -1533,17 +1533,17 @@ export default function HomeScreen({ navigation }: Props) {
             color={colors.textSecondary}
             style={{ marginRight: 4 }}
           />
-          <Text style={styles.resultsText}>
-            พบ <Text style={styles.resultsCount}>{visibleJobs.length}</Text>{' '}
+          <Text style={[styles.resultsText, { color: colors.textSecondary }]}>
+            พบ <Text style={[styles.resultsCount, { color: colors.primary }]}>{visibleJobs.length}</Text>{' '}
             {CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.label ?? 'งาน'}
           </Text>
         </View>
         {nearbyMode && (
-          <Text style={styles.nearbySortLabel}>ใกล้สุดก่อน • {nearbyRadiusKm} กม.</Text>
+          <Text style={[styles.nearbySortLabel, { color: colors.primary }]}>ใกล้สุดก่อน • {nearbyRadiusKm} กม.</Text>
         )}
         {activeFilterCount > 0 && (
           <TouchableOpacity onPress={clearFilters}>
-            <Text style={styles.clearFilters}>ล้างตัวกรอง</Text>
+            <Text style={[styles.clearFilters, { color: colors.primary }]}>ล้างตัวกรอง</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -2032,7 +2032,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
         </View>
 
         {/* Staff Type */}
-        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+        <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SectionHeader icon="person-outline" label="ประเภทบุคลากร" iconColor={colors.primary} />
           <View style={styles.filterOptions}>
             <Chip label="ทั้งหมด" selected={!filters.staffType}
@@ -2047,7 +2047,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
         </View>
 
         {/* Location Type */}
-        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+        <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SectionHeader icon="business-outline" label="ประเภทสถานที่" iconColor="#8B5CF6" />
           <View style={styles.filterOptions}>
             <Chip label="ทั้งหมด" selected={!filters.locationType}
@@ -2064,7 +2064,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
         </View>
 
         {/* Province */}
-        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+        <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SectionHeader icon="map-outline" label="จังหวัด" iconColor="#10B981" />
           <TextInput
             style={[styles.provinceSearchInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
@@ -2093,7 +2093,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
 
         {/* District (conditional) */}
         {filters.province && getDistrictsForProvince(filters.province).length > 0 && (
-          <View style={[styles.filterCard, { marginBottom: 14 }]}>
+          <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
             <SectionHeader icon="location-outline" label={filters.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'} iconColor="#10B981" />
             <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
               <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -2112,11 +2112,11 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
         )}
 
         {/* Salary Range */}
-        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+        <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SectionHeader icon="cash-outline" label="ค่าตอบแทน (บาท)" iconColor="#F59E0B" />
           <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>ขั้นต่ำ</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>ขั้นต่ำ</Text>
               <TextInput
                 style={[styles.provinceSearchInput, { marginBottom: 0, borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholder="เช่น 500"
@@ -2131,7 +2131,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
             </View>
             <Text style={{ color: colors.textMuted, marginTop: 16 }}>—</Text>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>สูงสุด</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>สูงสุด</Text>
               <TextInput
                 style={[styles.provinceSearchInput, { marginBottom: 0, borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
                 placeholder="เช่น 3000"
@@ -2170,7 +2170,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
         </View>
 
         {/* Special + Sort */}
-        <View style={[styles.filterCard, { marginBottom: 14 }]}>
+        <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SectionHeader icon="options-outline" label="ตัวเลือกพิเศษ" iconColor="#EF4444" />
           <View style={styles.filterOptions}>
             <Chip label="🔥 ด่วนเท่านั้น" selected={filters.urgentOnly || false}
@@ -2180,7 +2180,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
           </View>
         </View>
 
-        <View style={[styles.filterCard, { marginBottom: 24 }]}>
+        <View style={[styles.filterCard, { marginBottom: 24, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SectionHeader icon="swap-vertical-outline" label="เรียงตาม" iconColor="#64748B" />
           <View style={styles.filterOptions}>
             <Chip label="ล่าสุด" selected={filters.sortBy === 'latest' || !filters.sortBy}

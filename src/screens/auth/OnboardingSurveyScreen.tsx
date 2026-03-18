@@ -2,7 +2,7 @@
 // ONBOARDING TIPS - role-aware, skippable, production-style
 // ============================================
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { STAFF_TYPES } from '../../constants/jobOptions';
 import { POPULAR_PROVINCES, ALL_PROVINCES } from '../../constants/locations';
 import { RootStackParamList } from '../../types';
+import { trackEvent } from '../../services/analyticsService';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'OnboardingSurvey'>;
 
@@ -56,16 +57,16 @@ const HOSPITAL_URGENCY = [
 
 const STEP_META = [
   {
-    title: 'เริ่มใช้งานให้เป็นในไม่กี่นาที',
-    subtitle: 'สรุปให้ว่าบทบาทของคุณทำอะไรได้บ้าง และฟีเจอร์สำคัญอยู่ตรงไหน',
+    title: 'เริ่มใช้งานได้คล่องในไม่กี่นาที',
+    subtitle: 'สรุปให้ว่าบทบาทของคุณทำอะไรได้บ้าง และเริ่มตรงไหนถึงจะเร็วและง่ายที่สุด',
   },
   {
     title: 'ฟีเจอร์หลักอยู่ตรงไหน',
-    subtitle: 'ดูทางลัดของแอปก่อนเข้าใช้งานจริง จะได้ไม่ต้องกดหาเองทีละหน้า',
+    subtitle: 'ดูทางลัดของแอปก่อนเริ่มใช้งานจริง เพื่อไปถึงหน้าสำคัญได้ไวขึ้น',
   },
   {
     title: 'ปรับแอปให้ตรงกับคุณ',
-    subtitle: 'เลือกข้อมูลพื้นฐานที่ช่วยให้ระบบแนะนำงานหรือผู้ดูแลได้แม่นขึ้น',
+    subtitle: 'เลือกข้อมูลพื้นฐานเพื่อให้ระบบแนะนำงานหรือผู้ดูแลได้ตรงและปลอดภัยยิ่งขึ้น',
   },
 ];
 
@@ -82,59 +83,59 @@ const ROLE_GUIDE: Record<AppRole, {
   nurse: {
     badge: 'สำหรับพยาบาล',
     icon: 'medical-outline',
-    heroTitle: 'หางานแทนเวร แชทไว และจัดการโปรไฟล์ได้ในที่เดียว',
-    heroSubtitle: 'NurseGo จะพาคุณไปยังงานที่เหมาะกับความถนัด พื้นที่ และรูปแบบเวลาที่คุณต้องการ',
+    heroTitle: 'หางานไว คุยสะดวก และจัดการโปรไฟล์ได้ในที่เดียว',
+    heroSubtitle: 'NurseGo จะช่วยเรียงงานที่เหมาะกับความถนัด พื้นที่ และเวลาที่คุณต้องการ พร้อมขั้นตอนคุยงานที่ต่อเนื่องและเข้าใจง่าย',
     highlights: [
-      { icon: 'swap-horizontal-outline', title: 'หางานแทนเวร', description: 'ดูงานล่าสุด กรองตามจังหวัด แผนก หรือเปิดโหมดใกล้ฉันได้' },
-      { icon: 'chatbubbles-outline', title: 'คุยกับผู้โพสต์ทันที', description: 'เริ่มแชทจากหน้าโพสต์และติดตามงานต่อได้จากแท็บข้อความ' },
-      { icon: 'shield-checkmark-outline', title: 'เพิ่มความน่าเชื่อถือ', description: 'ยืนยันตัวตนและเติมโปรไฟล์ให้ครบ เพื่อให้ผู้จ้างตัดสินใจง่ายขึ้น' },
+      { icon: 'swap-horizontal-outline', title: 'หางานแทนเวรได้ไว', description: 'ดูงานล่าสุด กรองตามจังหวัด แผนก หรือเปิดโหมดงานใกล้คุณได้ทันที' },
+      { icon: 'chatbubbles-outline', title: 'คุยกับผู้โพสต์ได้ต่อเนื่อง', description: 'เริ่มแชทจากหน้าโพสต์และติดตามรายละเอียดงานต่อได้สะดวกในแท็บข้อความ' },
+      { icon: 'shield-checkmark-outline', title: 'เพิ่มความมั่นใจให้โปรไฟล์', description: 'ยืนยันตัวตนและเติมโปรไฟล์ให้ครบ เพื่อให้ผู้จ้างตัดสินใจได้ง่ายและมั่นใจขึ้น' },
     ],
     featureTips: [
-      { icon: 'home-outline', title: 'หน้าแรก', description: 'รวมงานใหม่ ฟิลเตอร์ และโหมดใกล้ฉัน' },
-      { icon: 'add-circle-outline', title: 'โพสต์', description: 'สำหรับพยาบาลจะเห็น flow หาคนแทนเวรโดยอัตโนมัติ' },
-      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'รวมทุกห้องแชทที่คุยเรื่องงานไว้ที่เดียว' },
-      { icon: 'person-outline', title: 'โปรไฟล์', description: 'ดูรีวิว ยืนยันตัวตน และเข้าหน้าประกาศของฉัน' },
+      { icon: 'home-outline', title: 'หน้าแรก', description: 'รวมงานใหม่ ฟิลเตอร์ และโหมดงานใกล้คุณไว้ในที่เดียว' },
+      { icon: 'add-circle-outline', title: 'โพสต์', description: 'สำหรับพยาบาล แท็บนี้จะพาไปยังหน้าประกาศหาคนช่วยขึ้นเวรแทนได้ทันที' },
+      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'รวมทุกห้องแชทเรื่องงานไว้ในที่เดียว เพื่อคุยต่อได้เร็วและไม่หลุดบริบท' },
+      { icon: 'person-outline', title: 'โปรไฟล์', description: 'ดูรีวิว ยืนยันตัวตน และจัดการข้อมูลที่ช่วยเพิ่มความน่าเชื่อถือ' },
     ],
-    setupTitle: 'บอกเราว่าคุณรับงานแบบไหน',
-    setupSubtitle: 'ข้อมูลนี้ช่วยให้แอปกรองงานได้แม่นขึ้นตั้งแต่ครั้งแรก',
+    setupTitle: 'บอกเราว่าคุณทำงานแบบไหน',
+    setupSubtitle: 'ข้อมูลนี้ช่วยให้แอปกรองงานได้แม่นขึ้นตั้งแต่ครั้งแรก และช่วยให้เจองานได้เร็วขึ้น',
   },
   hospital: {
     badge: 'สำหรับองค์กร',
     icon: 'business-outline',
-    heroTitle: 'โพสต์รับสมัคร ดูผู้สมัคร และคุยกับผู้สมัครได้จาก flow เดียว',
-    heroSubtitle: 'บทบาทองค์กรจะโฟกัสที่การลงประกาศงานจริง ดูรายชื่อผู้สนใจ และบริหารโพสต์ได้เร็ว',
+    heroTitle: 'โพสต์รับสมัคร ดูผู้สนใจ และคุยต่อได้ในที่เดียว',
+    heroSubtitle: 'บทบาทองค์กรจะโฟกัสที่การลงประกาศอย่างเป็นระบบ ดูรายชื่อผู้สนใจ และติดตามต่อได้รวดเร็ว',
     highlights: [
-      { icon: 'briefcase-outline', title: 'ลงประกาศรับสมัคร', description: 'สร้างประกาศงานพร้อมเงินเดือน สวัสดิการ และข้อมูลติดต่อ' },
-      { icon: 'people-outline', title: 'ดูผู้สมัคร / ผู้ติดต่อ', description: 'ติดตามคนที่สนใจจากหน้า Applicants และแยกตามประกาศได้' },
-      { icon: 'chatbubbles-outline', title: 'คุยต่อได้ทันที', description: 'เปิดแชทกับผู้สมัครโดยไม่ต้องออกไปใช้แอปอื่น' },
+      { icon: 'briefcase-outline', title: 'ลงประกาศรับสมัครได้เร็ว', description: 'สร้างประกาศงานพร้อมเงินเดือน สวัสดิการ และช่องทางคุยที่จัดการได้ง่าย' },
+      { icon: 'people-outline', title: 'ดูผู้สนใจเป็นระเบียบ', description: 'ติดตามคนที่สนใจจากหน้า Applicants และแยกตามประกาศได้ชัดเจน' },
+      { icon: 'chatbubbles-outline', title: 'คุยต่อได้ทันที', description: 'เปิดแชทกับผู้สมัครต่อในแอปได้เลย เพื่อให้ข้อมูลครบและติดตามง่าย' },
     ],
     featureTips: [
-      { icon: 'home-outline', title: 'หน้าแรก', description: 'ดูบอร์ดงานและฟีเจอร์แนะนำ แต่จุดหลักของคุณคือการโพสต์และจัดการผู้สมัคร' },
-      { icon: 'add-circle-outline', title: 'โพสต์', description: 'แท็บนี้จะเปิด flow รับสมัครบุคลากรให้ตรงกับ role องค์กร' },
-      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'ใช้คุยกับผู้สมัครที่ติดต่อเข้ามา' },
-      { icon: 'person-outline', title: 'โปรไฟล์', description: 'เข้าถึงประกาศของฉัน Applicants และข้อมูลองค์กร' },
+      { icon: 'home-outline', title: 'หน้าแรก', description: 'ดูบอร์ดงานและคำแนะนำต่าง ๆ แต่จุดหลักของคุณคือการโพสต์และจัดการผู้สนใจ' },
+      { icon: 'add-circle-outline', title: 'โพสต์', description: 'แท็บนี้จะเปิดหน้าสำหรับลงประกาศรับสมัครบุคลากรให้เหมาะกับการใช้งานขององค์กรโดยอัตโนมัติ' },
+      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'ใช้คุยกับผู้สมัครต่อได้อย่างรวดเร็วโดยไม่ต้องสลับแอป' },
+      { icon: 'person-outline', title: 'โปรไฟล์', description: 'เข้าถึงประกาศ Applicants และข้อมูลองค์กรเพื่อบริหารงานต่อได้ง่าย' },
     ],
     setupTitle: 'ตั้งค่าพื้นฐานขององค์กร',
-    setupSubtitle: 'ระบุจังหวัดและระดับความเร่งด่วนเพื่อจัด flow การโพสต์ให้เหมาะกับคุณ',
+    setupSubtitle: 'ระบุจังหวัดและระดับความเร่งด่วน เพื่อให้การโพสต์และจัดการผู้สนใจลื่นไหลขึ้น',
   },
   user: {
     badge: 'สำหรับผู้ใช้งานทั่วไป',
     icon: 'heart-outline',
-    heroTitle: 'ค้นหาผู้ดูแลที่เหมาะสม ดูโปรไฟล์ และติดต่อได้อย่างมั่นใจ',
-    heroSubtitle: 'แอปจะช่วยให้คุณหาผู้ดูแลที่ตรงประเภทงานและพื้นที่ พร้อมดูโปรไฟล์และรีวิวประกอบการตัดสินใจ',
+    heroTitle: 'ค้นหาผู้ดูแลที่เหมาะสม ติดต่ออย่างเป็นส่วนตัว และตัดสินใจได้มั่นใจ',
+    heroSubtitle: 'แอปจะช่วยให้คุณหาผู้ดูแลที่ตรงประเภทงานและพื้นที่ พร้อมดูโปรไฟล์ รีวิว และคุยต่อได้อย่างสะดวก',
     highlights: [
-      { icon: 'home-outline', title: 'ดูประกาศที่ตรงความต้องการ', description: 'เลือกงานดูแลผู้ป่วยและใช้ตัวกรองเพื่อหาคนที่เหมาะที่สุด' },
-      { icon: 'person-circle-outline', title: 'ดูโปรไฟล์ก่อนตัดสินใจ', description: 'เช็กประสบการณ์ รีวิว และสถานะการยืนยันตัวตนได้ในหน้าโปรไฟล์' },
-      { icon: 'call-outline', title: 'ติดต่อได้หลายทาง', description: 'โทร, LINE, หรือแชทในแอปตามช่องทางที่ผู้โพสต์เปิดไว้' },
+      { icon: 'home-outline', title: 'ดูประกาศที่ตรงความต้องการ', description: 'ใช้ตัวกรองเพื่อหาผู้ดูแลที่เหมาะกับงานและพื้นที่ได้เร็วขึ้น' },
+      { icon: 'person-circle-outline', title: 'ดูโปรไฟล์ก่อนตัดสินใจ', description: 'เช็กประสบการณ์ รีวิว และสถานะการยืนยันตัวตนเพื่อเพิ่มความมั่นใจ' },
+      { icon: 'call-outline', title: 'คุยได้ตามช่องทางที่สะดวก', description: 'เลือกโทร, LINE หรือแชทในแอปตามช่องทางที่ผู้โพสต์เปิดไว้' },
     ],
     featureTips: [
-      { icon: 'home-outline', title: 'หน้าแรก', description: 'ค้นหาโพสต์ดูแลผู้ป่วยและใช้ตัวกรองให้เจองานที่ตรงเร็วขึ้น' },
-      { icon: 'add-circle-outline', title: 'โพสต์', description: 'ถ้าต้องการหาผู้ดูแลเอง แท็บนี้จะเปิด flow สำหรับคนทั่วไปโดยตรง' },
-      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'ติดตามการพูดคุยกับผู้ดูแลที่คุณสนใจ' },
-      { icon: 'person-outline', title: 'โปรไฟล์', description: 'จัดการข้อมูลส่วนตัว รายการโปรด และการตั้งค่าต่าง ๆ' },
+      { icon: 'home-outline', title: 'หน้าแรก', description: 'ค้นหาโพสต์ดูแลผู้ป่วยและใช้ตัวกรองเพื่อเจอคนที่เหมาะได้เร็วขึ้น' },
+      { icon: 'add-circle-outline', title: 'โพสต์', description: 'ถ้าต้องการหาผู้ดูแลเอง แท็บนี้จะเปิดหน้ากรอกข้อมูลแบบเป็นขั้นตอนให้ทันที' },
+      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'ติดตามการพูดคุยกับผู้ดูแลที่คุณสนใจได้ต่อเนื่องในที่เดียว' },
+      { icon: 'person-outline', title: 'โปรไฟล์', description: 'จัดการข้อมูลส่วนตัว รายการโปรด และการตั้งค่าความเป็นส่วนตัวต่าง ๆ' },
     ],
     setupTitle: 'บอกประเภทการดูแลที่คุณสนใจ',
-    setupSubtitle: 'ข้อมูลพื้นฐานนี้ช่วยให้แอปแนะนำผู้ดูแลได้ตรงกับความต้องการมากขึ้น',
+    setupSubtitle: 'ข้อมูลพื้นฐานนี้ช่วยให้แอปแนะนำผู้ดูแลได้ตรงกับความต้องการมากขึ้น และช่วยให้เลือกได้ง่ายขึ้น',
   },
 };
 
@@ -166,6 +167,27 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
     return user?.hiringUrgency ? [user.hiringUrgency] : [];
   });
 
+  useEffect(() => {
+    trackEvent({
+      eventName: 'onboarding_started',
+      screenName: 'OnboardingSurvey',
+      props: {
+        role,
+      },
+    });
+  }, [role]);
+
+  useEffect(() => {
+    trackEvent({
+      eventName: 'screen_view',
+      screenName: 'OnboardingSurvey',
+      props: {
+        role,
+        step,
+      },
+    });
+  }, [role, step]);
+
   const setupOptions = useMemo(() => {
     if (role === 'nurse') {
       return {
@@ -195,6 +217,19 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
   }, [provinceQuery]);
 
   const goToStep = (nextStep: number) => {
+    trackEvent({
+      eventName: 'onboarding_step_completed',
+      screenName: 'OnboardingSurvey',
+      props: {
+        role,
+        fromStep: step,
+        toStep: nextStep,
+        selectedTypesCount: selectedTypes.length,
+        selectedSetupCount: selectedStep3.length,
+        hasProvince: Boolean(selectedProvince),
+      },
+    });
+
     setStep(nextStep);
     Animated.timing(progress, {
       toValue: nextStep / (STEP_META.length - 1),
@@ -253,10 +288,30 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
       await updateUser(updates);
     } catch (_) {}
 
+    trackEvent({
+      eventName: 'onboarding_completed',
+      screenName: 'OnboardingSurvey',
+      props: {
+        role,
+        selectedTypesCount: selectedTypes.length,
+        selectedSetupCount: selectedStep3.length,
+        hasProvince: Boolean(selectedProvince),
+      },
+    });
+
     navigation.reset({ index: 0, routes: [{ name: 'Main' as any }] });
   };
 
   const skipAll = () => {
+    trackEvent({
+      eventName: 'onboarding_completed',
+      screenName: 'OnboardingSurvey',
+      props: {
+        role,
+        skipped: true,
+      },
+    });
+
     updateUser({ onboardingCompleted: true }).catch(() => {});
     navigation.reset({ index: 0, routes: [{ name: 'Main' as any }] });
   };
@@ -332,13 +387,13 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
       ))}
 
       <View style={[styles.quickActionsCard, { backgroundColor: colors.primaryBackground }]}> 
-        <Text style={[styles.quickActionsTitle, { color: colors.primaryDark }]}>แนะนำให้ทำต่อหลังเข้าแอป</Text>
+        <Text style={[styles.quickActionsTitle, { color: colors.primaryDark }]}>เริ่มจาก 3 อย่างนี้ จะใช้งานได้คล่องขึ้นทันที</Text>
         <View style={styles.quickActionsList}>
           {role === 'nurse' && (
             <>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>1. เปิดงานใกล้ฉันเพื่อรับงานเร็วขึ้น</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>2. ยืนยันตัวตนเพื่อเพิ่มความน่าเชื่อถือ</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>3. เติมโปรไฟล์และรีวิวให้ครบ</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>1. เปิดงานใกล้คุณ เพื่อรู้ไวเมื่อมีเวรใหม่ในพื้นที่ที่สนใจ</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>2. ยืนยันตัวตน เพื่อให้ผู้จ้างมั่นใจและตัดสินใจได้เร็วขึ้น</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>3. เติมโปรไฟล์และรีวิวให้ครบ เพื่อให้โอกาสงานเข้าหาคุณง่ายขึ้น</Text>
             </>
           )}
           {role === 'hospital' && (
@@ -380,7 +435,7 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
       {role === 'nurse' && (
         <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>ประเภทวิชาชีพของคุณ</Text>
-          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>เลือกได้หลายประเภท หากคุณรับงานได้มากกว่าหนึ่งสาย</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>เลือกได้หลายประเภท หากคุณทำงานได้มากกว่าหนึ่งสาย</Text>
           <View style={styles.chipRow}>
             {STAFF_TYPES.map((item) => {
               const active = selectedTypes.includes(item.code);

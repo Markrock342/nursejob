@@ -12,7 +12,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 
 interface ConfirmModalProps {
   visible: boolean;
@@ -41,37 +41,38 @@ export default function ConfirmModal({
 }: ConfirmModalProps) {
   const scaleAnim = useRef(new Animated.Value(0.88)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+  const { colors, isDark } = useTheme();
 
   const getTypeStyles = () => {
     switch (type) {
       case 'danger':
         return {
           ionicon: 'log-out-outline' as const,
-          color: '#EF4444',
-          ringBg: 'rgba(239,68,68,0.10)',
-          innerBg: '#FEF2F2',
+          color: colors.error,
+          ringBg: colors.errorLight,
+          innerBg: isDark ? 'rgba(241,91,91,0.08)' : '#FEF2F2',
         };
       case 'success':
         return {
           ionicon: 'checkmark-circle-outline' as const,
-          color: '#10B981',
-          ringBg: 'rgba(16,185,129,0.10)',
-          innerBg: '#ECFDF5',
+          color: colors.success,
+          ringBg: colors.successLight,
+          innerBg: isDark ? 'rgba(66,184,131,0.08)' : '#ECFDF5',
         };
       case 'warning':
         return {
           ionicon: 'alert-circle-outline' as const,
-          color: '#F59E0B',
-          ringBg: 'rgba(245,158,11,0.10)',
-          innerBg: '#FFFBEB',
+          color: colors.warning,
+          ringBg: colors.warningLight,
+          innerBg: isDark ? 'rgba(231,163,62,0.08)' : '#FFFBEB',
         };
       case 'info':
       default:
         return {
           ionicon: 'information-circle-outline' as const,
-          color: COLORS.primary,
-          ringBg: 'rgba(99,102,241,0.10)',
-          innerBg: '#EEF2FF',
+          color: colors.primary,
+          ringBg: colors.primaryBackground,
+          innerBg: isDark ? 'rgba(69,153,255,0.08)' : '#EEF2FF',
         };
     }
   };
@@ -99,8 +100,8 @@ export default function ConfirmModal({
       statusBarTranslucent
       onRequestClose={onCancel}
     >
-      <Animated.View style={[styles.overlay, { opacity: opacityAnim }]} accessibilityViewIsModal={true}>
-        <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }]}>
+      <Animated.View style={[styles.overlay, { opacity: opacityAnim, backgroundColor: colors.overlay }]} accessibilityViewIsModal={true}>
+        <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }], backgroundColor: colors.surface }]}>
           {/* Top accent bar */}
           <View style={[styles.topAccent, { backgroundColor: accentColor }]} />
 
@@ -113,21 +114,21 @@ export default function ConfirmModal({
             </View>
 
             {/* Title */}
-            {title && <Text style={styles.modalTitle}>{title}</Text>}
+            {title && <Text style={[styles.modalTitle, { color: colors.text }]}>{title}</Text>}
 
             {/* Message */}
-            <Text style={styles.modalMessage}>{message}</Text>
+            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>{message}</Text>
 
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
             {/* Buttons */}
             <View style={styles.buttonRow}>
               <TouchableOpacity
-                style={[styles.btn, styles.btnCancel]}
+                style={[styles.btn, styles.btnCancel, { backgroundColor: isDark ? colors.backgroundSecondary : '#F1F5F9' }]}
                 onPress={onCancel}
                 activeOpacity={0.8}
               >
-                <Text style={styles.btnCancelText}>{cancelText}</Text>
+                <Text style={[styles.btnCancelText, { color: colors.textSecondary }]}>{cancelText}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -167,8 +168,7 @@ export function SuccessModal({
 }: SuccessModalProps) {
   const scaleAnim = useRef(new Animated.Value(0.88)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
+  const { colors, isDark } = useTheme();  useEffect(() => {
     if (visible) {
       Animated.parallel([
         Animated.spring(scaleAnim, { toValue: 1, friction: 9, tension: 60, useNativeDriver: true }),
@@ -188,22 +188,22 @@ export function SuccessModal({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <Animated.View style={[styles.overlay, { opacity: opacityAnim }]} accessibilityViewIsModal={true}>
-        <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }]}>
+      <Animated.View style={[styles.overlay, { opacity: opacityAnim, backgroundColor: colors.overlay }]} accessibilityViewIsModal={true}>
+        <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }], backgroundColor: colors.surface }]}>
           {/* Top accent */}
-          <View style={[styles.topAccent, { backgroundColor: '#10B981' }]} />
+          <View style={[styles.topAccent, { backgroundColor: colors.success }]} />
           <View style={styles.modalBody}>
             {/* Icon */}
-            <View style={[styles.iconRing, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
-              <View style={[styles.iconInner, { backgroundColor: '#ECFDF5' }]}>
-                <Ionicons name="checkmark-circle" size={38} color="#10B981" />
+            <View style={[styles.iconRing, { backgroundColor: colors.successLight }]}>
+              <View style={[styles.iconInner, { backgroundColor: isDark ? 'rgba(66,184,131,0.08)' : '#ECFDF5' }]}>
+                <Ionicons name="checkmark-circle" size={38} color={colors.success} />
               </View>
             </View>
-            <Text style={styles.modalTitle}>{title}</Text>
-            <Text style={styles.modalMessage}>{message}</Text>
-            <View style={styles.divider} />
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{title}</Text>
+            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>{message}</Text>
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
             <TouchableOpacity
-              style={[styles.modalBtn, { backgroundColor: '#10B981', borderColor: '#10B981' }]}
+              style={[styles.modalBtn, { backgroundColor: colors.success, borderColor: colors.success }]}
               onPress={onClose}
               activeOpacity={0.8}
             >
@@ -238,6 +238,7 @@ export function ErrorModal({
 }: ErrorModalProps) {
   const scaleAnim = useRef(new Animated.Value(0.88)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+  const { colors, isDark } = useTheme();
 
   useEffect(() => {
     if (visible) {
@@ -259,20 +260,20 @@ export function ErrorModal({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <Animated.View style={[styles.overlay, { opacity: opacityAnim }]} accessibilityViewIsModal={true}>
-        <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }]}>
-          <View style={[styles.topAccent, { backgroundColor: '#EF4444' }]} />
+      <Animated.View style={[styles.overlay, { opacity: opacityAnim, backgroundColor: colors.overlay }]} accessibilityViewIsModal={true}>
+        <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }], backgroundColor: colors.surface }]}>
+          <View style={[styles.topAccent, { backgroundColor: colors.error }]} />
           <View style={styles.modalBody}>
-            <View style={[styles.iconRing, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
-              <View style={[styles.iconInner, { backgroundColor: '#FEF2F2' }]}>
-                <Ionicons name="close-circle" size={38} color="#EF4444" />
+            <View style={[styles.iconRing, { backgroundColor: colors.errorLight }]}>
+              <View style={[styles.iconInner, { backgroundColor: isDark ? 'rgba(241,91,91,0.08)' : '#FEF2F2' }]}>
+                <Ionicons name="close-circle" size={38} color={colors.error} />
               </View>
             </View>
-            <Text style={styles.modalTitle}>{title}</Text>
-            <Text style={styles.modalMessage}>{message}</Text>
-            <View style={styles.divider} />
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{title}</Text>
+            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>{message}</Text>
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
             <TouchableOpacity
-              style={[styles.modalBtn, { backgroundColor: '#EF4444', borderColor: '#EF4444' }]}
+              style={[styles.modalBtn, { backgroundColor: colors.error, borderColor: colors.error }]}
               onPress={onClose}
               activeOpacity={0.8}
             >

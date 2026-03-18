@@ -2,7 +2,7 @@
 // HELP / FAQ SCREEN - Production Ready
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,14 @@ import {
   TouchableOpacity,
   Linking,
   TextInput,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
+import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
 
 interface FAQItem {
   id: string;
@@ -52,7 +54,7 @@ const FAQ_DATA: FAQItem[] = [
     id: '2',
     category: 'general',
     question: 'แอปนี้ใช้งานฟรีหรือไม่?',
-    answer: 'สำหรับพยาบาลผู้หางาน สามารถใช้งานได้ฟรีทุกฟีเจอร์ รวมถึงการค้นหางาน, การสมัครงาน, และการแชทกับโรงพยาบาล สำหรับโรงพยาบาลจะมีแพ็กเกจการลงประกาศงานให้เลือก',
+    answer: 'ตอนนี้ NurseGo เปิดให้ใช้งานฟรีในช่วงทดลองใช้ฟรี โดยระบบจะดูแลสิทธิ์ของแต่ละบัญชีให้อัตโนมัติ และจะประกาศให้ทราบอีกครั้งเมื่อเปิดระบบชำระเงินอย่างเป็นทางการ',
   },
   {
     id: '3',
@@ -158,19 +160,19 @@ const FAQ_DATA: FAQItem[] = [
     id: '18',
     category: 'payment',
     question: 'โรงพยาบาลต้องจ่ายค่าธรรมเนียมอะไรบ้าง?',
-    answer: 'โรงพยาบาลสามารถเลือกแพ็กเกจการลงประกาศงานตามความต้องการ มีทั้งแบบรายเดือนและรายประกาศ ดูรายละเอียดได้ที่หน้าราคาหรือติดต่อทีมงาน',
+    answer: 'ในช่วงทดลองใช้ฟรี ระบบยังไม่เรียกเก็บเงินจริง โรงพยาบาลและผู้ใช้งานจะได้รับสิทธิ์ตามสถานะบัญชีและการใช้งานที่ระบบเปิดให้ก่อน เมื่อเปิดระบบชำระเงินอย่างเป็นทางการ เราจะแจ้งแพ็กเกจและเงื่อนไขอีกครั้ง',
   },
   {
     id: '19',
     category: 'payment',
     question: 'ชำระเงินได้ทางช่องทางไหนบ้าง?',
-    answer: 'รองรับการชำระเงินผ่านบัตรเครดิต/เดบิต, โอนผ่านธนาคาร, PromptPay, และ TrueMoney Wallet',
+    answer: 'ขณะนี้ยังไม่มีการเปิดรับชำระเงินจริงในแอป เมื่อเปิดระบบชำระเงินแล้ว เราจะแจ้งช่องทางที่รองรับให้ทราบอีกครั้ง',
   },
   {
     id: '20',
     category: 'payment',
     question: 'ขอใบเสร็จได้อย่างไร?',
-    answer: 'ใบเสร็จจะส่งไปยังอีเมลโดยอัตโนมัติหลังการชำระเงิน หรือสามารถดาวน์โหลดได้จากหน้า "ประวัติการชำระเงิน" ในเมนูตั้งค่า',
+    answer: 'ในช่วงที่ยังไม่เปิดเก็บเงินจริง ระบบจะยังไม่มีใบเสร็จหรือประวัติการชำระเงิน เมื่อเปิดใช้งานจริงแล้ว เราจะแจ้งขั้นตอนการรับเอกสารให้ทราบอีกครั้ง',
   },
 ];
 
@@ -180,6 +182,7 @@ const FAQItemComponent = ({ item, isExpanded, onToggle }: {
   onToggle: () => void;
 }) => {
   const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
   <View style={styles.faqItem}>
     <TouchableOpacity style={styles.faqQuestion} onPress={onToggle} activeOpacity={0.7}>
@@ -201,7 +204,11 @@ const FAQItemComponent = ({ item, isExpanded, onToggle }: {
 
 export default function HelpScreen() {
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
+  const headerBackground = colors.surface;
+  const statusBarStyle = isDark ? 'light-content' : 'dark-content';
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -217,7 +224,7 @@ export default function HelpScreen() {
   });
 
   const handleContactSupport = () => {
-    Linking.openURL('mailto:support@nursego.app?subject=ขอความช่วยเหลือ');
+    Linking.openURL('mailto:support@nursego.co?subject=ขอความช่วยเหลือ');
   };
 
   const handleCall = () => {
@@ -229,7 +236,8 @@ export default function HelpScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -324,7 +332,7 @@ export default function HelpScreen() {
                 <Ionicons name="mail-outline" size={24} color={colors.primary} />
               </View>
               <Text style={styles.contactLabel}>อีเมล</Text>
-              <Text style={styles.contactValue}>support@nursego.app</Text>
+              <Text style={styles.contactValue}>support@nursego.co</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.contactCard} onPress={handleCall}>
@@ -356,14 +364,16 @@ export default function HelpScreen() {
         <View style={styles.quickLinksSection}>
           <Text style={styles.sectionTitle}>ลิงก์ที่เกี่ยวข้อง</Text>
 
-          <TouchableOpacity
-            style={styles.quickLink}
-            onPress={() => (navigation as any).navigate('OnboardingSurvey')}
-          >
-            <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
-            <Text style={[styles.quickLinkText, { color: colors.text }]}>ดูคู่มือเริ่มต้นใช้งาน</Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
+          {onboardingSurveyEnabled ? (
+            <TouchableOpacity
+              style={styles.quickLink}
+              onPress={() => (navigation as any).navigate('OnboardingSurvey')}
+            >
+              <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
+              <Text style={[styles.quickLinkText, { color: colors.text }]}>ดูคู่มือเริ่มต้นใช้งาน</Text>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
           
           <TouchableOpacity
             style={styles.quickLink}
@@ -385,7 +395,7 @@ export default function HelpScreen() {
 
           <TouchableOpacity
             style={styles.quickLink}
-            onPress={() => Linking.openURL('https://nursego.app/about')}
+            onPress={() => Linking.openURL('https://nursego.co/about')}
           >
             <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
             <Text style={styles.quickLinkText}>เกี่ยวกับเรา</Text>
@@ -399,7 +409,7 @@ export default function HelpScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

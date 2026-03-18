@@ -8,7 +8,6 @@ import {
   StyleSheet,
   Animated,
   Dimensions,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -132,7 +131,6 @@ export default function SplashScreen() {
             { opacity: logoOpacity, transform: [{ scale: logoScale }] },
           ]}
         >
-          {/* Try loading splash asset, fallback to icon */}
           <Ionicons name="medical" size={56} color="#FDE047" />
         </Animated.View>
 

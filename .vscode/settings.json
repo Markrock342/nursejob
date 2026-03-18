@@ -1,0 +1,12 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^node --check index\\.js && cd /Users/nursego/nursejob && npx tsc --noEmit$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^node --check functions/index\\.js 2>&1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

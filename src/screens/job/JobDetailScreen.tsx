@@ -2,7 +2,7 @@
 // SHIFT DETAIL SCREEN - รายละเอียดงาน
 // ============================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -117,6 +117,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const entrySource = route.params?.source || 'direct';
   const { user, requireAuth, isAuthenticated } = useAuth();
   const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const toast = useToast();
 
@@ -1189,8 +1190,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.ownerAddonCard} onPress={handleExtendAddon} disabled={isApplyingAddon || jobStatus === 'closed'}>
-                <View style={[styles.ownerAddonIcon, { backgroundColor: '#E8F5E9' }]}> 
-                  <Ionicons name="time-outline" size={20} color="#2E7D32" />
+                <View style={[styles.ownerAddonIcon, { backgroundColor: colors.successLight }]}> 
+                  <Ionicons name="time-outline" size={20} color={colors.success} />
                 </View>
                 <Text style={styles.ownerAddonCardTitle}>ต่ออายุ</Text>
                 <Text style={styles.ownerAddonCardSub}>เพิ่มเวลาแสดงประกาศอีก 1 วัน</Text>
@@ -1587,8 +1588,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             onPress={() => { setShowOptionsModal(false); handleExtendAddon(); }}
             disabled={jobStatus === 'closed'}
           >
-            <View style={[styles.optionIconWrap, { backgroundColor: '#E8F5E9' }]}> 
-              <Ionicons name="time-outline" size={22} color="#2E7D32" />
+            <View style={[styles.optionIconWrap, { backgroundColor: colors.successLight }]}> 
+              <Ionicons name="time-outline" size={22} color={colors.success} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: colors.text }]}>ต่ออายุประกาศ</Text>
@@ -1620,8 +1621,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             style={styles.optionRow}
             onPress={() => { setShowOptionsModal(false); handleEdit(); }}
           >
-            <View style={[styles.optionIconWrap, { backgroundColor: '#EFF6FF' }]}>
-              <Ionicons name="create-outline" size={22} color="#3B82F6" />
+            <View style={[styles.optionIconWrap, { backgroundColor: colors.primaryBackground }]}>
+              <Ionicons name="create-outline" size={22} color={colors.info} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: colors.text }]}>แก้ไขประกาศ</Text>
@@ -1636,8 +1637,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             style={styles.optionRow}
             onPress={() => { setShowOptionsModal(false); handleDuplicatePost(); }}
           >
-            <View style={[styles.optionIconWrap, { backgroundColor: '#FFF7ED' }]}> 
-              <Ionicons name="copy-outline" size={22} color="#F59E0B" />
+            <View style={[styles.optionIconWrap, { backgroundColor: colors.accentLight }]}> 
+              <Ionicons name="copy-outline" size={22} color={colors.accent} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: colors.text }]}>โพสต์คล้ายเดิม</Text>
@@ -1652,11 +1653,11 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             style={styles.optionRow}
             onPress={() => { setShowOptionsModal(false); setShowDeleteModal(true); }}
           >
-            <View style={[styles.optionIconWrap, { backgroundColor: '#FEF2F2' }]}>
-              <Ionicons name="trash-outline" size={22} color="#EF4444" />
+            <View style={[styles.optionIconWrap, { backgroundColor: colors.errorLight }]}>
+              <Ionicons name="trash-outline" size={22} color={colors.error} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: '#EF4444' }]}>ลบประกาศ</Text>
+              <Text style={[styles.optionLabel, { color: colors.error }]}>ลบประกาศ</Text>
               <Text style={[styles.optionSub, { color: colors.textMuted }]}>ลบประกาศออกจากระบบถาวร</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -1678,9 +1679,9 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 }
 
 // ============================================
-// Styles
+// Styles (dynamic — receives theme colors)
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -2117,7 +2118,7 @@ const styles = StyleSheet.create({
   lockedSection: {
     marginHorizontal: SPACING.sm,
     marginTop: SPACING.sm,
-    backgroundColor: '#f8fafc',
+    backgroundColor: COLORS.backgroundSecondary,
     borderWidth: 2,
     borderStyle: 'dashed',
     borderColor: COLORS.border,
@@ -2148,10 +2149,10 @@ const styles = StyleSheet.create({
   quickApplyCard: {
     marginHorizontal: SPACING.md,
     marginTop: SPACING.md,
-    backgroundColor: '#FFFBEA',
+    backgroundColor: COLORS.accentLight,
     borderWidth: 1,
-    borderColor: '#FDE68A',
-    shadowColor: '#F59E0B',
+    borderColor: COLORS.accent,
+    shadowColor: COLORS.accent,
     shadowOpacity: 0.12,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
@@ -2162,7 +2163,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FEF3C7',
+    backgroundColor: COLORS.warningLight,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -2202,7 +2203,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FEF3C7',
+    backgroundColor: COLORS.warningLight,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -2232,9 +2233,9 @@ const styles = StyleSheet.create({
   ownerSection: {
     marginHorizontal: SPACING.md,
     marginTop: SPACING.md,
-    backgroundColor: '#fffbeb',
+    backgroundColor: COLORS.accentLight,
     borderWidth: 1,
-    borderColor: '#fbbf24',
+    borderColor: COLORS.accent,
   },
   ownerNote: {
     fontSize: FONT_SIZES.sm,
@@ -2323,8 +2324,8 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   deleteButton: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#fecaca',
+    backgroundColor: COLORS.errorLight,
+    borderColor: COLORS.errorLight,
   },
   deleteButtonText: {
     color: COLORS.error,

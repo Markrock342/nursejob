@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,9 +12,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { KittenButton as Button, Input, ErrorModal, TermsConsentModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
-import { AuthStackParamList } from '../../types';
+import { useTheme } from '../../context/ThemeContext';
+import { AuthStackParamList, LegalConsentRecord } from '../../types';
 import { sendOTP, isValidThaiPhone } from '../../services/otpService';
 import { Ionicons } from '@expo/vector-icons';
+import { trackEvent } from '../../services/analyticsService';
+import { PRIVACY_VERSION, TERMS_VERSION } from '../../legal/legalContent';
 
 // ============================================
 // Types
@@ -29,6 +32,8 @@ interface Props {
 // Component
 // ============================================
 export default function RegisterScreen({ navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   // Form State
   const [phone, setPhone] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -36,6 +41,16 @@ export default function RegisterScreen({ navigation }: Props) {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showTermsModal, setShowTermsModal] = useState(false);
+
+  useEffect(() => {
+    trackEvent({
+      eventName: 'onboarding_started',
+      screenName: 'Register',
+      props: {
+        entryPoint: 'phone_registration',
+      },
+    });
+  }, []);
 
 
 
@@ -62,16 +77,10 @@ export default function RegisterScreen({ navigation }: Props) {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Handle continue button press - send OTP directly (dev mode)
+  // Handle continue button press
   const handleContinuePress = async () => {
     if (!validateForm()) return;
-    
-    // In dev mode, skip terms modal and send OTP directly
-    if (__DEV__) {
-      await handleSendOTP();
-      return;
-    }
-    
+
     // Show terms modal for user to accept
     setShowTermsModal(true);
   };
@@ -83,14 +92,38 @@ export default function RegisterScreen({ navigation }: Props) {
 
     try {
       const cleanedPhone = phone.replace(/\D/g, '');
+      const acceptedAt = new Date();
+      const legalConsent: LegalConsentRecord = {
+        terms: {
+          version: TERMS_VERSION,
+          acceptedAt,
+        },
+        privacy: {
+          version: PRIVACY_VERSION,
+          acceptedAt,
+        },
+        acceptedFrom: 'register_modal',
+      };
 
       const result = await sendOTP(cleanedPhone);
 
       if (result.success && result.verificationId) {
-        if (result.devCode && __DEV__) console.log('[OTP] devCode:', result.devCode);
+        await trackEvent({
+          eventName: 'otp_requested',
+          screenName: 'Register',
+          subjectType: 'phone_registration',
+          subjectId: cleanedPhone,
+          props: {
+            flow: 'register',
+          },
+        });
+
         navigation.navigate('OTPVerification', {
           phone: cleanedPhone,
           verificationId: result.verificationId,
+          registrationData: {
+            legalConsent,
+          },
         });
       } else {
         setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
@@ -136,7 +169,7 @@ export default function RegisterScreen({ navigation }: Props) {
           {/* Illustration */}
           <View style={styles.illustrationContainer}>
             <View style={styles.illustration}>
-              <Ionicons name="phone-portrait-outline" size={64} color={COLORS.primary} />
+              <Ionicons name="phone-portrait-outline" size={64} color={COLORS.black} />
             </View>
           </View>
 
@@ -144,7 +177,7 @@ export default function RegisterScreen({ navigation }: Props) {
           <View style={styles.form}>
             {/* Phone Info */}
             <View style={styles.infoBox}>
-              <Ionicons name="information-circle-outline" size={20} color={COLORS.primary} />
+              <Ionicons name="information-circle-outline" size={20} color={COLORS.black} />
               <Text style={styles.infoText}>
                 เราจะส่งรหัส OTP 6 หลักไปยังเบอร์โทรศัพท์ของคุณเพื่อยืนยันตัวตน
               </Text>
@@ -182,7 +215,7 @@ export default function RegisterScreen({ navigation }: Props) {
             </Button>
 
             {/* Note */}
-            <Text style={styles.noteText}>
+            <Text style={styles.noteText} >
               📱 รองรับเบอร์ไทยที่ขึ้นต้นด้วย 06, 08, 09
             </Text>
           </View>
@@ -221,7 +254,7 @@ export default function RegisterScreen({ navigation }: Props) {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -286,7 +319,7 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
     fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
+    color: COLORS.black,
     lineHeight: 20,
   },
   flagIcon: {
@@ -297,7 +330,7 @@ const styles = StyleSheet.create({
   },
   noteText: {
     fontSize: FONT_SIZES.xs,
-    color: COLORS.textMuted,
+    color: COLORS.black,
     textAlign: 'center',
     marginTop: SPACING.md,
   },

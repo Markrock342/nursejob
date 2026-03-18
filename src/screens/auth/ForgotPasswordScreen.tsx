@@ -2,7 +2,7 @@
 // FORGOT PASSWORD SCREEN - Production Ready
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Button, Input } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import { resetPassword } from '../../services/authService';
 import { AuthStackParamList } from '../../types';
 
@@ -32,6 +33,8 @@ interface Props {
 // Component
 // ============================================
 export default function ForgotPasswordScreen({ navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   // State
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -184,7 +187,7 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

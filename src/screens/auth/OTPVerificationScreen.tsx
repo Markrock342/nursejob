@@ -2,7 +2,7 @@
 // OTP VERIFICATION SCREEN - Firebase Phone Auth
 // ============================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   Alert,
   Keyboard,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,8 +19,10 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { KittenButton as Button } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import { sendOTP, verifyOTP } from '../../services/otpService';
 import { AuthStackParamList } from '../../types';
+import { trackEvent } from '../../services/analyticsService';
 
 type OTPVerificationScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'OTPVerification'>;
 type OTPVerificationScreenRouteProp = RouteProp<AuthStackParamList, 'OTPVerification'>;
@@ -29,6 +32,8 @@ interface Props {
 }
 
 export default function OTPVerificationScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { phone, verificationId: initialVerificationId, registrationData } = route.params;
 
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
@@ -38,6 +43,16 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const [verificationId, setVerificationId] = useState(initialVerificationId);
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
+
+  useEffect(() => {
+    trackEvent({
+      eventName: 'onboarding_started',
+      screenName: 'OTPVerification',
+      props: {
+        entryPoint: 'otp_verification',
+      },
+    });
+  }, []);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -69,6 +84,16 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
     try {
       const result = await sendOTP(phone);
       if (result.success && result.verificationId) {
+        await trackEvent({
+          eventName: 'otp_requested',
+          screenName: 'OTPVerification',
+          subjectType: 'phone_registration',
+          subjectId: phone,
+          props: {
+            flow: 'register_resend',
+          },
+        });
+
         setVerificationId(result.verificationId);
         setCountdown(60);
         setOtp(['', '', '', '', '', '']);
@@ -94,6 +119,16 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
     try {
       const result = await verifyOTP(verificationId, code);
       if (result.success) {
+        await trackEvent({
+          eventName: 'otp_verified',
+          screenName: 'OTPVerification',
+          subjectType: 'phone_registration',
+          subjectId: phone,
+          props: {
+            flow: 'register',
+          },
+        });
+
         Alert.alert(
           'ยืนยันสำเร็จ!',
           'เบอร์โทรศัพท์ของคุณได้รับการยืนยันแล้ว',
@@ -120,7 +155,12 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={COLORS.background}
+        translucent={false}
+      />
       <View style={styles.content}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
@@ -181,9 +221,9 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  content: { flex: 1, paddingHorizontal: SPACING.xl, paddingTop: SPACING.md },
+  content: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: SPACING.xl, paddingTop: SPACING.md },
   backButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.lg },
   iconContainer: { alignItems: 'center', marginBottom: SPACING.xl },
   iconCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: COLORS.primaryLight, alignItems: 'center', justifyContent: 'center' },

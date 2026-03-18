@@ -2,7 +2,7 @@
 // COMPLETE REGISTRATION SCREEN (After OTP Verification)
 // ============================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { KittenButton as Button, Input, SuccessModal, ErrorModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { AuthStackParamList } from '../../types';
 import { getErrorMessage } from '../../utils/helpers';
@@ -38,6 +39,8 @@ interface Props {
 // Component
 // ============================================
 export default function CompleteRegistrationScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { phone, phoneVerified, role, staffType, orgType, registrationData } = route.params;
   
   // Form State
@@ -298,7 +301,7 @@ const { register, isLoading, clearError, user } = useAuth();
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

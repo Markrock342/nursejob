@@ -2,7 +2,7 @@
 // MY POSTS SCREEN - ประกาศของฉัน
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   BackHandler,
   Platform,
   ToastAndroid,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,9 +25,11 @@ import { useTheme } from '../../context/ThemeContext';
 import { Loading, EmptyState, KittenButton as Button, Avatar } from '../../components/common';
 import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import { getUserPosts, updateJobStatus, deleteJob, subscribeToUserPosts } from '../../services/jobService';
-import { canUseFreeUrgent, markFreeUrgentUsed } from '../../services/subscriptionService';
-import { JobPost } from '../../types';
+import { canUseFreeUrgent, consumeFeatureUsage, markFreeUrgentUsed, extendPostExpiry, getFeatureUsageStatus } from '../../services/subscriptionService';
+import { JobPost, PRICING } from '../../types';
+import { getCommerceAccessStatus } from '../../services/commerceService';
 import { formatRelativeTime, formatDate } from '../../utils/helpers';
+import { useScreenPerformance } from '../../hooks/useScreenPerformance';
 import { Timestamp } from 'firebase/firestore';
 
 // ============================================
@@ -38,9 +41,11 @@ type StatusFilter = 'all' | 'active' | 'urgent' | 'closed' | 'expired' | 'delete
 // Component
 // ============================================
 export default function MyPostsScreen() {
+  useScreenPerformance('MyPosts');
   const navigation = useNavigation();
   const { user, requireAuth } = useAuth();
   const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   
   const [posts, setPosts] = useState<JobPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -84,7 +89,10 @@ export default function MyPostsScreen() {
     if (!user?.uid) return;
 
     try {
-      const userPosts = await getUserPosts(user.uid);
+      const userPosts = await getUserPosts(user.uid, {
+        screenName: 'MyPosts',
+        source: 'myposts:manual_load',
+      });
       setPosts(userPosts);
     } catch (error) {
       console.error('Error loading posts:', error);
@@ -106,6 +114,9 @@ export default function MyPostsScreen() {
       setPosts(newPosts);
       setIsLoading(false);
       setIsRefreshing(false);
+    }, {
+      screenName: 'MyPosts',
+      source: 'myposts:subscription',
     });
 
     return () => unsubscribe();
@@ -140,23 +151,22 @@ export default function MyPostsScreen() {
 
   const handleClosePost = async () => {
     if (!selectedPost) return;
+    setShowActionModal(false);
 
-    setAlert({
-      ...createAlert.warning('ปิดประกาศ', 'คุณต้องการปิดประกาศนี้หรือไม่?\nผู้คนจะไม่เห็นประกาศนี้อีก'),
-      visible: true, // Ensure 'visible' is explicitly set
-      buttons: [
-        { text: 'ยกเลิก', style: 'cancel', onPress: closeAlert },
+    Alert.alert(
+      'ปิดประกาศ',
+      'คุณต้องการปิดประกาศนี้หรือไม่?\nผู้คนจะไม่เห็นประกาศนี้อีก',
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
         {
           text: 'ปิดประกาศ',
           style: 'destructive',
           onPress: async () => {
-            closeAlert();
             try {
               await updateJobStatus(selectedPost.id, 'closed');
               setPosts(prev =>
                 prev.map(p => (p.id === selectedPost.id ? { ...p, status: 'closed' as const } : p))
               );
-              setShowActionModal(false);
               setAlert({ ...createAlert.success('สำเร็จ', 'ประกาศถูกปิดเรียบร้อยแล้ว'), visible: true });
             } catch (error) {
               setAlert({ ...createAlert.error('เกิดข้อผิดพลาด', 'ไม่สามารถปิดประกาศได้'), visible: true });
@@ -164,7 +174,7 @@ export default function MyPostsScreen() {
           },
         },
       ],
-    } as AlertState);
+    );
   };
 
   const handleReactivatePost = async () => {
@@ -184,26 +194,58 @@ export default function MyPostsScreen() {
 
   const handleMarkUrgent = async () => {
     if (!selectedPost || !user) return;
+    setShowActionModal(false);
 
     try {
+      const commerceStatus = await getCommerceAccessStatus();
+      if (commerceStatus.freeAccessEnabled) {
+        const usage = await getFeatureUsageStatus(user.uid, 'urgent_post');
+        if (!usage.canUse) {
+          setAlert({
+            ...createAlert.info('ใช้สิทธิ์ป้ายด่วนครบแล้ว', usage.reason || 'บัญชีนี้ใช้สิทธิ์ป้ายด่วนครบตามรอบเดือนนี้แล้ว'),
+            visible: true,
+          });
+          return;
+        }
+
+        const canUseUrgent = await canUseFreeUrgent(user.uid);
+        if (!canUseUrgent) {
+          setAlert({
+            ...createAlert.info('ใช้สิทธิ์ป้ายด่วนครบแล้ว', 'บัญชีนี้ใช้สิทธิ์ป้ายด่วนของรอบปัจจุบันครบแล้ว แต่ยังโพสต์และจัดการประกาศแบบปกติได้ตามปกติ'),
+            visible: true,
+          });
+          return;
+        }
+
+        await updateJobStatus(selectedPost.id, 'urgent');
+        await markFreeUrgentUsed(user.uid);
+        setPosts(prev =>
+          prev.map(p => (p.id === selectedPost.id ? { ...p, status: 'urgent' as const } : p))
+        );
+        setAlert({
+          ...createAlert.success('สำเร็จ', 'ทำเครื่องหมายด่วนให้ประกาศนี้เรียบร้อยแล้ว'),
+          visible: true,
+        });
+        return;
+      }
+
       const canUseFree = await canUseFreeUrgent(user.uid);
       
       if (canUseFree) {
-        setAlert({
-          ...createAlert.info('🎁 สิทธิ์พิเศษ Premium', 'คุณได้รับปุ่มด่วนฟรี 1 ครั้ง\nจากการเป็นสมาชิก Premium!\n\nต้องการใช้ตอนนี้หรือไม่?'),
-          buttons: [
-            { text: 'ยกเลิก', style: 'cancel', onPress: closeAlert },
+        Alert.alert(
+          '🎁 สิทธิ์พิเศษ Premium',
+          'บัญชีนี้มีสิทธิ์ใช้ป้ายด่วนฟรี 1 ครั้งจาก Premium\nเพื่อช่วยให้ประกาศถูกมองเห็นได้เร็วขึ้น\n\nต้องการใช้ตอนนี้หรือไม่?',
+          [
+            { text: 'ยกเลิก', style: 'cancel' },
             {
               text: '🎁 ใช้สิทธิ์ฟรี',
               onPress: async () => {
-                closeAlert();
                 try {
                   await updateJobStatus(selectedPost.id, 'urgent');
                   await markFreeUrgentUsed(user.uid);
                   setPosts(prev =>
                     prev.map(p => (p.id === selectedPost.id ? { ...p, status: 'urgent' as const } : p))
                   );
-                  setShowActionModal(false);
                   setAlert({ ...createAlert.success('สำเร็จ', 'ทำเครื่องหมายด่วนเรียบร้อยแล้ว!'), visible: true });
                 } catch (error) {
                   setAlert({ ...createAlert.error('เกิดข้อผิดพลาด', 'ไม่สามารถอัปเดตได้'), visible: true });
@@ -211,22 +253,21 @@ export default function MyPostsScreen() {
               },
             },
           ],
-        } as AlertState);
+        );
       } else {
-        setShowActionModal(false);
-        setAlert({
-          ...createAlert.warning('⚡ ทำเครื่องหมายด่วน', `ทำให้ประกาศ "${selectedPost.title}" โดดเด่นขึ้น!\n\nราคา: ฿49`),
-          buttons: [
-            { text: 'ยกเลิก', style: 'cancel', onPress: closeAlert },
+        Alert.alert(
+          '⚡ ทำเครื่องหมายด่วน',
+          `ช่วยให้ประกาศ "${selectedPost.title}" ถูกมองเห็นได้เร็วขึ้นเมื่อเปิดระบบชำระเงินในอนาคต`,
+          [
+            { text: 'ยกเลิก', style: 'cancel' },
             {
-              text: 'ชำระเงิน ฿49',
+              text: 'รับทราบ',
               onPress: () => {
-                closeAlert();
-                setAlert({ ...createAlert.info('ระบบชำระเงิน', 'ระบบชำระเงินกำลังพัฒนา\นติดต่อ admin เพื่อทำเครื่องหมายด่วน'), visible: true });
+                setAlert({ ...createAlert.info('ยังอยู่ในช่วงทดลองใช้ฟรี', 'ตอนนี้ระบบยังใช้งานฟรีอยู่ จึงยังไม่มีขั้นตอนชำระเงินจริงสำหรับป้ายด่วน'), visible: true });
               },
             },
           ],
-        } as AlertState);
+        );
       }
     } catch (error) {
       setAlert({ ...createAlert.error('เกิดข้อผิดพลาด', 'ไม่สามารถอัปเดตได้'), visible: true });
@@ -235,20 +276,20 @@ export default function MyPostsScreen() {
 
   const handleDeletePost = async () => {
     if (!selectedPost) return;
+    setShowActionModal(false);
 
-    setAlert({
-      ...createAlert.error('🗑️ ลบประกาศ', 'คุณต้องการลบประกาศนี้ถาวรหรือไม่?\nการดำเนินการนี้ไม่สามารถย้อนกลับได้'),
-      buttons: [
-        { text: 'ยกเลิก', style: 'cancel', onPress: closeAlert },
+    Alert.alert(
+      '🗑️ ลบประกาศ',
+      'คุณต้องการลบประกาศนี้ถาวรหรือไม่?\nการดำเนินการนี้ไม่สามารถย้อนกลับได้',
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
         {
           text: 'ลบถาวร',
           style: 'destructive',
           onPress: async () => {
-            closeAlert();
             try {
               await deleteJob(selectedPost.id);
               setPosts(prev => prev.filter(p => p.id !== selectedPost.id));
-              setShowActionModal(false);
               setAlert({ ...createAlert.success('สำเร็จ', 'ลบประกาศเรียบร้อยแล้ว'), visible: true });
             } catch (error) {
               setAlert({ ...createAlert.error('เกิดข้อผิดพลาด', 'ไม่สามารถลบประกาศได้'), visible: true });
@@ -256,7 +297,7 @@ export default function MyPostsScreen() {
           },
         },
       ],
-    } as AlertState);
+    );
   };
 
   const handleEditPost = () => {
@@ -274,14 +315,48 @@ export default function MyPostsScreen() {
     if (!selectedPost) return;
     setShowActionModal(false);
     setAlert({
-      ...createAlert.info('⏰ ต่ออายุประกาศ', `ต่ออายุประกาศ "${selectedPost.title}\"\nเพิ่มอีก 1 วัน\n\nราคา: ฿19`),
+      ...createAlert.info('⏰ ต่ออายุประกาศ', `ต่ออายุประกาศ "${selectedPost.title}" เพิ่มอีก 1 วัน`),
       buttons: [
         { text: 'ยกเลิก', style: 'cancel', onPress: closeAlert },
         {
-          text: 'ชำระเงิน ฿19',
-          onPress: () => {
+          text: 'ต่ออายุเลย',
+          onPress: async () => {
             closeAlert();
-            setAlert({ ...createAlert.info('ระบบชำระเงิน', 'ระบบชำระเงินกำลังพัฒนา\นติดต่อ admin เพื่อต่ออายุ'), visible: true });
+            try {
+              const commerceStatus = await getCommerceAccessStatus();
+              if (commerceStatus.freeAccessEnabled) {
+                if (!user?.uid) {
+                  setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', 'ไม่พบข้อมูลบัญชีสำหรับใช้สิทธิ์'), visible: true });
+                  return;
+                }
+
+                const usage = await getFeatureUsageStatus(user.uid, 'extend_post');
+                if (!usage.canUse) {
+                  setAlert({
+                    ...createAlert.info('ใช้สิทธิ์ต่ออายุครบแล้ว', usage.reason || 'บัญชีนี้ใช้สิทธิ์ต่ออายุประกาศครบตามรอบเดือนนี้แล้ว'),
+                    visible: true,
+                  });
+                  return;
+                }
+
+                const newExpiry = await extendPostExpiry(selectedPost.id, 1);
+                if (usage.limit != null) {
+                  await consumeFeatureUsage(user.uid, 'extend_post');
+                }
+                setPosts(prev =>
+                  prev.map(p => (p.id === selectedPost.id ? { ...p, expiresAt: newExpiry } : p))
+                );
+                setAlert({ ...createAlert.success('สำเร็จ', 'ต่ออายุประกาศเพิ่มอีก 1 วันแล้ว'), visible: true });
+                return;
+              }
+
+              setAlert({
+                ...createAlert.info('ยังอยู่ในช่วงทดลองใช้ฟรี', 'ตอนนี้ระบบยังใช้งานฟรีอยู่ จึงยังไม่มีขั้นตอนชำระเงินจริงสำหรับการต่ออายุประกาศ'),
+                visible: true,
+              });
+            } catch {
+              setAlert({ ...createAlert.error('เกิดข้อผิดพลาด', 'ไม่สามารถต่ออายุประกาศได้'), visible: true });
+            }
           },
         },
       ],
@@ -614,7 +689,7 @@ export default function MyPostsScreen() {
                     <View style={[styles.modalActionIcon, { backgroundColor: colors.primaryLight }]}>
                       <Ionicons name="people" size={22} color={colors.primary} />
                     </View>
-                    <Text style={styles.modalActionText}>ดูผู้สนใจ</Text>
+                    <Text style={styles.modalActionText}>ดูผู้สมัคร</Text>
                   </TouchableOpacity>
 
                   {/* Edit */}
@@ -631,7 +706,7 @@ export default function MyPostsScreen() {
                       <View style={[styles.modalActionIcon, { backgroundColor: '#E8F5E9' }]}>
                         <Ionicons name="time" size={22} color="#4CAF50" />
                       </View>
-                      <Text style={styles.modalActionText}>ต่ออายุ ฿19</Text>
+                      <Text style={styles.modalActionText}>ต่ออายุประกาศ</Text>
                     </TouchableOpacity>
                   )}
 
@@ -641,7 +716,7 @@ export default function MyPostsScreen() {
                       <View style={[styles.modalActionIcon, { backgroundColor: colors.warningLight || '#FFF3E0' }]}>
                         <Ionicons name="flash" size={22} color={colors.warning} />
                       </View>
-                      <Text style={styles.modalActionText}>ด่วน ฿49</Text>
+                      <Text style={styles.modalActionText}>ทำเครื่องหมายด่วน</Text>
                     </TouchableOpacity>
                   )}
 
@@ -699,7 +774,7 @@ export default function MyPostsScreen() {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

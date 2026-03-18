@@ -2,7 +2,7 @@
 // PHONE LOGIN SCREEN - ล็อกอินด้วยเบอร์โทร + OTP
 // ============================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,7 @@ interface Props {
 // ============================================
 export default function PhoneLoginScreen({ navigation }: Props) {
   const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   
   // State
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
@@ -89,7 +90,6 @@ export default function PhoneLoginScreen({ navigation }: Props) {
         setVerificationId(result.verificationId);
         setStep('otp');
         setCountdown(60);
-        if (result.devCode && __DEV__) console.log('[OTP] devCode:', result.devCode);
       } else {
         setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
         setShowErrorModal(true);
@@ -111,7 +111,6 @@ export default function PhoneLoginScreen({ navigation }: Props) {
         setVerificationId(result.verificationId);
         setCountdown(60);
         setOtp(['', '', '', '', '', '']);
-        if (result.devCode && __DEV__) console.log('[OTP] devCode:', result.devCode);
       } else {
         setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
         setShowErrorModal(true);
@@ -365,7 +364,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

@@ -2,7 +2,7 @@
 // USER PROFILE SCREEN - ดูโปรไฟล์คนอื่น
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -97,6 +97,7 @@ export default function UserProfileScreen() {
   const navigation = useNavigation();
   const route = useRoute<RouteProp<UserProfileRouteParams, 'UserProfile'>>();
   const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { user } = useAuth();
   const { userId, userName, userPhoto } = route.params;
   const surfaceBackground = isDark ? colors.surface : colors.white;
@@ -245,7 +246,7 @@ export default function UserProfileScreen() {
       shiftDate: job.shiftDate ? (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : job.shiftDate) : undefined,
       shiftDateEnd: (job as any).shiftDateEnd ? ((job as any).shiftDateEnd instanceof Date ? (job as any).shiftDateEnd.toISOString() : (job as any).shiftDateEnd) : undefined,
     } as any;
-    (navigation as any).navigate('JobDetail', { job: serializedJob });
+    (navigation as any).navigate('JobDetail', { job: serializedJob, source: 'user_profile' });
   };
 
   // Format date
@@ -691,7 +692,7 @@ export default function UserProfileScreen() {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

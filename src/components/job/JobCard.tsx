@@ -20,7 +20,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { formatRelativeTime } from '../../utils/helpers';
 import { getStaffTypeLabel } from '../../constants/jobOptions';
 import { StaffType } from '../../types';
-import { getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
+import { getAdminDisplayTagColors, getIdentityDisplayTags, getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
 
 // ============================================
 // Helpers
@@ -79,6 +79,19 @@ const getShiftTimeSummary = (job: JobPost): string => {
   return 'หลายช่วงเวลา';
 };
 
+const getSlotDemandSummary = (job: JobPost): string | null => {
+  if (job.postType === 'job') {
+    return job.campaignSummary || null;
+  }
+
+  const datesCount = job.shiftDates?.length || (job.shiftDate ? 1 : 0);
+  const slotsNeeded = Math.max(1, Number(job.slotsNeeded || 1));
+  if (!datesCount && !job.campaignSummary) return null;
+  if (job.campaignSummary) return job.campaignSummary;
+  if (datesCount <= 1) return `ต้องการ ${slotsNeeded} คน`;
+  return `ต้องการ ${slotsNeeded} คน ต่อรอบ • ${datesCount} วัน`;
+};
+
 // ============================================
 // Props
 // ============================================
@@ -114,6 +127,14 @@ export function JobCard({
   const roleTagColors = getRoleTagColors(job.posterRole);
   const premiumTagText = getPremiumTagText(job.posterPlan);
   const premiumTagColors = getPremiumTagColors();
+  const adminDisplayTags = getIdentityDisplayTags({
+    role: job.posterRole,
+    orgType: job.posterOrgType,
+    staffType: job.posterStaffType,
+    staffTypes: job.posterStaffTypes,
+    adminTags: job.posterAdminTags,
+    adminWarningTag: job.posterWarningTag,
+  });
   const verificationTagText = getVerificationTagText({
     isVerified: job.posterVerified,
     role: job.posterRole,
@@ -143,7 +164,14 @@ export function JobCard({
         onPress={onPress}
         activeOpacity={0.75}
       >
-        <Avatar uri={job.posterPhoto} name={job.posterName} size={40} />
+        <View style={cStyles.avatarWrap}>
+          <Avatar uri={job.posterPhoto} name={job.posterName} size={40} />
+          {job.posterVerified ? (
+            <View style={[cStyles.verifiedBadge, { backgroundColor: colors.card }]}> 
+              <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+            </View>
+          ) : null}
+        </View>
         <View style={cStyles.content}>
           <Text style={[cStyles.title, { color: colors.text }]} numberOfLines={1}>{job.title}</Text>
           <Text style={[cStyles.location, { color: colors.textSecondary }]} numberOfLines={1}>
@@ -167,7 +195,7 @@ export function JobCard({
         styles.card,
         {
           backgroundColor: colors.card,
-          borderColor: isUrgent ? colors.urgent + '30' : colors.border,
+          borderColor: job.posterVerified ? colors.success : (isUrgent ? colors.urgent + '30' : colors.border),
           shadowColor: isDark ? '#000' : '#1E293B',
         },
         style,
@@ -187,7 +215,14 @@ export function JobCard({
           disabled={!showPosterProfile || !job.posterId}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Avatar uri={job.posterPhoto} name={job.posterName} size={46} />
+          <View style={styles.avatarWrap}>
+            <Avatar uri={job.posterPhoto} name={job.posterName} size={46} />
+            {job.posterVerified ? (
+              <View style={[styles.verifiedBadge, { backgroundColor: colors.card }]}> 
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+              </View>
+            ) : null}
+          </View>
         </TouchableOpacity>
 
         <View style={styles.posterInfo}>
@@ -200,7 +235,7 @@ export function JobCard({
               <Text
                 style={[
                   styles.posterName,
-                  { color: job.posterVerified ? colors.primary : colors.text },
+                  { color: colors.text },
                 ]}
                 numberOfLines={1}
               >
@@ -235,6 +270,21 @@ export function JobCard({
                 </Text>
               </View>
             ) : null}
+            {adminDisplayTags.slice(0, 2).map((tag) => {
+              const tone = getAdminDisplayTagColors(tag.tone);
+              return (
+                <View key={`${tag.tone}-${tag.label}`} style={[styles.inlineTag, { backgroundColor: tone.backgroundColor }]}> 
+                  <Ionicons
+                    name={tag.tone === 'warning' ? 'alert-circle' : 'pricetag'}
+                    size={11}
+                    color={tone.textColor}
+                  />
+                  <Text style={[styles.inlineTagText, { color: tone.textColor }]} numberOfLines={1}>
+                    {tag.label}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
 
           <View style={styles.locationRow}>
@@ -303,6 +353,15 @@ export function JobCard({
           </View>
         );
       })()}
+
+      {getSlotDemandSummary(job) ? (
+        <View style={[styles.campaignRow, { backgroundColor: colors.infoLight }]}> 
+          <Ionicons name="layers-outline" size={12} color={colors.info} />
+          <Text style={[styles.campaignRowText, { color: colors.info }]} numberOfLines={2}>
+            {getSlotDemandSummary(job)}
+          </Text>
+        </View>
+      ) : null}
 
       {/* Tags */}
       <Text style={[styles.tagsLabel, { color: colors.textMuted }]}>คุณสมบัติที่ต้องการ</Text>
@@ -410,6 +469,15 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  avatarWrap: {
+    position: 'relative',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    borderRadius: BORDER_RADIUS.full,
+  },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -451,16 +519,34 @@ const styles = StyleSheet.create({
   },
   distanceBadge: {
     marginTop: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: BORDER_RADIUS.full,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.full,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  campaignRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 10,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  campaignRowText: {
+    flex: 1,
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
   },
   distanceText: {
     fontSize: 11,
     fontWeight: '700',
+    flexShrink: 1,
   },
   headerRight: {
     alignItems: 'flex-end',
@@ -596,6 +682,15 @@ const cStyles = StyleSheet.create({
     borderWidth: 1,
     gap: SPACING.sm,
     ...SHADOWS.sm,
+  },
+  avatarWrap: {
+    position: 'relative',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    borderRadius: BORDER_RADIUS.full,
   },
   content: { flex: 1, minWidth: 0 },
   title: { fontSize: FONT_SIZES.md, fontWeight: '600' },

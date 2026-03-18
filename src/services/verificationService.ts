@@ -2,7 +2,7 @@
 // VERIFICATION SERVICE - ตรวจสอบใบประกอบวิชาชีพ
 // ============================================
 
-import { db } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 import { 
   collection, 
   doc, 
@@ -12,6 +12,7 @@ import {
   query, 
   where, 
   getDocs,
+  limit,
   orderBy,
   serverTimestamp,
   Timestamp,
@@ -25,23 +26,46 @@ const USERS_COLLECTION = 'users';
 // Types
 // ============================================
 
+export type VerificationType = 'nurse' | 'hospital_hr' | 'clinic' | 'agency' | 'user';
+
+export interface VerificationFlowConfig {
+  type: VerificationType;
+  menuLabel: string;
+  title: string;
+  subtitle: string;
+  verifiedTitle: string;
+  verifiedSubtitle: string;
+  requiresLicenseInfo: boolean;
+  requiresEmployeeCard: boolean;
+  requiresIdCard: boolean;
+  requiresDeclaration: boolean;
+}
+
 export interface VerificationRequest {
   id?: string;
   userId: string;
   userName: string;
+  userPhotoURL?: string;
   firstName: string;
   lastName: string;
   userEmail: string;
   userPhone?: string;
+  role?: string;
+  orgType?: string;
+  staffType?: string;
+  staffTypes?: string[];
+  verificationType: VerificationType;
   
   // License info
-  licenseNumber: string;
-  licenseType: 'nurse' | 'practical_nurse' | 'midwife' | 'other';
-  licenseExpiry: Date;
+  licenseNumber?: string;
+  licenseType?: 'nurse' | 'practical_nurse' | 'midwife' | 'other';
+  licenseExpiry?: Date | Timestamp;
   
   // Documents
-  licenseDocumentUrl: string;
+  licenseDocumentUrl?: string;
+  employeeCardUrl?: string;
   idCardUrl?: string;
+  declarationDocumentUrl?: string;
   selfieUrl?: string;
   
   // Status
@@ -57,6 +81,7 @@ export interface VerificationRequest {
 export interface UserVerificationStatus {
   isVerified: boolean;
   verifiedAt?: Date;
+  verificationType?: VerificationType;
   licenseNumber?: string;
   licenseType?: string;
   licenseExpiry?: Date;
@@ -77,6 +102,103 @@ export const LICENSE_TYPES = [
 export function getLicenseTypeLabel(type: string): string {
   const found = LICENSE_TYPES.find(t => t.value === type);
   return found?.label || type;
+}
+
+export function resolveVerificationType(role?: string | null, orgType?: string | null): VerificationType {
+  if (role === 'nurse') return 'nurse';
+  if (role === 'hospital') {
+    if (orgType === 'clinic') return 'clinic';
+    if (orgType === 'agency') return 'agency';
+    return 'hospital_hr';
+  }
+  return 'user';
+}
+
+export function getVerificationFlowConfig(role?: string | null, orgType?: string | null): VerificationFlowConfig {
+  const type = resolveVerificationType(role, orgType);
+
+  switch (type) {
+    case 'nurse':
+      return {
+        type,
+        menuLabel: 'ยืนยันตัวตนพยาบาล',
+        title: 'ยืนยันตัวตนพยาบาล',
+        subtitle: 'ส่งชื่อจริง นามสกุล และใบประกอบวิชาชีพ เพื่อให้ระบบแสดงว่าเป็นบัญชีที่ตรวจสอบได้',
+        verifiedTitle: 'ยืนยันตัวตนพยาบาลแล้ว',
+        verifiedSubtitle: 'บัญชีนี้ผ่านการตรวจสอบชื่อจริงและใบประกอบวิชาชีพแล้ว',
+        requiresLicenseInfo: true,
+        requiresEmployeeCard: false,
+        requiresIdCard: false,
+        requiresDeclaration: false,
+      };
+    case 'hospital_hr':
+      return {
+        type,
+        menuLabel: 'ยืนยันตัวตน HR / โรงพยาบาล',
+        title: 'ยืนยันตัวตน HR / โรงพยาบาล',
+        subtitle: 'ส่งชื่อจริง นามสกุล บัตรพนักงาน บัตรประชาชน และเอกสารเซ็นกำกับว่าใช้กับ NurseGo เพื่อยืนยันตัวตนผู้ประกาศงาน',
+        verifiedTitle: 'ยืนยันตัวตน HR / โรงพยาบาลแล้ว',
+        verifiedSubtitle: 'บัญชีนี้ผ่านการตรวจสอบเอกสารผู้แทนองค์กรแล้ว',
+        requiresLicenseInfo: false,
+        requiresEmployeeCard: true,
+        requiresIdCard: true,
+        requiresDeclaration: true,
+      };
+    case 'clinic':
+      return {
+        type,
+        menuLabel: 'ยืนยันตัวตนคลินิก',
+        title: 'ยืนยันตัวตนคลินิก',
+        subtitle: 'ส่งชื่อจริง นามสกุล บัตรพนักงาน บัตรประชาชน และเอกสารเซ็นกำกับว่าใช้กับ NurseGo เพื่อยืนยันคลินิกผู้ประกาศ',
+        verifiedTitle: 'ยืนยันตัวตนคลินิกแล้ว',
+        verifiedSubtitle: 'บัญชีนี้ผ่านการตรวจสอบเอกสารของคลินิกแล้ว',
+        requiresLicenseInfo: false,
+        requiresEmployeeCard: true,
+        requiresIdCard: true,
+        requiresDeclaration: true,
+      };
+    case 'agency':
+      return {
+        type,
+        menuLabel: 'ยืนยันตัวตน Agency',
+        title: 'ยืนยันตัวตน Agency',
+        subtitle: 'ส่งชื่อจริง นามสกุล และบัตรประชาชนของผู้ดูแลบัญชี เพื่อยืนยันว่า Agency นี้ตรวจสอบตัวตนได้',
+        verifiedTitle: 'ยืนยันตัวตน Agency แล้ว',
+        verifiedSubtitle: 'บัญชีนี้ผ่านการตรวจสอบตัวตนผู้ดูแล Agency แล้ว',
+        requiresLicenseInfo: false,
+        requiresEmployeeCard: false,
+        requiresIdCard: true,
+        requiresDeclaration: false,
+      };
+    default:
+      return {
+        type,
+        menuLabel: 'ยืนยันตัวตนผู้ใช้',
+        title: 'ยืนยันตัวตนผู้ใช้',
+        subtitle: 'ส่งชื่อจริง นามสกุล และบัตรประชาชน เพื่อเพิ่มความน่าเชื่อถือของบัญชี',
+        verifiedTitle: 'ยืนยันตัวตนผู้ใช้แล้ว',
+        verifiedSubtitle: 'บัญชีนี้ผ่านการตรวจสอบตัวตนแล้ว',
+        requiresLicenseInfo: false,
+        requiresEmployeeCard: false,
+        requiresIdCard: true,
+        requiresDeclaration: false,
+      };
+  }
+}
+
+export function getVerificationMenuLabel(role?: string | null, orgType?: string | null): string {
+  return getVerificationFlowConfig(role, orgType).menuLabel;
+}
+
+export function getVerificationTypeLabel(type?: VerificationType | string | null): string {
+  switch (type) {
+    case 'nurse': return 'พยาบาล';
+    case 'hospital_hr': return 'HR / โรงพยาบาล';
+    case 'clinic': return 'คลินิก';
+    case 'agency': return 'Agency';
+    case 'user': return 'ผู้ใช้ทั่วไป';
+    default: return 'ยืนยันตัวตน';
+  }
 }
 
 // ============================================
@@ -189,10 +311,15 @@ export async function getPendingVerificationRequest(
   userId: string
 ): Promise<VerificationRequest | null> {
   try {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) {
+      return null;
+    }
+
     const q = query(
       collection(db, VERIFICATIONS_COLLECTION),
       where('userId', '==', userId),
-      where('status', '==', 'pending')
+      where('status', '==', 'pending'),
+      limit(1)
     );
     
     const snapshot = await getDocs(q);
@@ -204,10 +331,12 @@ export async function getPendingVerificationRequest(
       id: doc.id,
       ...data,
       submittedAt: data.submittedAt?.toDate() || new Date(),
-      licenseExpiry: data.licenseExpiry?.toDate() || new Date(),
+      licenseExpiry: data.licenseExpiry?.toDate?.() || data.licenseExpiry,
     } as VerificationRequest;
-  } catch (error) {
-    console.error('Error getting pending verification:', error);
+  } catch (error: any) {
+    if (error?.code !== 'permission-denied') {
+      console.error('Error getting pending verification:', error);
+    }
     return null;
   }
 }
@@ -220,6 +349,10 @@ export async function getUserVerificationStatus(
   userId: string
 ): Promise<UserVerificationStatus> {
   try {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) {
+      return { isVerified: false };
+    }
+
     const userDoc = await getDoc(doc(db, USERS_COLLECTION, userId));
     
     if (!userDoc.exists()) {
@@ -232,6 +365,7 @@ export async function getUserVerificationStatus(
     return {
       isVerified: userData.isVerified || false,
       verifiedAt: userData.verifiedAt?.toDate(),
+      verificationType: userData.verificationType,
       licenseNumber: userData.licenseNumber,
       licenseType: userData.licenseType,
       licenseExpiry: userData.licenseExpiry?.toDate(),
@@ -274,11 +408,12 @@ export async function approveVerificationRequest(
     await updateDoc(userRef, {
       isVerified: true,
       verifiedAt: serverTimestamp(),
+      verificationType: requestData.verificationType,
       firstName: requestData.firstName,
       lastName: requestData.lastName,
-      licenseNumber: requestData.licenseNumber,
-      licenseType: requestData.licenseType,
-      licenseExpiry: requestData.licenseExpiry,
+      ...(requestData.licenseNumber ? { licenseNumber: requestData.licenseNumber } : {}),
+      ...(requestData.licenseType ? { licenseType: requestData.licenseType } : {}),
+      ...(requestData.licenseExpiry ? { licenseExpiry: requestData.licenseExpiry } : {}),
     });
   } catch (error) {
     console.error('Error approving verification:', error);
@@ -319,15 +454,32 @@ export async function getAllPendingVerifications(): Promise<VerificationRequest[
     
     const snapshot = await getDocs(q);
     
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
+    const requests = await Promise.all(snapshot.docs.map(async (requestDoc) => {
+      const data = requestDoc.data();
+      let userPhotoURL: string | undefined;
+
+      if (data.userId) {
+        try {
+          const userSnap = await getDoc(doc(db, USERS_COLLECTION, data.userId));
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            userPhotoURL = userData.photoURL;
+          }
+        } catch {
+          // Ignore enrichment failures and return the request data anyway.
+        }
+      }
+
       return {
-        id: doc.id,
+        id: requestDoc.id,
         ...data,
+        userPhotoURL,
         submittedAt: data.submittedAt?.toDate() || new Date(),
-        licenseExpiry: data.licenseExpiry?.toDate() || new Date(),
+        licenseExpiry: data.licenseExpiry?.toDate?.() || data.licenseExpiry,
       } as VerificationRequest;
-    });
+    }));
+
+    return requests;
   } catch (error) {
     console.error('Error getting pending verifications:', error);
     return [];

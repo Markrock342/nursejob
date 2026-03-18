@@ -16,11 +16,11 @@ import {
   serverTimestamp,
   Timestamp,
   increment,
-  documentId,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { assertAuthUser } from './security/authGuards';
-import { getJobById } from './jobService';
+import { getJobCompletionById, getUserJobCompletions } from './jobCompletionService';
 
 const REVIEWS_COLLECTION = 'reviews';
 const HOSPITALS_COLLECTION = 'hospitals';
@@ -39,6 +39,7 @@ export interface Review {
   wouldRecommend: boolean;
   isVerified: boolean; // เคยทำงานจริงหรือเปล่า
   helpful: number; // จำนวนคนที่กด helpful
+  helpfulVoterIds?: string[];
   createdAt: Date;
   updatedAt?: Date;
   response?: {
@@ -64,8 +65,14 @@ export type ReviewTargetType = 'hospital' | 'user';
 export interface ReviewEligibility {
   canReview: boolean;
   isVerified: boolean;
+  completionId?: string;
   relatedJobId?: string;
   relatedJobTitle?: string;
+}
+
+interface ReviewLookupOptions {
+  relatedJobId?: string;
+  completionId?: string;
 }
 
 function getEmploymentTargetId(targetId: string, targetType: ReviewTargetType) {
@@ -107,6 +114,7 @@ export async function createReview(
     targetType?: ReviewTargetType;
     targetName?: string;
     relatedJobId?: string;
+    completionId?: string;
     isVerified?: boolean;
   }
 ): Promise<string> {
@@ -116,10 +124,22 @@ export async function createReview(
     const targetType = options?.targetType || 'hospital';
     const targetId = hospitalId;
 
+    if (targetId === userId) {
+      throw new Error('ไม่สามารถรีวิวตัวเองได้');
+    }
+
+    const eligibility = await canUserReviewTarget(userId, targetId, options?.completionId);
+    if (!eligibility.canReview) {
+      throw new Error('ยังไม่มีสิทธิ์รีวิวนี้ ต้องมีงานที่ยืนยันและจบงานจริงก่อน');
+    }
+
     // Check if user already reviewed this hospital
-    const existing = await getUserReviewForTarget(userId, targetId, targetType);
+    const existing = await getUserReviewForTarget(userId, targetId, targetType, {
+      relatedJobId: options?.relatedJobId,
+      completionId: options?.completionId,
+    });
     if (existing) {
-      throw new Error('คุณได้รีวิวโรงพยาบาลนี้แล้ว');
+      throw new Error(targetType === 'user' ? 'คุณได้รีวิวงานนี้ไปแล้ว' : 'คุณได้รีวิวสถานที่นี้แล้ว');
     }
 
     const docRef = await addDoc(collection(db, REVIEWS_COLLECTION), {
@@ -139,8 +159,10 @@ export async function createReview(
       cons: options?.cons || null,
       wouldRecommend: options?.wouldRecommend ?? true,
       relatedJobId: options?.relatedJobId || null,
+      completionId: options?.completionId || null,
       isVerified: options?.isVerified ?? false,
       helpful: 0,
+      helpfulVoterIds: [],
       createdAt: serverTimestamp(),
     });
 
@@ -177,33 +199,83 @@ export async function getUserReviewForHospital(
 export async function getUserReviewForTarget(
   userId: string,
   targetId: string,
-  targetType: ReviewTargetType = 'hospital'
+  targetType: ReviewTargetType = 'hospital',
+  options?: ReviewLookupOptions,
 ): Promise<Review | null> {
   try {
+    const fieldName = targetType === 'hospital' ? 'hospitalId' : 'revieweeId';
     const reviewerQuery = query(
       collection(db, REVIEWS_COLLECTION),
       where('reviewerId', '==', userId),
-      where(targetType === 'hospital' ? 'hospitalId' : 'revieweeId', '==', targetId)
+      where(fieldName, '==', targetId)
     );
-    let snapshot = await getDocs(reviewerQuery);
+    let docs = (await getDocs(reviewerQuery)).docs;
 
-    // Backward compatibility for old docs that used userId instead of reviewerId
-    if (snapshot.empty) {
+    if (docs.length === 0) {
       const legacyQuery = query(
         collection(db, REVIEWS_COLLECTION),
         where('userId', '==', userId),
-        where(targetType === 'hospital' ? 'hospitalId' : 'revieweeId', '==', targetId)
+        where(fieldName, '==', targetId)
       );
-      snapshot = await getDocs(legacyQuery);
+      docs = (await getDocs(legacyQuery)).docs;
     }
-    
-    if (snapshot.empty) return null;
-    
-    return toReview(snapshot.docs[0]);
+
+    if (options?.completionId) {
+      docs = docs.filter((docSnap) => docSnap.data()?.completionId === options.completionId);
+    }
+    if (options?.relatedJobId) {
+      docs = docs.filter((docSnap) => docSnap.data()?.relatedJobId === options.relatedJobId);
+    }
+
+    if (docs.length === 0) return null;
+
+    docs.sort((a, b) => {
+      const aTime = (a.data().createdAt as Timestamp)?.toDate?.()?.getTime?.() || 0;
+      const bTime = (b.data().createdAt as Timestamp)?.toDate?.()?.getTime?.() || 0;
+      return bTime - aTime;
+    });
+
+    return toReview(docs[0]);
   } catch (error) {
     console.error('Error getting user review:', error);
     return null;
   }
+}
+
+async function findEligibleCompletionReview(
+  currentUserId: string,
+  targetUserId: string,
+  completionId?: string,
+): Promise<ReviewEligibility> {
+  const targetCompletion = completionId
+    ? await getJobCompletionById(completionId)
+    : null;
+
+  const completions = targetCompletion
+    ? [targetCompletion]
+    : await getUserJobCompletions(currentUserId);
+
+  for (const completion of completions) {
+    if (!completion || completion.status !== 'completed') continue;
+    if (!completion.participantIds?.includes(currentUserId) || !completion.participantIds?.includes(targetUserId)) continue;
+
+    const existingReview = await getUserReviewForTarget(currentUserId, targetUserId, 'user', {
+      completionId: completion.id,
+      relatedJobId: completion.jobId,
+    });
+
+    if (existingReview) continue;
+
+    return {
+      canReview: true,
+      isVerified: true,
+      completionId: completion.id,
+      relatedJobId: completion.jobId,
+      relatedJobTitle: completion.jobTitle,
+    };
+  }
+
+  return { canReview: false, isVerified: false };
 }
 
 export async function getReviewsForTarget(
@@ -256,45 +328,11 @@ export async function getTargetRating(
 export async function canUserReviewTarget(
   currentUserId: string,
   targetUserId: string,
+  completionId?: string,
 ): Promise<ReviewEligibility> {
   try {
     assertAuthUser(currentUserId, 'ไม่สามารถตรวจสอบสิทธิ์รีวิวได้');
-
-    const [asWorkerSnap, asPosterSnap] = await Promise.all([
-      getDocs(query(
-        collection(db, 'shift_contacts'),
-        where('interestedUserId', '==', currentUserId),
-        where('status', '==', 'confirmed')
-      )),
-      getDocs(query(
-        collection(db, 'shift_contacts'),
-        where('posterId', '==', currentUserId),
-        where('status', '==', 'confirmed')
-      )),
-    ]);
-
-    const candidateDocs = [
-      ...asWorkerSnap.docs.filter((docSnap) => docSnap.data().posterId === targetUserId),
-      ...asPosterSnap.docs.filter((docSnap) => docSnap.data().interestedUserId === targetUserId),
-    ];
-
-    for (const docSnap of candidateDocs) {
-      const data = docSnap.data();
-      const job = data.jobId ? await getJobById(data.jobId) : null;
-      const now = new Date();
-      const expired = Boolean(job?.expiresAt && new Date(job.expiresAt as any) < now);
-      const completed = !job || job.status === 'closed' || job.status === 'expired' || job.status === 'deleted' || expired;
-      if (completed) {
-        return {
-          canReview: true,
-          isVerified: true,
-          relatedJobId: data.jobId,
-          relatedJobTitle: job?.title,
-        };
-      }
-    }
-
-    return { canReview: false, isVerified: false };
+    return await findEligibleCompletionReview(currentUserId, targetUserId, completionId);
   } catch (error) {
     console.error('Error checking review eligibility:', error);
     return { canReview: false, isVerified: false };
@@ -365,13 +403,39 @@ export async function deleteReview(reviewId: string): Promise<void> {
 }
 
 // Mark review as helpful
-export async function markReviewHelpful(reviewId: string): Promise<void> {
+export async function markReviewHelpful(reviewId: string, userId: string): Promise<boolean> {
   try {
-    await updateDoc(doc(db, REVIEWS_COLLECTION, reviewId), {
-      helpful: increment(1),
+    assertAuthUser(userId, 'ไม่สามารถกดรีวิวนี้ว่ามีประโยชน์แทนผู้ใช้อื่นได้');
+
+    return await runTransaction(db, async (transaction) => {
+      const reviewRef = doc(db, REVIEWS_COLLECTION, reviewId);
+      const reviewSnap = await transaction.get(reviewRef);
+
+      if (!reviewSnap.exists()) {
+        throw new Error('ไม่พบรีวิวนี้');
+      }
+
+      const reviewData = reviewSnap.data() || {};
+      const helpfulVoterIds = Array.isArray(reviewData.helpfulVoterIds) ? reviewData.helpfulVoterIds : [];
+
+      if (reviewData.reviewerId === userId) {
+        throw new Error('ไม่สามารถกดมีประโยชน์ให้รีวิวของตัวเองได้');
+      }
+
+      if (helpfulVoterIds.includes(userId)) {
+        return false;
+      }
+
+      transaction.update(reviewRef, {
+        helpful: Number(reviewData.helpful || 0) + 1,
+        helpfulVoterIds: [...helpfulVoterIds, userId],
+      });
+
+      return true;
     });
   } catch (error) {
     console.error('Error marking review helpful:', error);
+    throw error;
   }
 }
 

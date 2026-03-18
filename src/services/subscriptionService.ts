@@ -6,18 +6,314 @@ import {
   doc,
   getDoc,
   updateDoc,
+  runTransaction,
   collection,
+  getCountFromServer,
   query,
   where,
   getDocs,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { Subscription, SubscriptionPlan, SUBSCRIPTION_PLANS, PRICING, BillingCycle } from '../types';
+import { Subscription, SubscriptionPlan, SUBSCRIPTION_PLANS, PRICING, BillingCycle, SubscriptionUsageFeature } from '../types';
+import { applyEarlyAccessToSubscription, getCommerceAccessStatus } from './commerceService';
 import { grantReferralReward } from './referralService';
 
 const USERS_COLLECTION = 'users';
-const JOBS_COLLECTION = 'jobs';
+const JOBS_COLLECTION = 'shifts';
+
+const LAUNCH_USAGE_LIMITS: Record<string, Partial<Record<SubscriptionUsageFeature, number>>> = {
+  user: {
+    post_create: 2,
+    job_application: 5,
+    chat_start: 5,
+    urgent_post: 1,
+    extend_post: 1,
+    boost_post: 1,
+  },
+  nurse: {
+    post_create: 5,
+    job_application: 20,
+    chat_start: 20,
+    urgent_post: 2,
+    extend_post: 2,
+    boost_post: 2,
+  },
+  hospital: {
+    post_create: 10,
+    job_application: 0,
+    chat_start: 40,
+    urgent_post: 5,
+    extend_post: 10,
+    boost_post: 10,
+  },
+  admin: {
+    post_create: 10,
+    job_application: 0,
+    chat_start: 40,
+    urgent_post: 5,
+    extend_post: 10,
+    boost_post: 10,
+  },
+};
+
+const LAUNCH_USAGE_LABELS: Record<SubscriptionUsageFeature, { label: string; description: string }> = {
+  post_create: {
+    label: 'ลงประกาศงาน',
+    description: 'ใช้สำหรับโพสต์ประกาศใหม่',
+  },
+  job_application: {
+    label: 'สมัครงานหรือแสดงความสนใจ',
+    description: 'ใช้เมื่อกดสมัครหรือแสดงความสนใจกับประกาศ',
+  },
+  chat_start: {
+    label: 'เริ่มแชตใหม่',
+    description: 'ใช้ตอนเปิดห้องแชตใหม่ครั้งแรก',
+  },
+  urgent_post: {
+    label: 'ติดป้ายด่วน',
+    description: 'ช่วยให้ประกาศเด่นขึ้น',
+  },
+  extend_post: {
+    label: 'ต่ออายุประกาศ',
+    description: 'เพิ่มเวลาให้ประกาศแสดงต่อได้',
+  },
+  boost_post: {
+    label: 'ดันโพสต์ขึ้นบน',
+    description: 'พาประกาศกลับไปอยู่ลำดับบน ๆ อีกครั้ง',
+  },
+};
+
+const LAUNCH_USAGE_ORDER: Record<string, SubscriptionUsageFeature[]> = {
+  user: ['post_create', 'job_application', 'chat_start', 'urgent_post', 'extend_post', 'boost_post'],
+  nurse: ['post_create', 'job_application', 'chat_start', 'urgent_post', 'extend_post', 'boost_post'],
+  hospital: ['post_create', 'chat_start', 'urgent_post', 'extend_post', 'boost_post'],
+  admin: ['post_create', 'chat_start', 'urgent_post', 'extend_post', 'boost_post'],
+};
+
+export interface LaunchQuotaDisplayItem {
+  feature: SubscriptionUsageFeature;
+  label: string;
+  description: string;
+  limit: number;
+  used: number;
+  remaining: number;
+  statusText: string;
+}
+
+export interface LaunchQuotaSummary {
+  title: string;
+  subtitle: string;
+  footnote: string;
+  items: LaunchQuotaDisplayItem[];
+}
+
+function getMonthlyPeriodKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function getLaunchFeatureLimit(role: string | null | undefined, feature: SubscriptionUsageFeature): number | null {
+  const roleLimits = LAUNCH_USAGE_LIMITS[role || 'user'] || LAUNCH_USAGE_LIMITS.user;
+  const limit = roleLimits[feature];
+  return typeof limit === 'number' ? limit : null;
+}
+
+export function getLaunchUsageLimitForRole(
+  role: string | null | undefined,
+  feature: SubscriptionUsageFeature,
+): number | null {
+  return getLaunchFeatureLimit(role, feature);
+}
+
+export function getLaunchUsageLimitsForRole(
+  role: string | null | undefined,
+): Partial<Record<SubscriptionUsageFeature, number>> {
+  const roleLimits = LAUNCH_USAGE_LIMITS[role || 'user'] || LAUNCH_USAGE_LIMITS.user;
+  return { ...roleLimits };
+}
+
+function getCurrentFeatureUsage(subscription: Subscription | undefined, feature: SubscriptionUsageFeature, periodKey: string): number {
+  const usage = subscription?.monthlyUsage?.[feature];
+  if (!usage || usage.periodKey !== periodKey) return 0;
+  return usage.used || 0;
+}
+
+function getLaunchQuotaIntro(role: string | null | undefined): Pick<LaunchQuotaSummary, 'title' | 'subtitle' | 'footnote'> {
+  switch (role) {
+    case 'nurse':
+      return {
+        title: 'บัญชีนี้ทำอะไรได้บ้าง',
+        subtitle: 'คุณใช้งานสมัครงาน คุยต่อ และจัดการประกาศได้ตามโควตารายเดือนของบัญชีพยาบาล',
+        footnote: 'แต่ละรายการจะรีเซ็ตใหม่ทุกต้นเดือน',
+      };
+    case 'hospital':
+    case 'admin':
+      return {
+        title: 'บัญชีนี้ทำอะไรได้บ้าง',
+        subtitle: 'คุณลงประกาศ คุยกับผู้สมัคร และใช้บริการเสริมได้ตามโควตารายเดือนของบัญชีองค์กร',
+        footnote: 'แต่ละรายการจะรีเซ็ตใหม่ทุกต้นเดือน',
+      };
+    default:
+      return {
+        title: 'บัญชีนี้ทำอะไรได้บ้าง',
+        subtitle: 'คุณใช้งานฟีเจอร์หลักและบริการเสริมได้ตามโควตารายเดือนของบัญชีนี้',
+        footnote: 'แต่ละรายการจะรีเซ็ตใหม่ทุกต้นเดือน',
+      };
+  }
+}
+
+function getLaunchUsageStatusText(used: number, limit: number, remaining: number): string {
+  if (used <= 0) {
+    return `ยังไม่ได้ใช้เดือนนี้ • ใช้ได้ ${limit} ครั้ง`;
+  }
+  if (remaining > 0) {
+    return `ใช้ไปแล้ว ${used}/${limit} ครั้ง • เหลือ ${remaining} ครั้ง`;
+  }
+  return `ใช้ครบ ${limit} ครั้งแล้วในเดือนนี้`;
+}
+
+async function getRawUserSubscriptionState(userId: string): Promise<{
+  role: string | null;
+  subscription: Subscription;
+  commerceStatus: Awaited<ReturnType<typeof getCommerceAccessStatus>>;
+}> {
+  const [userDoc, commerceStatus] = await Promise.all([
+    getDoc(doc(db, USERS_COLLECTION, userId)),
+    getCommerceAccessStatus(),
+  ]);
+
+  const data = userDoc.exists() ? userDoc.data() : {};
+  return {
+    role: (data?.role as string | null | undefined) || null,
+    subscription: (data?.subscription as Subscription | undefined) || { plan: 'free' },
+    commerceStatus,
+  };
+}
+
+export async function getFeatureUsageStatus(userId: string, feature: SubscriptionUsageFeature): Promise<{
+  canUse: boolean;
+  remaining: number | null;
+  limit: number | null;
+  used: number;
+  reason?: string;
+}> {
+  try {
+    const { role, subscription, commerceStatus } = await getRawUserSubscriptionState(userId);
+    if (!commerceStatus.freeAccessEnabled) {
+      return { canUse: true, remaining: null, limit: null, used: 0 };
+    }
+
+    const limit = getLaunchFeatureLimit(role, feature);
+    if (limit == null) {
+      return { canUse: true, remaining: null, limit: null, used: 0 };
+    }
+
+    const periodKey = getMonthlyPeriodKey();
+    const used = getCurrentFeatureUsage(subscription, feature, periodKey);
+    const remaining = Math.max(limit - used, 0);
+    return {
+      canUse: remaining > 0,
+      remaining,
+      limit,
+      used,
+      reason: remaining > 0 ? undefined : `คุณใช้สิทธิ์ ${limit} ครั้งครบแล้วในเดือนนี้`,
+    };
+  } catch (error) {
+    console.error('Error checking feature usage:', error);
+    return { canUse: true, remaining: null, limit: null, used: 0 };
+  }
+}
+
+export async function getLaunchQuotaSummary(userId: string): Promise<LaunchQuotaSummary | null> {
+  try {
+    const { role, subscription, commerceStatus } = await getRawUserSubscriptionState(userId);
+    if (!commerceStatus.freeAccessEnabled) return null;
+
+    const roleKey = role || 'user';
+    const features = LAUNCH_USAGE_ORDER[roleKey] || LAUNCH_USAGE_ORDER.user;
+    const periodKey = getMonthlyPeriodKey();
+    const items = features
+      .map((feature) => {
+        const limit = getLaunchFeatureLimit(role, feature);
+        if (!limit || limit <= 0) return null;
+        const used = getCurrentFeatureUsage(subscription, feature, periodKey);
+        const remaining = Math.max(limit - used, 0);
+        const meta = LAUNCH_USAGE_LABELS[feature];
+
+        return {
+          feature,
+          label: meta.label,
+          description: meta.description,
+          limit,
+          used,
+          remaining,
+          statusText: getLaunchUsageStatusText(used, limit, remaining),
+        } as LaunchQuotaDisplayItem;
+      })
+      .filter((item): item is LaunchQuotaDisplayItem => Boolean(item));
+
+    return {
+      ...getLaunchQuotaIntro(role),
+      items,
+    };
+  } catch (error) {
+    console.error('Error building launch quota summary:', error);
+    return null;
+  }
+}
+
+export async function consumeFeatureUsage(userId: string, feature: SubscriptionUsageFeature): Promise<void> {
+  const { commerceStatus } = await getRawUserSubscriptionState(userId);
+  if (!commerceStatus.freeAccessEnabled) return;
+
+  const userRef = doc(db, USERS_COLLECTION, userId);
+  await runTransaction(db, async (transaction) => {
+    const userDoc = await transaction.get(userRef);
+    if (!userDoc.exists()) return;
+
+    const data = userDoc.data() || {};
+    const role = (data.role as string | null | undefined) || null;
+    const subscription = (data.subscription as Subscription | undefined) || { plan: 'free' };
+    const limit = getLaunchFeatureLimit(role, feature);
+    if (limit == null) return;
+
+    const periodKey = getMonthlyPeriodKey();
+    const currentUsed = getCurrentFeatureUsage(subscription, feature, periodKey);
+    const monthlyUsage = {
+      ...(subscription.monthlyUsage || {}),
+      [feature]: {
+        periodKey,
+        used: Math.min(currentUsed + 1, limit),
+      },
+    };
+
+    transaction.update(userRef, {
+      subscription: {
+        ...subscription,
+        monthlyUsage,
+      },
+      updatedAt: new Date(),
+    });
+  });
+}
+
+async function countUserPostsThisMonth(userId: string): Promise<number> {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  const q = query(
+    collection(db, JOBS_COLLECTION),
+    where('posterId', '==', userId),
+    where('createdAt', '>=', startOfMonth),
+    where('createdAt', '<', startOfNextMonth)
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.size;
+}
 
 // ============================================
 // GET USER SUBSCRIPTION
@@ -25,6 +321,7 @@ const JOBS_COLLECTION = 'jobs';
 export async function getUserSubscription(userId: string): Promise<Subscription> {
   try {
     const userDoc = await getDoc(doc(db, USERS_COLLECTION, userId));
+    const commerceStatus = await getCommerceAccessStatus();
     
     if (userDoc.exists()) {
       const data = userDoc.data();
@@ -46,11 +343,13 @@ export async function getUserSubscription(userId: string): Promise<Subscription>
           if (expiresAt < new Date()) {
             // Premium expired, revert to free
             await updateUserSubscription(userId, { plan: 'free' });
-            return { plan: 'free' };
+            return applyEarlyAccessToSubscription({ plan: 'free' }, data.role, commerceStatus);
           }
         }
-        return subscription;
+        return applyEarlyAccessToSubscription(subscription, data.role, commerceStatus);
       }
+
+      return applyEarlyAccessToSubscription({ plan: 'free' }, data.role, commerceStatus);
     }
     
     // Default to free plan
@@ -75,6 +374,7 @@ export async function updateUserSubscription(
     const sanitize = (obj: Partial<Subscription>) => {
       const out: any = {};
       for (const key of Object.keys(obj)) {
+        if (key === 'isEarlyAccess' || key === 'sourcePlan') continue;
         const v = (obj as any)[key];
         if (v !== undefined) out[key] = v;
       }
@@ -94,10 +394,23 @@ export async function updateUserSubscription(
 }
 
 // ============================================
-// UPGRADE TO PREMIUM (legacy → nurse_pro)
+// UPGRADE TO PREMIUM (legacy helper, now role-aware)
 // ============================================
 export async function upgradeToPremium(userId: string): Promise<boolean> {
-  return upgradePlan(userId, 'nurse_pro', 'monthly');
+  try {
+    const userDoc = await getDoc(doc(db, USERS_COLLECTION, userId));
+    const role = userDoc.exists() ? userDoc.data().role : null;
+    const targetPlan: SubscriptionPlan = role === 'hospital' || role === 'admin'
+      ? 'hospital_pro'
+      : role === 'nurse'
+        ? 'nurse_pro'
+        : 'premium';
+
+    return upgradePlan(userId, targetPlan, 'monthly');
+  } catch (error) {
+    console.error('Error resolving premium upgrade plan:', error);
+    return upgradePlan(userId, 'premium', 'monthly');
+  }
 }
 
 // ============================================
@@ -143,6 +456,16 @@ export async function canUserPostToday(userId: string): Promise<{
   canPayForExtra?: boolean;
 }> {
   try {
+    const launchUsage = await getFeatureUsageStatus(userId, 'post_create');
+    if (launchUsage.limit != null) {
+      return {
+        canPost: launchUsage.canUse,
+        postsRemaining: launchUsage.remaining,
+        reason: launchUsage.canUse ? undefined : `คุณโพสต์ครบ ${launchUsage.limit} ครั้งแล้วในเดือนนี้`,
+        canPayForExtra: !launchUsage.canUse,
+      };
+    }
+
     const subscription = (await getUserSubscription(userId)) || { plan: 'free' as const };
     const planKey = subscription.plan;
     const planDef = (SUBSCRIPTION_PLANS as any)[planKey] || SUBSCRIPTION_PLANS.free;
@@ -154,8 +477,16 @@ export async function canUserPostToday(userId: string): Promise<{
 
     // Monthly limit (hospital_starter)
     if (planDef.maxPostsPerMonth) {
-      // check monthly count from Firestore separately if needed — for now allow
-      return { canPost: true, postsRemaining: planDef.maxPostsPerMonth };
+      const postsThisMonth = await countUserPostsThisMonth(userId);
+      const postsRemaining = Math.max(0, planDef.maxPostsPerMonth - postsThisMonth);
+      if (postsRemaining <= 0) {
+        return {
+          canPost: false,
+          postsRemaining: 0,
+          reason: `คุณลงประกาศครบ ${planDef.maxPostsPerMonth} ครั้งแล้วในเดือนนี้`,
+        };
+      }
+      return { canPost: true, postsRemaining };
     }
 
     // Free: daily limit
@@ -181,10 +512,16 @@ export async function canUserPostToday(userId: string): Promise<{
 // ============================================
 export async function incrementPostCount(userId: string): Promise<void> {
   try {
+    const launchUsage = await getFeatureUsageStatus(userId, 'post_create');
+    if (launchUsage.limit != null) {
+      await consumeFeatureUsage(userId, 'post_create');
+      return;
+    }
+
     const subscription = await getUserSubscription(userId);
     
     // Unlimited plans don't need daily tracking
-    if (subscription.plan !== 'free') return;
+    if (subscription.plan !== 'free' || subscription.isEarlyAccess) return;
 
     const today = new Date().toISOString().split('T')[0];
     
@@ -240,6 +577,20 @@ export async function countUserPostsToday(userId: string): Promise<number> {
   }
 }
 
+export async function getUserCreatedPostCount(userId: string): Promise<number> {
+  try {
+    const postsQuery = query(
+      collection(db, JOBS_COLLECTION),
+      where('posterId', '==', userId)
+    );
+    const snapshot = await getCountFromServer(postsQuery);
+    return snapshot.data().count;
+  } catch (error) {
+    console.error('Error counting all user posts:', error);
+    return 0;
+  }
+}
+
 // ============================================
 // GET SUBSCRIPTION STATUS DISPLAY
 // ============================================
@@ -257,11 +608,20 @@ export function getSubscriptionStatusDisplay(subscription: Subscription): {
     hospital_starter:     { label: '🏥 Starter',       color: '#0288D1' },
     hospital_pro:         { label: '🏥 Professional',  color: '#6A1B9A' },
     hospital_enterprise:  { label: '🏢 Enterprise',    color: '#1B5E20' },
-    premium:              { label: '👑 Premium',        color: '#FFD700' }, // legacy
+    premium:              { label: '👑 Premium',        color: '#FFD700' },
   };
 
   const meta = planMeta[plan] || planMeta.free;
   const isPaid = plan !== 'free';
+
+  if (subscription?.isEarlyAccess) {
+    return {
+      planName: meta.label,
+      statusText: 'สิทธิ์ช่วงเปิดตัวแบบมีโควตารายเดือน',
+      statusColor: meta.color,
+      expiresText: 'ใช้งานฟีเจอร์หลักและบริการเสริมได้ แต่มีเพดานการใช้รายเดือนตามประเภทบัญชี',
+    };
+  }
 
   let expiresText: string | undefined;
   const expiresAt = subscription?.expiresAt;
@@ -290,7 +650,11 @@ export function getSubscriptionStatusDisplay(subscription: Subscription): {
 // ============================================
 export async function canUseFreeUrgent(userId: string): Promise<boolean> {
   try {
+    const launchUsage = await getFeatureUsageStatus(userId, 'urgent_post');
+    if (launchUsage.limit != null) return launchUsage.canUse;
+
     const subscription = await getUserSubscription(userId);
+    if (subscription.isEarlyAccess) return true;
     const plan = subscription.plan;
     const planDef = (SUBSCRIPTION_PLANS as any)[plan];
     const urgentQuota: number = planDef?.urgentPerMonth ?? 0;
@@ -310,7 +674,14 @@ export async function canUseFreeUrgent(userId: string): Promise<boolean> {
 // ============================================
 export async function markFreeUrgentUsed(userId: string): Promise<void> {
   try {
+    const launchUsage = await getFeatureUsageStatus(userId, 'urgent_post');
+    if (launchUsage.limit != null) {
+      await consumeFeatureUsage(userId, 'urgent_post');
+      return;
+    }
+
     const subscription = await getUserSubscription(userId);
+    if (subscription.isEarlyAccess) return;
     await updateUserSubscription(userId, {
       ...subscription,
       freeUrgentUsed: true,
@@ -364,9 +735,9 @@ export async function extendPostExpiry(postId: string, days: number = 1): Promis
 // ============================================
 export function getPricingInfo() {
   return {
-    subscription: PRICING.subscription,     // 89 THB/month
-    extendPost: PRICING.extendPost,         // 19 THB per day
-    extraPost: PRICING.extraPost,           // 19 THB per extra post
-    urgentPost: PRICING.urgentPost,         // 49 THB to make urgent
+    subscription: PRICING.subscription,
+    extendPost: PRICING.extendPost,
+    extraPost: PRICING.extraPost,
+    urgentPost: PRICING.urgentPost,
   };
 }

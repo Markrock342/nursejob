@@ -2,7 +2,7 @@
 // REVIEWS SCREEN - Production Ready
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +24,7 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Loading, EmptyState, Avatar, KittenButton as Button } from '../../components/common';
+import ReportModal from '../../components/report/ReportModal';
 import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import {
   getReviewsForTarget,
@@ -43,6 +45,8 @@ type ReviewsRouteParams = {
   targetUserId?: string;
   targetName?: string;
   targetRole?: string;
+  completionId?: string;
+  relatedJobId?: string;
 };
 
 // Star Rating Component
@@ -56,7 +60,10 @@ const StarRating = ({
   size?: number;
   onRate?: (rating: number) => void;
   editable?: boolean;
-}) => (
+}) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
   <View style={styles.starContainer}>
     {[1, 2, 3, 4, 5].map((star) => (
       <TouchableOpacity
@@ -67,15 +74,18 @@ const StarRating = ({
         <Ionicons
           name={star <= rating ? 'star' : 'star-outline'}
           size={size}
-          color={star <= rating ? COLORS.warning : COLORS.border}
+          color={star <= rating ? colors.warning : colors.border}
         />
       </TouchableOpacity>
     ))}
   </View>
-);
+  );
+};
 
 // Rating Bar Component
 const RatingBar = ({ label, count, total }: { label: string; count: number; total: number }) => {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const percentage = total > 0 ? (count / total) * 100 : 0;
   
   return (
@@ -93,9 +103,12 @@ export default function ReviewsScreen() {
   const route = useRoute<RouteProp<Record<string, ReviewsRouteParams>, string>>();
   const navigation = useNavigation();
   const { user, requireAuth } = useAuth();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const headerBackground = colors.surface;
+  const statusBarStyle = isDark ? 'light-content' : 'dark-content';
   
-  const { hospitalId, hospitalName, targetUserId, targetName, targetRole } = route.params || {};
+  const { hospitalId, hospitalName, targetUserId, targetName, targetRole, completionId } = route.params || {};
   const targetType = targetUserId ? 'user' : 'hospital';
   const targetId = targetUserId || hospitalId;
   const screenName = targetUserId ? (targetName || 'ผู้ใช้งาน') : (hospitalName || 'สถานที่ทำงาน');
@@ -107,6 +120,9 @@ export default function ReviewsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [reviewEligibility, setReviewEligibility] = useState<ReviewEligibility | null>(null);
+  const [reviewSort, setReviewSort] = useState<'latest' | 'highest' | 'lowest' | 'mostHelpful' | 'leastHelpful'>('latest');
+  const [helpfulReviewIds, setHelpfulReviewIds] = useState<string[]>([]);
+  const [reportingReview, setReportingReview] = useState<Review | null>(null);
   
   // New review form
   const [newRating, setNewRating] = useState(5);
@@ -126,7 +142,7 @@ export default function ReviewsScreen() {
       const [reviewsData, ratingInfo, eligibility] = await Promise.all([
         getReviewsForTarget(targetId, targetType),
         getTargetRating(targetId, targetType),
-        targetType === 'user' && user?.uid ? canUserReviewTarget(user.uid, targetId) : Promise.resolve(null),
+        user?.uid ? canUserReviewTarget(user.uid, targetId, completionId) : Promise.resolve(null),
       ]);
       
       setReviews(reviewsData);
@@ -135,7 +151,10 @@ export default function ReviewsScreen() {
       
       // Check if user already reviewed
       if (user?.uid) {
-        const existing = await getUserReviewForTarget(user.uid, targetId, targetType);
+        const existing = await getUserReviewForTarget(user.uid, targetId, targetType, {
+          completionId: completionId || eligibility?.completionId,
+          relatedJobId: route.params?.relatedJobId || eligibility?.relatedJobId,
+        });
         setUserReview(existing);
       }
     } catch (error) {
@@ -144,7 +163,7 @@ export default function ReviewsScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [targetId, targetType, user?.uid]);
+  }, [completionId, route.params?.relatedJobId, targetId, targetType, user?.uid]);
 
   useEffect(() => {
     loadData();
@@ -155,13 +174,38 @@ export default function ReviewsScreen() {
     loadData();
   };
 
+  const sortedReviews = useMemo(() => {
+    const nextReviews = [...reviews];
+
+    switch (reviewSort) {
+      case 'highest':
+        nextReviews.sort((a, b) => (b.rating - a.rating) || (b.createdAt.getTime() - a.createdAt.getTime()));
+        break;
+      case 'lowest':
+        nextReviews.sort((a, b) => (a.rating - b.rating) || (b.createdAt.getTime() - a.createdAt.getTime()));
+        break;
+      case 'mostHelpful':
+        nextReviews.sort((a, b) => (b.helpful - a.helpful) || (b.createdAt.getTime() - a.createdAt.getTime()));
+        break;
+      case 'leastHelpful':
+        nextReviews.sort((a, b) => (a.helpful - b.helpful) || (b.createdAt.getTime() - a.createdAt.getTime()));
+        break;
+      case 'latest':
+      default:
+        nextReviews.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        break;
+    }
+
+    return nextReviews;
+  }, [reviewSort, reviews]);
+
   const handleWriteReview = () => {
     requireAuth(() => {
       if (userReview) {
-        setAlert({ ...createAlert.info('แจ้งเตือน', 'คุณได้รีวิวโรงพยาบาลนี้แล้ว') } as AlertState);
+        setAlert({ ...createAlert.info('แจ้งเตือน', targetType === 'user' ? 'คุณได้รีวิวงานนี้แล้ว' : 'คุณได้รีวิวสถานที่นี้แล้ว') } as AlertState);
         return;
       }
-      if (targetType === 'user' && !reviewEligibility?.canReview) {
+      if (!reviewEligibility?.canReview) {
         setAlert({ ...createAlert.warning('ยังรีวิวไม่ได้', 'จะรีวิวได้เมื่อมีงานที่ยืนยันแล้วและจบงานเรียบร้อย') } as AlertState);
         return;
       }
@@ -198,7 +242,8 @@ export default function ReviewsScreen() {
           cons: newCons.trim() || undefined,
           wouldRecommend,
           userPhotoURL: user.photoURL || undefined,
-          relatedJobId: reviewEligibility?.relatedJobId,
+          relatedJobId: route.params?.relatedJobId || reviewEligibility?.relatedJobId,
+          completionId: completionId || reviewEligibility?.completionId,
           isVerified: reviewEligibility?.isVerified ?? false,
         }
       );
@@ -224,18 +269,52 @@ export default function ReviewsScreen() {
   };
 
   const handleHelpful = async (review: Review) => {
-    await markReviewHelpful(review.id);
-    setReviews(prev =>
-      prev.map(r => (r.id === review.id ? { ...r, helpful: r.helpful + 1 } : r))
-    );
+    if (!user?.uid) {
+      setAlert({ ...createAlert.info('กรุณาเข้าสู่ระบบ', 'เข้าสู่ระบบก่อนกดว่ารีวิวนี้มีประโยชน์') } as AlertState);
+      return;
+    }
+
+    if (helpfulReviewIds.includes(review.id) || review.helpfulVoterIds?.includes(user.uid)) {
+      setAlert({ ...createAlert.info('กดแล้ว', 'คุณกดว่ารีวิวนี้มีประโยชน์ไปแล้ว') } as AlertState);
+      return;
+    }
+
+    try {
+      const updated = await markReviewHelpful(review.id, user.uid);
+      if (!updated) {
+        setAlert({ ...createAlert.info('กดแล้ว', 'คุณกดว่ารีวิวนี้มีประโยชน์ไปแล้ว') } as AlertState);
+        setHelpfulReviewIds((prev) => [...prev, review.id]);
+        return;
+      }
+
+      setHelpfulReviewIds((prev) => [...prev, review.id]);
+      setReviews((prev) =>
+        prev.map((r) => r.id === review.id
+          ? {
+              ...r,
+              helpful: r.helpful + 1,
+              helpfulVoterIds: [...(r.helpfulVoterIds || []), user.uid],
+            }
+          : r)
+      );
+    } catch (error: any) {
+      setAlert({ ...createAlert.error('กดไม่ได้', error?.message || 'ไม่สามารถบันทึกคะแนนประโยชน์ได้') } as AlertState);
+    }
+  };
+
+  const handleReportReview = (review: Review) => {
+    requireAuth(() => {
+      setReportingReview(review);
+    });
   };
 
   if (!targetId) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+        <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <EmptyState
           icon="alert-circle-outline"
-          title="ไม่พบข้อมูลโรงพยาบาล"
+          title={targetType === 'user' ? 'ไม่พบข้อมูลผู้ใช้งาน' : 'ไม่พบข้อมูลสถานที่ทำงาน'}
           actionLabel="กลับ"
           onAction={() => navigation.goBack()}
         />
@@ -247,7 +326,10 @@ export default function ReviewsScreen() {
     return <Loading message="กำลังโหลดรีวิว..." />;
   }
 
-  const renderReview = ({ item }: { item: Review }) => (
+  const renderReview = ({ item }: { item: Review }) => {
+    const hasMarkedHelpful = Boolean(user?.uid && (helpfulReviewIds.includes(item.id) || item.helpfulVoterIds?.includes(user.uid)));
+
+    return (
     <View style={styles.reviewCard}>
       <View style={styles.reviewHeader}>
         <Avatar
@@ -301,24 +383,44 @@ export default function ReviewsScreen() {
             {item.wouldRecommend ? 'แนะนำ' : 'ไม่แนะนำ'}
           </Text>
         </View>
-        <TouchableOpacity style={styles.helpfulButton} onPress={() => handleHelpful(item)}>
-          <Ionicons name="thumbs-up-outline" size={16} color={colors.textSecondary} />
-          <Text style={styles.helpfulText}>เป็นประโยชน์ ({item.helpful})</Text>
+        <TouchableOpacity style={[styles.helpfulButton, hasMarkedHelpful && styles.helpfulButtonActive]} onPress={() => handleHelpful(item)}>
+          <Ionicons name={hasMarkedHelpful ? 'thumbs-up' : 'thumbs-up-outline'} size={16} color={hasMarkedHelpful ? colors.primary : colors.textSecondary} />
+          <Text style={[styles.helpfulText, hasMarkedHelpful && styles.helpfulTextActive]}>
+            {hasMarkedHelpful ? 'มีประโยชน์แล้ว' : 'มีประโยชน์'} ({item.helpful})
+          </Text>
         </TouchableOpacity>
       </View>
 
+      <TouchableOpacity style={styles.reportButton} onPress={() => handleReportReview(item)}>
+        <Ionicons name="flag-outline" size={15} color={colors.textMuted} />
+        <Text style={styles.reportButtonText}>รายงานรีวิว</Text>
+      </TouchableOpacity>
+
       {item.response && (
         <View style={styles.responseContainer}>
-          <Text style={styles.responseLabel}>คำตอบจากโรงพยาบาล</Text>
+          <Text style={styles.responseLabel}>{targetType === 'user' ? 'คำตอบจากผู้ใช้งาน' : 'คำตอบจากสถานที่ทำงาน'}</Text>
           <Text style={styles.responseContent}>{item.response.content}</Text>
         </View>
       )}
     </View>
   );
+  };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: headerBackground }]} edges={['top']}>
+      <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
       <CustomAlert {...alert} onClose={closeAlert} />
+      <ReportModal
+        visible={!!reportingReview}
+        onClose={() => setReportingReview(null)}
+        targetType="review"
+        targetId={reportingReview?.id || ''}
+        targetName={reportingReview ? `${reportingReview.userName}: ${reportingReview.title}` : undefined}
+        targetDescription={reportingReview?.content}
+        reporterId={user?.uid || ''}
+        reporterName={user?.displayName || 'ผู้ใช้'}
+        reporterEmail={user?.email || ''}
+      />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -352,23 +454,49 @@ export default function ReviewsScreen() {
       )}
 
       {/* Write Review Button */}
-      {!userReview && (targetType === 'hospital' || reviewEligibility?.canReview) && (
+      {!userReview && reviewEligibility?.canReview && (
         <TouchableOpacity style={styles.writeButton} onPress={handleWriteReview}>
           <Ionicons name="create-outline" size={20} color={colors.white} />
           <Text style={styles.writeButtonText}>เขียนรีวิว</Text>
         </TouchableOpacity>
       )}
 
-      {targetType === 'user' && !userReview && !reviewEligibility?.canReview ? (
+      {!userReview && !reviewEligibility?.canReview ? (
         <View style={styles.reviewHintBox}>
           <Ionicons name="information-circle-outline" size={18} color={colors.warning} />
           <Text style={styles.reviewHintText}>รีวิวได้เมื่อคุณมีงานที่ยืนยันแล้วและจบงานกับโปรไฟล์นี้</Text>
         </View>
       ) : null}
 
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.sortBar}
+        style={styles.sortScroll}
+      >
+        {[
+          { key: 'latest', label: 'ล่าสุด' },
+          { key: 'highest', label: 'คะแนนมากสุด' },
+          { key: 'lowest', label: 'คะแนนน้อยสุด' },
+          { key: 'mostHelpful', label: 'มีประโยชน์มากสุด' },
+          { key: 'leastHelpful', label: 'มีประโยชน์น้อยสุด' },
+        ].map((option) => {
+          const selected = reviewSort === option.key;
+          return (
+            <TouchableOpacity
+              key={option.key}
+              onPress={() => setReviewSort(option.key as typeof reviewSort)}
+              style={[styles.sortChip, selected && styles.sortChipActive]}
+            >
+              <Text style={[styles.sortChipText, selected && styles.sortChipTextActive]}>{option.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
       {/* Reviews List */}
       <FlatList
-        data={reviews}
+        data={sortedReviews}
         keyExtractor={(item) => item.id}
         renderItem={renderReview}
         contentContainerStyle={styles.list}
@@ -383,7 +511,7 @@ export default function ReviewsScreen() {
           <EmptyState
             icon="chatbubbles-outline"
             title="ยังไม่มีรีวิว"
-            subtitle="เป็นคนแรกที่รีวิวโรงพยาบาลนี้"
+            subtitle={targetType === 'user' ? 'เป็นคนแรกที่รีวิวผู้ใช้งานนี้' : 'เป็นคนแรกที่รีวิวสถานที่นี้'}
             actionLabel="เขียนรีวิว"
             onAction={handleWriteReview}
           />
@@ -415,7 +543,7 @@ export default function ReviewsScreen() {
 
             <ScrollView style={styles.modalBody}>
               {/* Hospital Name */}
-              <Text style={styles.hospitalLabel}>{hospitalName}</Text>
+              <Text style={styles.hospitalLabel}>{screenName}</Text>
 
               {/* Rating */}
               <View style={styles.formGroup}>
@@ -514,7 +642,7 @@ export default function ReviewsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -611,6 +739,39 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     paddingBottom: 100,
   },
+  sortScroll: {
+    maxHeight: 56,
+  },
+  sortBar: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
+    gap: SPACING.sm,
+    alignItems: 'center',
+  },
+  sortChip: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    minHeight: 38,
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  sortChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  sortChipText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  sortChipTextActive: {
+    color: COLORS.white,
+  },
   reviewCard: {
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.lg,
@@ -667,6 +828,23 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: SPACING.sm,
   },
+  reviewHintBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.warningLight,
+  },
+  reviewHintText: {
+    flex: 1,
+    fontSize: FONT_SIZES.sm,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+  },
   prosConsContainer: {
     marginTop: SPACING.md,
     gap: SPACING.sm,
@@ -717,10 +895,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  helpfulButtonActive: {
+    backgroundColor: COLORS.primaryLight,
   },
   helpfulText: {
     fontSize: FONT_SIZES.xs,
     color: COLORS.textSecondary,
+  },
+  helpfulTextActive: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  reportButton: {
+    alignSelf: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: SPACING.sm,
+  },
+  reportButtonText: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textMuted,
+    fontWeight: '600',
   },
   responseContainer: {
     marginTop: SPACING.md,

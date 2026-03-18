@@ -22,7 +22,7 @@ import {
   updateOnlineStatus,
   UserProfile,
 } from '../services/authService';
-import { ADMIN_CONFIG } from '../config/adminConfig';
+import { LegalConsentRecord } from '../types';
 import { getErrorMessage } from '../utils/helpers';
 
 // ============================================
@@ -41,7 +41,7 @@ interface AuthContextType extends AuthState {
   loginWithGoogle: (idToken: string) => Promise<{ isNewUser: boolean }>;
   loginAsAdmin: (username: string, password: string) => Promise<void>;
   loginWithPhone: (phone: string) => Promise<void>;
-    register: (email: string, password: string, displayName: string, role?: 'user' | 'nurse' | 'hospital', username?: string, phone?: string, staffType?: string, orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency') => Promise<void>;
+    register: (email: string, password: string, displayName: string, role?: 'user' | 'nurse' | 'hospital', username?: string, phone?: string, staffType?: string, orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency', legalConsent?: LegalConsentRecord) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<UserProfile>) => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
@@ -69,10 +69,39 @@ interface AuthContextType extends AuthState {
 // ============================================
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const LEGACY_USER_CACHE_KEY = 'user';
+const NEARBY_JOB_ALERT_CACHE_KEY = 'nearbyJobAlert';
+
 function isPermissionDeniedError(error: any): boolean {
   const code = error?.code;
   const message = String(error?.message || '');
   return code === 'permission-denied' || message.includes('Missing or insufficient permissions');
+}
+
+async function loadCachedNearbyJobAlert() {
+  try {
+    const raw = await AsyncStorage.getItem(NEARBY_JOB_ALERT_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistNearbyJobAlertCache(userProfile: UserProfile | null) {
+  try {
+    const nearbyJobAlert = userProfile?.nearbyJobAlert || null;
+    if (!nearbyJobAlert) {
+      await AsyncStorage.removeItem(NEARBY_JOB_ALERT_CACHE_KEY);
+      return;
+    }
+    await AsyncStorage.setItem(NEARBY_JOB_ALERT_CACHE_KEY, JSON.stringify(nearbyJobAlert));
+  } catch {}
+}
+
+async function clearLegacyUserCache() {
+  try {
+    await AsyncStorage.removeItem(LEGACY_USER_CACHE_KEY);
+  } catch {}
 }
 
 // ============================================
@@ -97,6 +126,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const profileFetchInProgressRef = useRef(false);
   const isInitializedRef = useRef(false); // ref version เพื่อใช้ใน async callbacks
 
+  useEffect(() => {
+    void clearLegacyUserCache();
+  }, []);
+
   // Listen for auth state changes
   useEffect(() => {
     // Mark as mounted
@@ -120,32 +153,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
           });
           // ⚠️ Only update state if still mounted
           if (isMountedRef.current) {
-            // Merge Firestore profile with AsyncStorage cache:
-            // ป้องกัน nearbyJobAlert หายเมื่อ Firestore อ่านข้อมูลเก่า
             let mergedProfile = profile;
             try {
-              const cachedStr = await AsyncStorage.getItem('user');
-              const cachedUser = cachedStr ? JSON.parse(cachedStr) : null;
-              if (mergedProfile && cachedUser) {
-                // ถ้า Firestore ไม่มี nearbyJobAlert แต่ cache มี → ใช้ค่าจาก cache
-                if (!mergedProfile.nearbyJobAlert && cachedUser.nearbyJobAlert) {
-                  mergedProfile = { ...mergedProfile, nearbyJobAlert: cachedUser.nearbyJobAlert };
+              const cachedNearbyJobAlert = await loadCachedNearbyJobAlert();
+              if (mergedProfile && cachedNearbyJobAlert) {
+                if (!mergedProfile.nearbyJobAlert) {
+                  mergedProfile = { ...mergedProfile, nearbyJobAlert: cachedNearbyJobAlert };
                 }
-                // ถ้า cache มี nearbyJobAlert ที่ enabled แต่ Firestore มี disabled → เชื่อ cache
-                // (กรณี Firestore อ่านจาก offline cache เก่าก่อนที่ write จะ sync)
                 if (
-                  cachedUser.nearbyJobAlert?.enabled === true &&
+                  cachedNearbyJobAlert?.enabled === true &&
                   mergedProfile.nearbyJobAlert?.enabled === false
                 ) {
-                  mergedProfile = { ...mergedProfile, nearbyJobAlert: cachedUser.nearbyJobAlert };
+                  mergedProfile = { ...mergedProfile, nearbyJobAlert: cachedNearbyJobAlert };
                 }
               }
             } catch (_) {}
 
             setUser(mergedProfile);
-            if (mergedProfile) {
-              await AsyncStorage.setItem('user', JSON.stringify(mergedProfile));
-            }
+            await persistNearbyJobAlertCache(mergedProfile);
           }
         } catch (err: any) {
           if (!isPermissionDeniedError(err)) {
@@ -160,7 +185,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       } else {
         if (isMountedRef.current) {
           setUser(null);
-          await AsyncStorage.removeItem('user');
+          await clearLegacyUserCache();
+          await AsyncStorage.removeItem(NEARBY_JOB_ALERT_CACHE_KEY);
         }
       }
       
@@ -169,9 +195,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setIsInitialized(true);
       }
     });
-
-    // Try to restore cached user on app start
-    loadCachedUser();
 
     // ✅ Cleanup: mark as unmounted and prevent state updates
     return () => {
@@ -208,64 +231,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
   }, [user?.uid, isInitialized]);
 
-  // Load cached user for faster startup
-  const loadCachedUser = async () => {
-    try {
-      const cached = await AsyncStorage.getItem('user');
-      if (cached) {
-        const cachedUser = JSON.parse(cached);
-        // Never trust cached admin profile without a real Firebase auth session.
-        if (cachedUser?.isAdmin) {
-          return;
-        }
-        // Only use cache if still loading (use ref to avoid stale closure)
-        if (!isInitializedRef.current) {
-          setUser(cachedUser);
-        }
-      }
-    } catch (err) {
-      console.error('Error loading cached user:', err);
-    }
-  };
-
   // Login (supports both email and username)
   const login = async (emailOrUsername: string, password: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      let email = emailOrUsername;
-      
-      // Route admin username directly to server-side admin verification.
-      const inputNormalized = emailOrUsername.trim().toLowerCase();
-      const adminUsername = (ADMIN_CONFIG.username || 'adminmark').toLowerCase();
-      const isAdminUsername = inputNormalized === adminUsername;
-      if (isAdminUsername) {
-        const profile = await loginAsAdminService(emailOrUsername, password);
-        await AsyncStorage.setItem('user', JSON.stringify(profile));
-        // ⚠️ Only update state if still mounted
-        if (isMountedRef.current) {
-          setUser(profile);
-          setIsInitialized(true);
-          setShowLoginModal(false);
-        }
-        if (pendingAction) {
-          setTimeout(() => {
-            if (isMountedRef.current) {
-              pendingAction();
-              setPendingAction(null);
-            }
-          }, 100);
-        }
-        return;
-      }
-      
+      let email = emailOrUsername.trim();
+
       // Check if it's a username (doesn't contain @)
       if (!emailOrUsername.includes('@')) {
         const foundEmail = await findEmailByUsername(emailOrUsername);
         if (foundEmail) {
           email = foundEmail;
         } else {
-          throw new Error('ไม่พบ Username นี้ในระบบ');
+          const profile = await loginAsAdminService(emailOrUsername, password);
+          if (isMountedRef.current) {
+            setUser(profile);
+            setIsInitialized(true);
+            setShowLoginModal(false);
+          }
+          await persistNearbyJobAlertCache(profile);
+          if (pendingAction) {
+            setTimeout(() => {
+              if (isMountedRef.current) {
+                pendingAction();
+                setPendingAction(null);
+              }
+            }, 100);
+          }
+          return;
         }
       }
       
@@ -274,14 +268,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Note: Email verification is optional - user can verify later
       // We allow login without verification but show reminder in profile
       
-      // Save to AsyncStorage first
-      await AsyncStorage.setItem('user', JSON.stringify(profile));
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(profile);
         setIsInitialized(true);
         setShowLoginModal(false);
       }
+      await persistNearbyJobAlertCache(profile);
       // Execute pending action after login
       if (pendingAction) {
         setTimeout(() => {
@@ -312,14 +305,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     try {
       const { profile, isNewUser } = await loginWithGoogleService(idToken);
-      // Save to AsyncStorage first
-      await AsyncStorage.setItem('user', JSON.stringify(profile));
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(profile);
         setIsInitialized(true);
         setShowLoginModal(false);
       }
+      await persistNearbyJobAlertCache(profile);
       // Execute pending action only for returning users
       if (!isNewUser && pendingAction) {
         setTimeout(() => {
@@ -350,14 +342,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     try {
       const profile = await loginAsAdminService(username, password);
-      // Save to AsyncStorage first
-      await AsyncStorage.setItem('user', JSON.stringify(profile));
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(profile);
         setIsInitialized(true);
         setShowLoginModal(false);
       }
+      await persistNearbyJobAlertCache(profile);
       // Execute pending action after login
       if (pendingAction) {
         setTimeout(() => {
@@ -387,14 +378,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
     try {
       const profile = await loginWithPhoneOTP(phone);
-      // Save to AsyncStorage first
-      await AsyncStorage.setItem('user', JSON.stringify(profile));
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(profile);
         setIsInitialized(true);
         setShowLoginModal(false);
       }
+      await persistNearbyJobAlertCache(profile);
       // Execute pending action after login
       if (pendingAction) {
         setTimeout(() => {
@@ -428,20 +418,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     username?: string,
     phone?: string,
     staffType?: string,
-    orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency'
+    orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency',
+    legalConsent?: LegalConsentRecord,
   ) => {
     setIsLoading(true);
     setError(null);
     try {
-      const profile = await registerUser(email, password, displayName, role, username, phone, staffType, orgType);
-      // Save to AsyncStorage first
-      await AsyncStorage.setItem('user', JSON.stringify(profile));
+      const profile = await registerUser(email, password, displayName, role, username, phone, staffType, orgType, legalConsent);
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(profile);
         setIsInitialized(true);
         setShowLoginModal(false);
       }
+      await persistNearbyJobAlertCache(profile);
       if (pendingAction) {
         setTimeout(() => {
           if (isMountedRef.current) {
@@ -471,8 +461,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Always sign out from Firebase Auth (covers email, phone, Google, and anonymous admin sessions)
       await logoutUser();
-      // Clear AsyncStorage
-      await AsyncStorage.removeItem('user');
+      await clearLegacyUserCache();
+      await AsyncStorage.removeItem(NEARBY_JOB_ALERT_CACHE_KEY);
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current) {
         setUser(null);
@@ -483,7 +473,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (isMountedRef.current) {
         setUser(null);
       }
-      await AsyncStorage.removeItem('user');
+      await clearLegacyUserCache();
+      await AsyncStorage.removeItem(NEARBY_JOB_ALERT_CACHE_KEY);
     } finally {
       if (isMountedRef.current) {
         setIsLoading(false);
@@ -499,7 +490,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Never allow profile edit path to change authz fields.
       // Role/isAdmin can only be changed by secure admin/server flows.
-      const blockedKeys = new Set(['role', 'isAdmin', 'uid', 'id', 'email']);
+      const blockedKeys = new Set([
+        'role',
+        'isAdmin',
+        'uid',
+        'id',
+        'email',
+        'adminTags',
+        'adminWarningTag',
+        'postingSuspended',
+        'postingSuspendedReason',
+      ]);
 
       // Filter out undefined values and prepare for Firestore
       const cleanUpdates: Record<string, any> = {};
@@ -516,7 +517,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (isMountedRef.current) {
         setUser(updatedProfile);
       }
-      await AsyncStorage.setItem('user', JSON.stringify(updatedProfile));
+      await persistNearbyJobAlertCache(updatedProfile);
     } catch (err: any) {
       const errorMessage = getErrorMessage(err);
       if (isMountedRef.current) {
@@ -566,7 +567,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // ⚠️ Only update state if still mounted
       if (isMountedRef.current && profile) {
         setUser(profile);
-        await AsyncStorage.setItem('user', JSON.stringify(profile));
+        await persistNearbyJobAlertCache(profile);
       }
     } catch (err: any) {
       if (!isPermissionDeniedError(err)) {

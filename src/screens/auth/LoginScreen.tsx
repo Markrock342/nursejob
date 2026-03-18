@@ -2,7 +2,7 @@
 // LOGIN SCREEN - Production Ready with Google Sign-In
 // ============================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,19 +16,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
 import Constants from 'expo-constants';
 import { Button, Input, Divider, SuccessModal, ErrorModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AuthStackParamList } from '../../types';
-import { validateAdminCredentials } from '../../services/authService';
-
-// Complete auth session for proper redirect handling
-WebBrowser.maybeCompleteAuthSession();
+import { getGoogleSigninModule, getGoogleSigninUnavailableMessage } from '../../utils/googleSignin';
 
 // ============================================
 // Google OAuth Config — อ่านจาก app.config.js extra
@@ -37,23 +31,7 @@ const extra = Constants.expoConfig?.extra || {};
 const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId || '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com';
 const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || '427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com';
 const GOOGLE_IOS_CLIENT_ID = extra.googleIosClientId || '';
-
-// Explicit redirect URI — ต้อง add URI นี้ใน Google Cloud Console → OAuth 2.0 → Authorized redirect URIs
-const REDIRECT_URI = makeRedirectUri({
-  scheme: 'nursego',
-  path: 'oauth2redirect/google',
-  // ใน Expo Go → จะได้ https://auth.expo.io/@markrock342/nurse-job-app
-  // ใน standalone build → จะได้ nursego://oauth2redirect/google
-});
-
-const GOOGLE_AUTH_CONFIG = {
-  expoClientId: GOOGLE_WEB_CLIENT_ID,
-  webClientId: GOOGLE_WEB_CLIENT_ID,
-  androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
-  iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
-  redirectUri: REDIRECT_URI,
-  selectAccount: true,
-};
+const HAS_GOOGLE_IOS_CLIENT_ID = Boolean(GOOGLE_IOS_CLIENT_ID);
 
 // ============================================
 // Types
@@ -80,39 +58,19 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Auth context
-  const { login, loginWithGoogle, loginAsAdmin, isLoading, error, clearError } = useAuth();
+  const { login, loginWithGoogle, isLoading, error, clearError } = useAuth();
   const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
-  // Google Auth Request
-  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    ...GOOGLE_AUTH_CONFIG,
-  });
-
-  // Handle Google Sign-In response
   useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token } = response.params;
-      if (!id_token) {
-        setErrorMessage('Google Sign-In สำเร็จไม่ครบขั้นตอน: ไม่ได้รับ id_token จาก Google');
-        setShowErrorModal(true);
-        setGoogleLoading(false);
-        return;
-      }
-      handleGoogleLogin(id_token);
-    } else if (response?.type === 'error') {
-      const errCode = (response as any).error?.code || (response as any).params?.error || '';
-      console.log('[Google OAuth] error response:', JSON.stringify(response));
-      if (errCode === 'access_denied') {
-        setErrorMessage('คุณยกเลิกการเข้าสู่ระบบ Google');
-      } else {
-        setErrorMessage(`Google Sign-In ล้มเหลว (${errCode || 'unknown'}) — กรุณาลองใหม่`);
-      }
-      setShowErrorModal(true);
-      setGoogleLoading(false);
-    } else if (response?.type === 'cancel' || response?.type === 'dismiss') {
-      setGoogleLoading(false);
-    }
-  }, [response]);
+    const googleSigninModule = getGoogleSigninModule();
+    googleSigninModule?.GoogleSignin.configure({
+      webClientId: GOOGLE_WEB_CLIENT_ID,
+      iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
+      offlineAccess: false,
+      profileImageSize: 120,
+    });
+  }, []);
 
   // Handle Google Login
   const handleGoogleLogin = async (idToken: string) => {
@@ -136,12 +94,54 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 
   // Trigger Google Sign-In
   const handleGoogleSignIn = async () => {
+    const googleSigninModule = getGoogleSigninModule();
+    if (!googleSigninModule) {
+      setErrorMessage(getGoogleSigninUnavailableMessage());
+      setShowErrorModal(true);
+      return;
+    }
+
+    if (Platform.OS === 'ios' && !HAS_GOOGLE_IOS_CLIENT_ID) {
+      setErrorMessage('ยังไม่ได้ตั้งค่า Google Sign-In สำหรับ iOS ให้เพิ่ม GoogleService-Info.plist หรือ googleIosClientId ของ bundle com.nursego.app ก่อน');
+      setShowErrorModal(true);
+      return;
+    }
+
     setGoogleLoading(true);
     clearError();
     try {
-      await promptAsync();
+      if (Platform.OS === 'android') {
+        await googleSigninModule.GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      }
+      await googleSigninModule.GoogleSignin.signOut().catch(() => null);
+      const response = await googleSigninModule.GoogleSignin.signIn();
+      if (!googleSigninModule.isSuccessResponse(response)) {
+        setGoogleLoading(false);
+        return;
+      }
+
+      const idToken = response.data.idToken;
+      if (!idToken) {
+        throw new Error('Google Sign-In สำเร็จไม่ครบขั้นตอน: ไม่ได้รับ idToken จาก Google');
+      }
+
+      await handleGoogleLogin(idToken);
     } catch (err: any) {
-      setErrorMessage('ไม่สามารถเปิดหน้า Google ได้');
+      if (googleSigninModule.isErrorWithCode(err)) {
+        if (err.code === googleSigninModule.statusCodes.SIGN_IN_CANCELLED) {
+          setGoogleLoading(false);
+          return;
+        }
+        if (err.code === googleSigninModule.statusCodes.IN_PROGRESS) {
+          setErrorMessage('Google Sign-In กำลังทำงานอยู่ กรุณารอสักครู่');
+        } else if (err.code === googleSigninModule.statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+          setErrorMessage('อุปกรณ์นี้ยังไม่พร้อมสำหรับ Google Sign-In');
+        } else {
+          setErrorMessage(err.message || 'Google Sign-In ล้มเหลว');
+        }
+      } else {
+        setErrorMessage(err?.message || 'ไม่สามารถเปิด Google Sign-In ได้');
+      }
       setShowErrorModal(true);
       setGoogleLoading(false);
     }
@@ -161,11 +161,6 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  };
-
-  // Check if input is admin username
-  const isAdminUsername = (input: string): boolean => {
-    return validateAdminCredentials(input, password) !== null;
   };
 
   // Handle login
@@ -303,10 +298,10 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
             <TouchableOpacity
               style={[
                 styles.googleButton,
-                (googleLoading || !request) && styles.googleButtonDisabled,
+                googleLoading && styles.googleButtonDisabled,
               ]}
               onPress={handleGoogleSignIn}
-              disabled={googleLoading || !request}
+              disabled={googleLoading}
             >
               {googleLoading ? (
                 <ActivityIndicator color={colors.text} />
@@ -368,7 +363,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

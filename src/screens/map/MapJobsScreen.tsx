@@ -294,7 +294,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
 
   const openJobDetail = (job: JobPost) => {
     setSelectedJob(null);
-    navigation.navigate('JobDetail', { job: serializeJob(job) });
+    navigation.navigate('JobDetail', { job: serializeJob(job), source: 'map' });
   };
 
   const openFilter = () => { setDraftFilter(filter); setShowFilterModal(true); };

@@ -12,6 +12,7 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,12 +20,15 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useScreenPerformance } from '../../hooks/useScreenPerformance';
 import { getUserFavorites, removeFromFavorites, Favorite } from '../../services/favoritesService';
 
 // ──────────────────────────────────────────
 // EmptyState
 // ──────────────────────────────────────────
 function EmptyState({ filtered }: { filtered: boolean }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyIcon}>{filtered ? '🔍' : '🤍'}</Text>
@@ -51,6 +55,8 @@ interface FavoriteCardProps {
 }
 
 function FavoriteCard({ favorite, onPress, onRemove, removing }: FavoriteCardProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const job = favorite.job;
   if (!job) return null;
 
@@ -153,9 +159,13 @@ function FavoriteCard({ favorite, onPress, onRemove, removing }: FavoriteCardPro
 // FavoritesScreen
 // ──────────────────────────────────────────
 export default function FavoritesScreen() {
+  useScreenPerformance('Favorites');
   const navigation = useNavigation<any>();
   const { user } = useAuth();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const headerBackground = colors.surface;
+  const statusBarStyle = isDark ? 'light-content' : 'dark-content';
 
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -171,7 +181,10 @@ export default function FavoritesScreen() {
       }
       if (!silent) setIsLoading(true);
       try {
-        const data = await getUserFavorites(user.uid);
+        const data = await getUserFavorites(user.uid, {
+          screenName: 'Favorites',
+          source: 'favorites:screen_load',
+        });
         setFavorites(data);
       } catch (e) {
         console.error('FavoritesScreen:', e);
@@ -234,13 +247,14 @@ export default function FavoritesScreen() {
 
   return (
     <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={[styles.container, { backgroundColor: headerBackground }]}
       edges={['top']}>
+      <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
       {/* ── Header ── */}
       <View
         style={[
           styles.header,
-          { backgroundColor: colors.surface, borderBottomColor: colors.border },
+          { backgroundColor: headerBackground, borderBottomColor: colors.border },
         ]}>
         <TouchableOpacity
           style={styles.backBtn}
@@ -307,7 +321,7 @@ export default function FavoritesScreen() {
             <FavoriteCard
               favorite={item}
               onPress={() =>
-                item.job && navigation.navigate('JobDetail', { job: item.job })
+                item.job && navigation.navigate('JobDetail', { job: item.job, source: 'favorites' })
               }
               onRemove={() => handleRemove(item)}
               removing={removingId === item.id}
@@ -342,7 +356,7 @@ export default function FavoritesScreen() {
 // ──────────────────────────────────────────
 // Styles
 // ──────────────────────────────────────────
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: { flex: 1 },
 
   // Header
@@ -420,17 +434,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  cardExpired: { opacity: 0.7, borderColor: '#E5E7EB' },
+  cardExpired: { opacity: 0.7, borderColor: COLORS.border },
   expiredBanner: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: COLORS.errorLight,
     paddingHorizontal: SPACING.md,
     paddingVertical: 4,
     borderBottomWidth: 1,
-    borderBottomColor: '#FECACA',
+    borderBottomColor: COLORS.errorLight,
   },
   expiredText: {
     fontSize: FONT_SIZES.xs,
-    color: '#DC2626',
+    color: COLORS.error,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -454,14 +468,14 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   urgentBadge: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: COLORS.warningLight,
     borderRadius: BORDER_RADIUS.sm,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   urgentText: {
     fontSize: FONT_SIZES.xs,
-    color: '#D97706',
+    color: COLORS.warning,
     fontWeight: '700',
   },
   jobTitle: {
@@ -483,21 +497,21 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   wageBadge: {
-    backgroundColor: '#DCFCE7',
+    backgroundColor: COLORS.successLight,
     borderRadius: BORDER_RADIUS.sm,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  wageText: { fontSize: FONT_SIZES.sm, fontWeight: '700', color: '#15803D' },
+  wageText: { fontSize: FONT_SIZES.sm, fontWeight: '700', color: COLORS.success },
   shiftBadge: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: COLORS.infoLight,
     borderRadius: BORDER_RADIUS.sm,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   shiftText: {
     fontSize: FONT_SIZES.xs,
-    color: '#1D4ED8',
+    color: COLORS.info,
     fontWeight: '600',
   },
 

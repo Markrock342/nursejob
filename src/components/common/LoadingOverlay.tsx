@@ -7,11 +7,11 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Modal,
   Animated,
 } from 'react-native';
 import { COLORS, SPACING, FONT_SIZES } from '../../theme';
+import BrandSpinner from './BrandSpinner';
 
 // ============================================
 // Types
@@ -50,7 +50,7 @@ export function LoadingOverlay({
     >
       <View style={styles.overlay} accessibilityViewIsModal={true}>
         <View style={styles.container}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
+          <BrandSpinner size={56} color={COLORS.accentLight} />
           {message && <Text style={styles.message}>{message}</Text>}
         </View>
       </View>
@@ -67,9 +67,10 @@ interface InlineLoadingProps {
 }
 
 export function InlineLoading({ message, size = 'small' }: InlineLoadingProps) {
+  const spinnerSize = size === 'large' ? 46 : 26;
   return (
     <View style={styles.inlineContainer}>
-      <ActivityIndicator size={size} color={COLORS.primary} />
+      <BrandSpinner size={spinnerSize} color={COLORS.accent} />
       {message && <Text style={styles.inlineMessage}>{message}</Text>}
     </View>
   );
@@ -88,7 +89,7 @@ export function ButtonLoading({ loading, children, loadingText }: ButtonLoadingP
   if (loading) {
     return (
       <View style={styles.buttonLoading}>
-        <ActivityIndicator size="small" color={COLORS.white} />
+        <BrandSpinner size={20} color={COLORS.white} />
         {loadingText && <Text style={styles.buttonLoadingText}>{loadingText}</Text>}
       </View>
     );

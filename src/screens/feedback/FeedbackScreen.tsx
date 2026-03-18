@@ -2,7 +2,7 @@
 // FEEDBACK SCREEN - หน้าส่ง Feedback/รีวิว
 // ============================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -36,6 +36,7 @@ export default function FeedbackScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
   const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   
   const [rating, setRating] = useState(5);
   const [feedbackType, setFeedbackType] = useState<FeedbackType>('app_review');
@@ -312,7 +313,7 @@ export default function FeedbackScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
