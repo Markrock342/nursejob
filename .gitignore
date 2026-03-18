@@ -9,8 +9,8 @@ node_modules/
 
 # Firebase secrets (google-services.json is intentionally tracked for EAS builds)
 # google-services.json  ← removed from ignore so EAS can include it
-GoogleService-Info.plist
 serviceAccountKey*.json
+*firebase-adminsdk*.json
 
 # Expo
 .expo/

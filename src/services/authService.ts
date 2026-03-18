@@ -2,23 +2,22 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  signInAnonymously,
   onAuthStateChanged,
   updateProfile,
   signInWithCredential,
-  signInWithCustomToken,
   linkWithCredential,
   GoogleAuthProvider,
   EmailAuthProvider,
   sendEmailVerification,
   sendPasswordResetEmail,
-  deleteUser,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db, firebaseConfig } from '../config/firebase';
-import { ADMIN_CONFIG, validateAdminConfig } from '../config/adminConfig';
-import * as ExpoCrypto from 'expo-crypto';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { auth, db, firebaseConfig, canUseNativeFirebaseModules, initializeNativeAppCheck } from '../config/firebase';
+import { ADMIN_CONFIG } from '../config/adminConfig';
+import { AppliedCampaignCode, LegalConsentRecord, UserAdminTag } from '../types';
+import { getGoogleSigninModule } from '../utils/googleSignin';
 
 export interface UserProfile {
   id: string;
@@ -59,6 +58,17 @@ export interface UserProfile {
     preferredShifts: string[];
     preferredDays: string[];
   };
+  privacy?: {
+    profileVisible?: boolean;
+    showOnlineStatus?: boolean;
+  };
+  notificationPreferences?: {
+    pushEnabled?: boolean;
+    newJobs?: boolean;
+    messages?: boolean;
+    applications?: boolean;
+    marketing?: boolean;
+  };
   workStyle?: string[];      // nurse: fulltime/parttime/weekend/flexible
   careTypes?: string[];      // user: elderly/bedridden/postsurg/child/terminal/other
   hiringUrgency?: string;    // hospital: now/week/month/plan
@@ -74,6 +84,13 @@ export interface UserProfile {
     updatedAt?: Date;
   };
   pushToken?: string; // Expo push token
+  pendingCampaignCode?: AppliedCampaignCode | null;
+  legalConsent?: LegalConsentRecord;
+  adminTags?: UserAdminTag[];
+  adminWarningTag?: string;
+  postingSuspended?: boolean;
+  postingSuspendedReason?: string;
+  isActive?: boolean;
 }
 
 // ==========================================
@@ -85,21 +102,6 @@ const ADMIN_EMAILS = [
   // เพิ่ม email ของคุณที่นี่:
   // 'your-email@gmail.com',
 ];
-
-// ✅ Admin credentials อ่านจาก environment variables แทนที่จะ hardcode
-// ⚠️ validating config ก่อนใช้
-const adminConfigValidation = validateAdminConfig();
-if (!adminConfigValidation.valid) {
-  console.warn(adminConfigValidation.error);
-}
-
-// SHA-256 via expo-crypto — works on iOS, Android (Hermes), and Web
-async function sha256(message: string): Promise<string> {
-  return ExpoCrypto.digestStringAsync(
-    ExpoCrypto.CryptoDigestAlgorithm.SHA256,
-    message,
-  );
-}
 
 function toErrorMessage(error: any): string {
   const code = String(error?.code || '');
@@ -117,6 +119,12 @@ function toErrorMessage(error: any): string {
   }
   if (code === 'functions/unauthenticated') {
     return 'Username หรือ Password ไม่ถูกต้อง';
+  }
+  if (code === 'functions/resource-exhausted') {
+    return message || 'มีการพยายามเข้าสู่ระบบมากเกินไป กรุณารอสักครู่';
+  }
+  if (code === 'functions/permission-denied' && message.includes('App Check')) {
+    return 'Admin login ต้องผ่านการยืนยัน App Check จากแอปที่เชื่อถือได้';
   }
   if (code === 'functions/not-found') {
     return `ไม่พบ Cloud Function verifyAdminLogin ในโปรเจกต์ ${projectId}`;
@@ -139,54 +147,27 @@ function toErrorMessage(error: any): string {
 }
 
 async function callAdminLoginEndpoint(username: string, password: string): Promise<any> {
-  const projectId = firebaseConfig.projectId;
-  if (!projectId) {
-    throw new Error('ไม่พบ Firebase projectId สำหรับเรียก Cloud Functions');
-  }
-
-  const response = await fetch(
-    `https://us-central1-${projectId}.cloudfunctions.net/verifyAdminLogin`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        data: { username, password },
-      }),
+  if (canUseNativeFirebaseModules()) {
+    try {
+      const appCheckReady = await initializeNativeAppCheck();
+      if (!appCheckReady) {
+        throw new Error('native-app-check-unavailable');
+      }
+      const nativeFunctions = require('@react-native-firebase/functions').default;
+      const result = await nativeFunctions().httpsCallable('verifyAdminLogin')({ username, password });
+      return result.data;
+    } catch (error) {
+      const code = String((error as any)?.code || '');
+      if (code.startsWith('functions/')) {
+        throw error;
+      }
+      console.warn('[admin-login] Native callable failed, falling back to web SDK:', error);
     }
-  );
-
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok || payload?.error) {
-    const error = payload?.error || {};
-    const message = error?.message || `HTTP ${response.status}`;
-    const status = error?.status || '';
-    const normalizedCode =
-      status === 'UNAUTHENTICATED' ? 'functions/unauthenticated' :
-      status === 'FAILED_PRECONDITION' ? 'functions/failed-precondition' :
-      status === 'NOT_FOUND' ? 'functions/not-found' :
-      status === 'INTERNAL' ? 'functions/internal' :
-      status === 'UNAVAILABLE' ? 'functions/unavailable' :
-      'functions/unknown';
-
-    throw { code: normalizedCode, message };
   }
 
-  return payload?.result || payload;
-}
-
-// ตรวจสอบ admin credentials (async เพื่อใช้ hashing)
-export async function validateAdminCredentials(username: string, password: string): Promise<boolean> {
-  // Check username
-  if (username.toLowerCase() !== ADMIN_CONFIG.username.toLowerCase()) {
-    return false;
-  }
-
-  // Hash input password และเทียบกับ stored hash
-  const inputHash = await sha256(password);
-  return inputHash === ADMIN_CONFIG.passwordHash;
+  const fn = httpsCallable(getFunctions(), 'verifyAdminLogin');
+  const result = await fn({ username, password });
+  return result.data;
 }
 
 // ตรวจสอบว่าเป็น admin หรือไม่
@@ -224,6 +205,7 @@ function mapUserProfile(docId: string, data: any): UserProfile {
     ...data,
     phone: normalizePhoneForStorage(data.phone),
     isAdmin: data.isAdmin === true || data.role === 'admin',
+    isActive: data.isActive !== false,
     createdAt: data.createdAt?.toDate?.() || data.createdAt || new Date(),
     updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
   } as UserProfile;
@@ -242,6 +224,7 @@ function buildProfileSeed(
     phone: normalizePhoneForStorage(seed.phone || user.phoneNumber),
     role: seed.role || 'user',
     isAdmin: seed.isAdmin === true,
+    isActive: seed.isActive !== false,
     isVerified: seed.isVerified ?? false,
     onboardingCompleted: seed.onboardingCompleted,
     staffType: seed.staffType,
@@ -310,7 +293,12 @@ export async function resolveAuthenticatedUserProfile(
     seed?: Partial<Omit<UserProfile, 'id' | 'uid' | 'createdAt'>>;
   } = {}
 ): Promise<UserProfile | null> {
-  return resolveUserProfileFromAuth(user, options);
+  const profile = await resolveUserProfileFromAuth(user, options);
+  if (profile && profile.isActive === false) {
+    await signOut(auth).catch(() => {});
+    throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
+  }
+  return profile;
 }
 
 // ==========================================
@@ -328,7 +316,8 @@ export async function registerUser(
   username?: string,
   phone?: string,
   staffType?: string,
-  orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency'
+  orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency',
+  legalConsent?: LegalConsentRecord,
 ): Promise<UserProfile> {
   try {
     // Check if username already exists (if provided)
@@ -385,10 +374,12 @@ export async function registerUser(
       phone: normalizePhoneForStorage(phone || user.phoneNumber),
       role: finalRole,
       isAdmin,
+      isActive: true,
       isVerified: false,
       onboardingCompleted: true,
       emailVerified: user.emailVerified,
       createdAt: new Date(),
+      ...(legalConsent ? { legalConsent } : {}),
       ...(staffType ? { staffType } : {}),
       ...(orgType ? { orgType } : {}),
     };
@@ -403,7 +394,7 @@ export async function registerUser(
     console.error('Error registering user:', error);
     
     if (error.code === 'auth/email-already-in-use') throw new Error('อีเมลนี้ถูกใช้งานแล้ว');
-    if (error.code === 'auth/weak-password') throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+    if (error.code === 'auth/weak-password') throw new Error('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
     if (error.code === 'auth/invalid-email') throw new Error('รูปแบบอีเมลไม่ถูกต้อง');
     if (error.code === 'auth/provider-already-linked') throw new Error('อีเมลนี้ถูกเชื่อมโยงกับบัญชีอื่นแล้ว');
     if (error.code === 'auth/credential-already-in-use') throw new Error('อีเมลนี้ถูกใช้งานแล้ว');
@@ -432,6 +423,11 @@ export async function loginUser(email: string, password: string): Promise<UserPr
 
     if (!userProfile) {
       throw new Error('ไม่สามารถโหลดข้อมูลผู้ใช้ได้');
+    }
+
+    if (userProfile.isActive === false) {
+      await signOut(auth).catch(() => {});
+      throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
     }
 
     return userProfile;
@@ -522,7 +518,6 @@ export async function findEmailByUsername(username: string): Promise<string | nu
 
 // Login as Admin with username/password
 export async function loginAsAdmin(username: string, password: string): Promise<UserProfile> {
-  const credentialsValid = await validateAdminCredentials(username, password);
   try {
     if (auth.currentUser) {
       await signOut(auth).catch(() => {});
@@ -532,11 +527,7 @@ export async function loginAsAdmin(username: string, password: string): Promise<
     const profile = data.profile || {};
     const email = data?.email || profile.email || ADMIN_CONFIG.email;
 
-    if (data?.customToken) {
-      await signInWithCustomToken(auth, data.customToken);
-    } else {
-      await signInWithEmailAndPassword(auth, email, password);
-    }
+    await signInWithEmailAndPassword(auth, email, password);
 
     const currentUid = auth.currentUser?.uid;
     return {
@@ -549,56 +540,17 @@ export async function loginAsAdmin(username: string, password: string): Promise<
       createdAt: new Date(),
     };
   } catch (e: any) {
-    if (!credentialsValid) {
-      throw new Error(toErrorMessage(e));
-    }
-
-    try {
-      if (auth.currentUser) {
-        await signOut(auth).catch(() => {});
-      }
-
-      const anonymousCredential = await signInAnonymously(auth);
-      const adminUid = anonymousCredential.user.uid;
-
-      await setDoc(doc(db, USERS_COLLECTION, adminUid), {
-        uid: adminUid,
-        email: ADMIN_CONFIG.email,
-        displayName: ADMIN_CONFIG.displayName,
-        role: 'admin',
-        isAdmin: true,
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      }, { merge: true });
-
-      return {
-        id: adminUid,
-        uid: adminUid,
-        email: ADMIN_CONFIG.email,
-        displayName: ADMIN_CONFIG.displayName,
-        role: 'admin',
-        isAdmin: true,
-        createdAt: new Date(),
-      };
-    } catch (fallbackError: any) {
-      const functionMessage = toErrorMessage(e);
-      const fallbackMessage = toErrorMessage(fallbackError);
-
-      if (
-        fallbackMessage === 'ยังไม่ได้เปิด Anonymous sign-in ใน Firebase Authentication' &&
-        functionMessage !== 'Username หรือ Password ไม่ถูกต้อง'
-      ) {
-        throw new Error(`${functionMessage} (และ Anonymous fallback ถูกปิดอยู่)`);
-      }
-
-      throw new Error(fallbackMessage);
-    }
+    throw new Error(toErrorMessage(e));
   }
 }
 
 // Logout user
 export async function logoutUser(): Promise<void> {
   try {
+    const googleSigninModule = getGoogleSigninModule();
+    if (googleSigninModule?.GoogleSignin) {
+      await googleSigninModule.GoogleSignin.signOut().catch(() => null);
+    }
     await signOut(auth);
   } catch (error) {
     console.error('Error logging out:', error);
@@ -776,17 +728,16 @@ export async function deleteUserAccount(): Promise<void> {
       throw new Error('ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
     }
 
-    // Delete user document from Firestore
-    await deleteDoc(doc(db, USERS_COLLECTION, user.uid));
+    await user.getIdToken(true);
 
-    // Delete Firebase Auth user
-    await deleteUser(user);
+    const fn = httpsCallable(getFunctions(), 'deleteCurrentUserAccount');
+    await fn({});
   } catch (error: any) {
     console.error('Error deleting account:', error);
-    if (error.code === 'auth/requires-recent-login') {
+    if (error.code === 'auth/requires-recent-login' || error.code === 'functions/unauthenticated') {
       throw new Error('กรุณาเข้าสู่ระบบใหม่ก่อนลบบัญชี');
     }
-    throw error;
+    throw new Error(error?.message || 'ไม่สามารถลบบัญชีได้ กรุณาลองใหม่');
   }
 }
 

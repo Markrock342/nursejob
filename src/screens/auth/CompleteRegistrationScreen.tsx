@@ -2,7 +2,7 @@
 // COMPLETE REGISTRATION SCREEN (After OTP Verification)
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { AuthStackParamList } from '../../types';
 import { getErrorMessage } from '../../utils/helpers';
+import { trackEvent } from '../../services/analyticsService';
 
 // ============================================
 // Types
@@ -37,7 +38,7 @@ interface Props {
 // Component
 // ============================================
 export default function CompleteRegistrationScreen({ navigation, route }: Props) {
-  const { phone, phoneVerified, role, staffType, orgType } = route.params;
+  const { phone, phoneVerified, role, staffType, orgType, registrationData } = route.params;
   
   // Form State
   const [displayName, setDisplayName] = useState('');
@@ -52,6 +53,18 @@ export default function CompleteRegistrationScreen({ navigation, route }: Props)
 
 // Auth context
 const { register, isLoading, clearError, user } = useAuth();
+
+  useEffect(() => {
+    trackEvent({
+      eventName: 'onboarding_started',
+      screenName: 'CompleteRegistration',
+      props: {
+        role: role || 'user',
+        staffType: staffType || null,
+        orgType: orgType || null,
+      },
+    });
+  }, [orgType, role, staffType]);
 
   // Validate form
   const validateForm = (): boolean => {
@@ -71,8 +84,8 @@ const { register, isLoading, clearError, user } = useAuth();
 
     if (!password) {
       newErrors.password = 'กรุณากรอกรหัสผ่าน';
-    } else if (password.length < 6) {
-      newErrors.password = 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร';
+    } else if (password.length < 8) {
+      newErrors.password = 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
     }
 
     if (!confirmPassword) {
@@ -100,7 +113,18 @@ const { register, isLoading, clearError, user } = useAuth();
         phone, // verified phone
         staffType, // ประเภทบุคลากร (nurse)
         orgType,  // ประเภทองค์กร (hospital)
+        registrationData?.legalConsent,
       );
+
+      await trackEvent({
+        eventName: 'onboarding_step_completed',
+        screenName: 'CompleteRegistration',
+        props: {
+          step: 'account_created',
+          role: role || 'user',
+          hasPhoneVerified: Boolean(phoneVerified),
+        },
+      });
       
       // ถ้า register สำเร็จ ให้แสดง success modal
       setShowSuccessModal(true);
@@ -201,7 +225,7 @@ const { register, isLoading, clearError, user } = useAuth();
                   setPassword(text);
                   if (errors.password) setErrors({ ...errors, password: '' });
                 }}
-                placeholder="อย่างน้อย 6 ตัวอักษร"
+                placeholder="อย่างน้อย 8 ตัวอักษร"
                 secureTextEntry={!showPassword}
                 error={errors.password}
                 icon={

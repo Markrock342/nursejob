@@ -14,7 +14,7 @@ if (!(global as any).process.stdout) {
   (global as any).process.stdout = { isTTY: false };
 }
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, TextInput } from 'react-native';
 import * as ExpoFont from 'expo-font';
@@ -26,19 +26,9 @@ import {
 } from '@expo-google-fonts/sarabun';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import * as Sentry from '@sentry/react-native';
-
-// Init Sentry early (before any component renders)
-Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
-  enabled: !__DEV__, // ปิดใน dev เพื่อไม่ให้ส่ง event ตอนทดสอบ
-  tracesSampleRate: 0.2,
-  debug: false,
-});
 
 // Context Providers
 import { AuthProvider } from './src/context/AuthContext';
-import { NotificationProvider } from './src/context/NotificationContext';
 import { ToastProvider } from './src/context/ToastContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 
@@ -51,18 +41,7 @@ import { getEvaTheme } from './src/theme/uiKitten';
 // Navigation
 import AppNavigator from './src/navigation/AppNavigator';
 import SplashScreen from './src/components/common/SplashScreen';
-
-// ============================================
-// Sentry Crash Tracking
-// ============================================
-Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
-  // Set tracesSampleRate to 1.0 to capture 100% of transactions for tracing.
-  tracesSampleRate: __DEV__ ? 1.0 : 0.2,
-  // Disable in development
-  enabled: !__DEV__,
-  environment: __DEV__ ? 'development' : 'production',
-});
+import { trackAppOpened } from './src/services/analyticsService';
 
 // ============================================
 // APP CONTENT WITH THEME
@@ -70,9 +49,14 @@ Sentry.init({
 function AppContent() {
   const { colors, isDark } = useTheme();
   const [showSplash, setShowSplash] = useState(true);
+
   useEffect(() => {
     const t = setTimeout(() => setShowSplash(false), 3000);
     return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    trackAppOpened();
   }, []);
 
   if (showSplash) return <SplashScreen />;
@@ -80,15 +64,13 @@ function AppContent() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AuthProvider>
-        <NotificationProvider>
-          <ToastProvider>
-            <StatusBar
-              style={isDark ? 'light' : 'dark'}
-              backgroundColor={colors.background}
-            />
-            <AppNavigator />
-          </ToastProvider>
-        </NotificationProvider>
+        <ToastProvider>
+          <StatusBar
+            style={isDark ? 'light' : 'dark'}
+            backgroundColor={colors.background}
+          />
+          <AppNavigator />
+        </ToastProvider>
       </AuthProvider>
     </View>
   );
@@ -104,7 +86,7 @@ function applyGlobalFont() {
   if (!(TextInput as any).__fontPatched) { (TextInput as any).defaultProps = { ...(TextInput as any).defaultProps, style }; (TextInput as any).__fontPatched = true; }
 }
 
-export default Sentry.wrap(function App() {
+export default function App() {
   const [fontsLoaded] = ExpoFont.useFonts({
     Sarabun_400Regular,
     Sarabun_500Medium,
@@ -128,7 +110,7 @@ export default Sentry.wrap(function App() {
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
-});
+}
 
 function ThemedApplication({ children }: { children: React.ReactNode }) {
   const { paletteId, isDark } = useTheme();

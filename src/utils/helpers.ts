@@ -311,8 +311,8 @@ export const validateLoginForm = (email: string, password: string): ValidationRe
   
   if (isEmpty(password)) {
     errors.password = 'กรุณากรอกรหัสผ่าน';
-  } else if (password.length < 6) {
-    errors.password = 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร';
+  } else if (password.length < 8) {
+    errors.password = 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
   }
   
   return {
@@ -343,8 +343,8 @@ export const validateRegisterForm = (
   
   if (isEmpty(password)) {
     errors.password = 'กรุณากรอกรหัสผ่าน';
-  } else if (password.length < 6) {
-    errors.password = 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร';
+  } else if (password.length < 8) {
+    errors.password = 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
   }
   
   if (password !== confirmPassword) {

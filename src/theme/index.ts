@@ -322,7 +322,7 @@ export const APPLICATION_STATUS = {
 export const ERROR_MESSAGES = {
   'auth/email-already-in-use': 'อีเมลนี้ถูกใช้งานแล้ว',
   'auth/invalid-email': 'รูปแบบอีเมลไม่ถูกต้อง',
-  'auth/weak-password': 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร',
+  'auth/weak-password': 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร',
   'auth/user-not-found': 'ไม่พบบัญชีผู้ใช้นี้',
   'auth/wrong-password': 'รหัสผ่านไม่ถูกต้อง',
   'auth/invalid-credential': 'อีเมลหรือรหัสผ่านไม่ถูกต้อง',

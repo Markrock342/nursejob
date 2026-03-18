@@ -98,11 +98,11 @@ export function hasMaxLength(value: string, maxLength: number): boolean {
 }
 
 /**
- * ตรวจสอบรหัสผ่าน (อย่างน้อย 6 ตัว)
+ * ตรวจสอบรหัสผ่าน (อย่างน้อย 8 ตัว)
  */
 export function isValidPassword(password: string): { valid: boolean; error?: string } {
-  if (password.length < 6) {
-    return { valid: false, error: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' };
+  if (password.length < 8) {
+    return { valid: false, error: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' };
   }
   // Optional: เพิ่มข้อกำหนดอื่นๆ
   // if (!/[A-Z]/.test(password)) {

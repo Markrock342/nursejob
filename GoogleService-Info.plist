@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>427547114323-de466f1n2uth5tg8traujh9ppdg30spm.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.427547114323-de466f1n2uth5tg8traujh9ppdg30spm</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyCzjW2z-4bEO6cDep8tROHA4Ro7BslVl98</string>
+	<key>GCM_SENDER_ID</key>
+	<string>427547114323</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.nursego.app</string>
+	<key>PROJECT_ID</key>
+	<string>nurse-go-th</string>
+	<key>STORAGE_BUCKET</key>
+	<string>nurse-go-th.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:427547114323:ios:3fc3fb7a1055ecdd19bfa6</string>
+</dict>
+</plist>

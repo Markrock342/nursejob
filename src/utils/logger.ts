@@ -73,17 +73,15 @@ class Logger {
 
   /**
    * Error log - always logs (for crash reporting)
-   * In production, this should send to error tracking service
+   * In production, keep minimal console error log
    */
   error(message: string, error?: any): void {
     const formattedMessage = this.formatMessage('error', message);
-    
+
     if (__DEV__) {
       console.error(formattedMessage, error);
     } else {
-      // TODO: Send to error tracking service (Sentry, Crashlytics, etc.)
-      // Example: Sentry.captureException(error);
-      console.error(formattedMessage); // Keep minimal error log in production
+      console.error(formattedMessage, error);
     }
   }
 
@@ -117,7 +115,6 @@ export const logger = new Logger({ prefix: 'NurseGo' });
 
 // Service-specific loggers
 export const authLogger = new Logger({ prefix: 'Auth' });
-export const iapLogger = new Logger({ prefix: 'IAP' });
 export const chatLogger = new Logger({ prefix: 'Chat' });
 export const jobLogger = new Logger({ prefix: 'Job' });
 

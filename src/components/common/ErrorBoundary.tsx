@@ -30,7 +30,7 @@ interface State {
 }
 
 class ErrorBoundaryImpl extends React.Component<InnerProps, State> {
-  constructor(props: Props) {
+  constructor(props: InnerProps) {
     super(props);
     this.state = {
       hasError: false,
@@ -46,7 +46,6 @@ class ErrorBoundaryImpl extends React.Component<InnerProps, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: any) {
-    // ⚠️ Log error to console (production: send to error tracking service)
     console.error('✗ ERROR BOUNDARY CAUGHT:', error);
     console.error('Error Info:', errorInfo);
     
@@ -54,13 +53,6 @@ class ErrorBoundaryImpl extends React.Component<InnerProps, State> {
       errorInfo,
       errorCount: prevState.errorCount + 1,
     }));
-
-    // ที่นี่คุณสามารถ:
-    // 1. Log to Sentry/Firebase Crashlytics
-    // 2. Send to analytics backend
-    // 3. Show notification
-    // ตัวอย่าง:
-    // logErrorToService(error, errorInfo);
   }
 
   handleReset = () => {
@@ -112,7 +104,7 @@ class ErrorBoundaryImpl extends React.Component<InnerProps, State> {
               <Text style={[styles.instructionText, { color: colors.text }]}>1. Tap "Try Again" to recover</Text>
               <Text style={[styles.instructionText, { color: colors.text }]}>2. If it persists, restart the app</Text>
               <Text style={[styles.instructionText, { color: colors.text }]}> 
-                3. If still broken, please contact support@nursego.app
+                3. If still broken, please contact support@nursego.co
               </Text>
             </View>
 
