@@ -7,11 +7,12 @@
 
 // Polyfill: some packages check `process.stdout.isTTY` which doesn't exist on web
 // Ensure a minimal `process.stdout` exists before other imports run
-if (typeof global.process === 'undefined') {
-  (global as any).process = { env: {} };
+const globalObject = globalThis as any;
+if (typeof globalObject.process === 'undefined') {
+  globalObject.process = { env: {} };
 }
-if (!(global as any).process.stdout) {
-  (global as any).process.stdout = { isTTY: false };
+if (!globalObject.process.stdout) {
+  globalObject.process.stdout = { isTTY: false };
 }
 
 import React, { useState, useEffect } from 'react';
