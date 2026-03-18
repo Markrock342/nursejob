@@ -13,6 +13,7 @@ import {
   FlatList,
   TouchableOpacity,
   TextInput,
+  ScrollView,
   Platform,
   KeyboardAvoidingView,
   ActivityIndicator,
@@ -21,6 +22,7 @@ import {
   Image,
   Modal,
   StatusBar,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PanGestureHandler, PinchGestureHandler, State, Swipeable } from 'react-native-gesture-handler';
@@ -32,9 +34,13 @@ import * as MediaLibrary from 'expo-media-library';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useChatNotification } from '../../context/ChatNotificationContext';
+import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
+import { useScreenPerformance } from '../../hooks/useScreenPerformance';
+import { useTabRefresh } from '../../hooks/useTabRefresh';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { formatRelativeTime } from '../../utils/helpers';
 import FirstVisitTip from '../../components/common/FirstVisitTip';
+import StickyInboxPanel from '../../components/common/StickyInboxPanel';
 import {
   subscribeToMessages,
   subscribeToConversations,
@@ -44,9 +50,15 @@ import {
   deleteConversation,
   hideConversation,
   sendImage,
+  sendSavedDocument,
+  sendLocationMessage,
   getConversationChatAvailability,
 } from '../../services/chatService';
 import { Message } from '../../types';
+import { trackEvent } from '../../services/analyticsService';
+import { StickyInboxItem, subscribeStickyInboxItems } from '../../services/communicationsService';
+import { getUserDocuments, Document as SavedDocument, formatFileSize } from '../../services/documentsService';
+import MapPickerModal, { PickedLocation } from '../../components/common/MapPickerModal';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -62,6 +74,13 @@ function formatTime(date: any): string {
   if (diffDays < 7) return `${diffDays} วันที่แล้ว`;
   return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
 }
+
+const QUICK_REPLY_TEMPLATES = [
+  'สนใจงานนี้ครับ/ค่ะ',
+  'ส่งเอกสารล่าสุดให้แล้วครับ/ค่ะ',
+  'ขอรายละเอียดเพิ่มอีกนิดได้ไหมครับ/คะ',
+  'สะดวกคุยต่อช่วงไหนครับ/คะ',
+];
 
 // ─── Simple Avatar fallback ─────────────────
 function Avatar({ uri, name, size }: { uri?: string; name: string; size: number }) {
@@ -176,14 +195,19 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
 // CHAT LIST SCREEN
 // ============================================
 export function ChatListScreen({ navigation }: any) {
+  useScreenPerformance('ChatList');
   const { user } = useAuth();
   const { colors } = useTheme();
+  const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
   const insets = useSafeAreaInsets();
   const headerBackground = colors.primary;
+  const listRef = useRef<FlatList<any>>(null);
   const [conversations, setConversations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showHidden, setShowHidden] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [stickyInboxItems, setStickyInboxItems] = useState<StickyInboxItem[]>([]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -193,9 +217,35 @@ export function ChatListScreen({ navigation }: any) {
     const unsub = subscribeToConversations(user.uid, (convs: any[]) => {
       setConversations(convs);
       setIsLoading(false);
+    }, {
+      screenName: 'ChatList',
+      source: 'chat:list_subscription',
     });
     return unsub;
+  }, [user?.uid, refreshVersion]);
+
+  useTabRefresh(() => {
+    if (!user?.uid) return;
+    setIsLoading(true);
+    setRefreshVersion((value) => value + 1);
+  }, {
+    scrollToTop: () => listRef.current?.scrollToOffset({ offset: 0, animated: true }),
+  });
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    trackEvent({
+      eventName: 'chat_list_view',
+      screenName: 'ChatList',
+      subjectType: 'conversation_list',
+      subjectId: user.uid,
+    });
   }, [user?.uid]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeStickyInboxItems('chat', setStickyInboxItems);
+    return () => unsubscribe();
+  }, []);
 
   // Not logged in
   if (!user) {
@@ -228,8 +278,23 @@ export function ChatListScreen({ navigation }: any) {
 
   const handlePress = (c: any) => {
     const other = c.participantDetails?.find((p: any) => p.id !== user?.uid);
+    trackEvent({
+      eventName: 'chat_room_view',
+      screenName: 'ChatList',
+      subjectType: 'conversation',
+      subjectId: c.id,
+      conversationId: c.id,
+      jobId: c.jobId || undefined,
+      props: {
+        source: 'chat_list',
+        hasUnread: Boolean(c.unreadBy?.[user?.uid || ''] ?? c.unreadCount ?? 0),
+        jobTitle: c.jobTitle || null,
+      },
+    });
+
     navigation.navigate('ChatRoom', {
       conversationId: c.id,
+      recipientId: other?.id,
       recipientName: other?.displayName || other?.name || 'ผู้ใช้',
       recipientPhoto: other?.photoURL,
       jobTitle: c.jobTitle,
@@ -319,10 +384,12 @@ export function ChatListScreen({ navigation }: any) {
           title="ข้อความทั้งหมดจะถูกรวมไว้ที่นี่"
           description="เมื่อคุณติดต่อจากหน้าโพสต์ ระบบจะสร้างห้องแชทให้อัตโนมัติ คุณปัดเพื่อซ่อนหรือลบห้องได้ และกลับมาดูภาพรวมการใช้งานจากคู่มือได้ทุกเมื่อ"
           actionLabel="ดูคู่มือ"
-          onAction={() => navigation.navigate('OnboardingSurvey')}
+          onAction={onboardingSurveyEnabled ? () => navigation.navigate('OnboardingSurvey') : undefined}
           containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: 4 }}
         />
       )}
+
+      <StickyInboxPanel items={stickyInboxItems} maxItems={2} containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.sm, marginBottom: 4 }} />
 
       {visible.length === 0 && !search ? (
         <View style={styles.centered}>
@@ -343,6 +410,7 @@ export function ChatListScreen({ navigation }: any) {
             </Text>
           )}
           <FlatList
+            ref={listRef}
             data={visible}
             keyExtractor={i => i.id}
             renderItem={({ item }) => (
@@ -423,6 +491,8 @@ function MessageBubble({
 }) {
   const isDeleted = (msg as any).isDeleted;
   const hasImage = (msg as any).imageUrl;
+  const hasDocument = Boolean((msg as any).fileUrl) && ['document', 'saved_document'].includes((msg as any).type || '');
+  const hasLocation = (msg as any).type === 'location' && Boolean((msg as any).location);
   const time = msg.createdAt ? formatTime(msg.createdAt) : '';
 
   return (
@@ -453,6 +523,37 @@ function MessageBubble({
               <Text style={styles.imageHintText}>แตะเพื่อเปิด</Text>
             </View>
           </TouchableOpacity>
+        ) : hasDocument ? (
+          <TouchableOpacity
+            onPress={() => Linking.openURL((msg as any).fileUrl).catch(() => Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเปิดเอกสารได้'))}
+            activeOpacity={0.9}
+            style={[styles.docBubble, { borderColor: isOwn ? 'rgba(255,255,255,0.25)' : colors.border }]}
+          >
+            <View style={[styles.docIconWrap, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : colors.primaryBackground }]}>
+              <Ionicons name="document-text-outline" size={20} color={isOwn ? '#FFF' : colors.primary} />
+            </View>
+            <View style={styles.docMeta}>
+              <Text style={[styles.docName, { color: isOwn ? '#FFF' : colors.text }]} numberOfLines={1}>{(msg as any).fileName || 'เอกสารแนบ'}</Text>
+              <Text style={[styles.docHint, { color: isOwn ? 'rgba(255,255,255,0.72)' : colors.textMuted }]}>แตะเพื่อเปิดเอกสาร</Text>
+            </View>
+          </TouchableOpacity>
+        ) : hasLocation ? (
+          <TouchableOpacity
+            onPress={() => {
+              const location = (msg as any).location;
+              Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`).catch(() => Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเปิดแผนที่ได้'));
+            }}
+            activeOpacity={0.9}
+            style={[styles.docBubble, { borderColor: isOwn ? 'rgba(255,255,255,0.25)' : colors.border }]}
+          >
+            <View style={[styles.docIconWrap, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : colors.primaryBackground }]}>
+              <Ionicons name="location-outline" size={20} color={isOwn ? '#FFF' : colors.primary} />
+            </View>
+            <View style={styles.docMeta}>
+              <Text style={[styles.docName, { color: isOwn ? '#FFF' : colors.text }]} numberOfLines={2}>{(msg as any).location.address || 'ตำแหน่งที่ปักหมุด'}</Text>
+              <Text style={[styles.docHint, { color: isOwn ? 'rgba(255,255,255,0.72)' : colors.textMuted }]}>แตะเพื่อเปิดในแผนที่</Text>
+            </View>
+          </TouchableOpacity>
         ) : (
           <Text style={[styles.bubbleText, { color: isOwn ? '#FFF' : colors.text }]}>{msg.text}</Text>
         )}
@@ -468,7 +569,8 @@ function MessageBubble({
 // CHAT ROOM SCREEN
 // ============================================
 export function ChatRoomScreen({ navigation, route }: any) {
-  const { conversationId, recipientName, recipientPhoto, jobTitle } = route.params;
+  useScreenPerformance('ChatRoom');
+  const { conversationId, recipientId, recipientName, recipientPhoto, jobTitle } = route.params;
   const { user } = useAuth();
   const { colors } = useTheme();
   const { setActiveConversationId } = useChatNotification();
@@ -482,6 +584,11 @@ export function ChatRoomScreen({ navigation, route }: any) {
   const [imageScale, setImageScale] = useState(1);
   const [isDownloadingImage, setIsDownloadingImage] = useState(false);
   const [chatLockReason, setChatLockReason] = useState<string | null>(null);
+  const [showAttachmentSheet, setShowAttachmentSheet] = useState(false);
+  const [showSavedDocsModal, setShowSavedDocsModal] = useState(false);
+  const [showMapPicker, setShowMapPicker] = useState(false);
+  const [savedDocuments, setSavedDocuments] = useState<SavedDocument[]>([]);
+  const [isLoadingSavedDocs, setIsLoadingSavedDocs] = useState(false);
   const flatRef = useRef<FlatList>(null);
 
   const baseScale = useRef(new Animated.Value(1)).current;
@@ -499,9 +606,26 @@ export function ChatRoomScreen({ navigation, route }: any) {
   }, [conversationId]);
 
   useEffect(() => {
+    trackEvent({
+      eventName: 'chat_room_view',
+      screenName: 'ChatRoom',
+      subjectType: 'conversation',
+      subjectId: conversationId,
+      conversationId,
+      props: {
+        recipientName: recipientName || null,
+        hasJobTitle: Boolean(jobTitle),
+      },
+    });
+  }, [conversationId, jobTitle, recipientName]);
+
+  useEffect(() => {
     const unsub = subscribeToMessages(conversationId, (msgs: Message[]) => {
       setMessages(msgs);
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 80);
+    }, {
+      screenName: 'ChatRoom',
+      source: 'chat:room_messages',
     });
     return unsub;
   }, [conversationId]);
@@ -526,12 +650,24 @@ export function ChatRoomScreen({ navigation, route }: any) {
     };
   }, [conversationId]);
 
-  const handleSend = async () => {
-    const t = text.trim();
+  const sendTextMessage = async (messageText: string) => {
+    const t = messageText.trim();
     if (!t || isSending || !user?.uid || chatLockReason) return;
-    setText('');
     setIsSending(true);
     try {
+      await trackEvent({
+        eventName: 'message_sent',
+        screenName: 'ChatRoom',
+        subjectType: 'message',
+        subjectId: conversationId,
+        conversationId,
+        props: {
+          source: 'chat_room',
+          messageType: 'text',
+          textLength: t.length,
+        },
+      });
+
       await sendMessage(conversationId, user.uid, user.displayName || 'ผู้ใช้', t);
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (error: any) {
@@ -540,19 +676,137 @@ export function ChatRoomScreen({ navigation, route }: any) {
     } finally { setIsSending(false); }
   };
 
+  const handleSend = async () => {
+    const t = text.trim();
+    if (!t || isSending || !user?.uid || chatLockReason) return;
+    setText('');
+    await sendTextMessage(t);
+  };
+
+  const handleQuickReplyPress = async (messageText: string) => {
+    await sendTextMessage(messageText);
+  };
+
   const handleImagePick = async () => {
     if (chatLockReason) return;
+    setShowAttachmentSheet(false);
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
     if (!result.canceled && result.assets[0] && user?.uid) {
       setIsSending(true);
-      try { await sendImage(conversationId, user.uid, user.displayName || 'ผู้ใช้', result.assets[0].uri, 'photo.jpg'); }
+      try {
+        await trackEvent({
+          eventName: 'message_sent',
+          screenName: 'ChatRoom',
+          subjectType: 'message',
+          subjectId: conversationId,
+          conversationId,
+          props: {
+            source: 'chat_room',
+            messageType: 'image',
+          },
+        });
+
+        await sendImage(conversationId, user.uid, user.displayName || 'ผู้ใช้', result.assets[0].uri, 'photo.jpg');
+      }
       catch (error: any) {
         setChatLockReason(error?.message || 'แชทนี้ถูกปิดแล้ว');
         Alert.alert('ข้อผิดพลาด', error?.message || 'ส่งรูปภาพไม่สำเร็จ');
       }
       finally { setIsSending(false); }
+    }
+  };
+
+  const openRecipientProfile = () => {
+    if (!recipientId) return;
+    navigation.navigate('UserProfile', {
+      userId: recipientId,
+      userName: recipientName,
+      userPhoto: recipientPhoto,
+    });
+  };
+
+  const loadSavedDocuments = async () => {
+    if (!user?.uid) return;
+    setIsLoadingSavedDocs(true);
+    try {
+      const docs = await getUserDocuments(user.uid);
+      setSavedDocuments(docs.filter((doc) => Boolean(doc.fileUrl)));
+    } catch {
+      setSavedDocuments([]);
+    } finally {
+      setIsLoadingSavedDocs(false);
+    }
+  };
+
+  const handleOpenSavedDocuments = async () => {
+    setShowAttachmentSheet(false);
+    await loadSavedDocuments();
+    setShowSavedDocsModal(true);
+  };
+
+  const handleSendSavedDocument = async (document: SavedDocument) => {
+    if (!user?.uid) return;
+
+    setIsSending(true);
+    try {
+      await trackEvent({
+        eventName: 'message_sent',
+        screenName: 'ChatRoom',
+        subjectType: 'message',
+        subjectId: conversationId,
+        conversationId,
+        props: {
+          source: 'chat_room',
+          messageType: 'saved_document',
+          documentType: document.type,
+          documentStatus: document.status,
+        },
+      });
+
+      await sendSavedDocument(
+        conversationId,
+        user.uid,
+        user.displayName || 'ผู้ใช้',
+        document.fileUrl,
+        document.fileName || document.name,
+        document.type,
+      );
+
+      setShowSavedDocsModal(false);
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (error: any) {
+      Alert.alert('ส่งเอกสารไม่ได้', error?.message || 'กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleConfirmLocation = async (picked: PickedLocation) => {
+    if (!user?.uid) return;
+
+    setShowMapPicker(false);
+    setIsSending(true);
+    try {
+      await trackEvent({
+        eventName: 'message_sent',
+        screenName: 'ChatRoom',
+        subjectType: 'message',
+        subjectId: conversationId,
+        conversationId,
+        props: {
+          source: 'chat_room',
+          messageType: 'location',
+        },
+      });
+
+      await sendLocationMessage(conversationId, user.uid, user.displayName || 'ผู้ใช้', picked);
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (error: any) {
+      Alert.alert('ส่งตำแหน่งไม่ได้', error?.message || 'กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -699,11 +953,13 @@ export function ChatRoomScreen({ navigation, route }: any) {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
-        <Avatar uri={recipientPhoto} name={recipientName || 'ผู้ใช้'} size={38} />
-        <View style={styles.roomHeaderCenter}>
-          <Text style={styles.roomHeaderName} numberOfLines={1}>{recipientName}</Text>
-          {jobTitle && <Text style={styles.roomHeaderSub} numberOfLines={1}>📋 {jobTitle}</Text>}
-        </View>
+        <TouchableOpacity style={styles.roomHeaderProfileTap} activeOpacity={0.85} onPress={openRecipientProfile} disabled={!recipientId}>
+          <Avatar uri={recipientPhoto} name={recipientName || 'ผู้ใช้'} size={38} />
+          <View style={styles.roomHeaderCenter}>
+            <Text style={styles.roomHeaderName} numberOfLines={1}>{recipientName}</Text>
+            {jobTitle && <Text style={styles.roomHeaderSub} numberOfLines={1}>📋 {jobTitle}</Text>}
+          </View>
+        </TouchableOpacity>
         <View style={{ width: 24 }} />
       </View>
 
@@ -729,17 +985,48 @@ export function ChatRoomScreen({ navigation, route }: any) {
           </View>
         ) : null}
 
+        {!chatLockReason && (
+          <View style={styles.quickReplySection}>
+            <View style={styles.quickReplyHeader}>
+              <View style={[styles.quickReplyHeaderIcon, { backgroundColor: colors.primaryBackground || '#E0F2FE' }]}>
+                <Ionicons name="flash-outline" size={14} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickReplyHeaderTitle, { color: colors.text }]}>ข้อความลัด</Text>
+              <Text style={[styles.quickReplyHeaderHint, { color: colors.textMuted }]}>แตะเพื่อส่งทันที</Text>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.quickReplyRow}
+            >
+              {QUICK_REPLY_TEMPLATES.map((item) => (
+                <TouchableOpacity
+                  key={item}
+                  style={[styles.quickReplyChip, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  onPress={() => handleQuickReplyPress(item)}
+                  disabled={isSending}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="sparkles-outline" size={13} color={colors.primary} style={styles.quickReplyChipIcon} />
+                  <Text style={[styles.quickReplyChipText, { color: colors.text }]}>{item}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         <View style={[styles.inputBar, {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           paddingBottom: Math.max(insets.bottom, 8),
         }]}>
-          <TouchableOpacity onPress={handleImagePick} style={styles.attBtn} disabled={Boolean(chatLockReason)}>
-            <Ionicons name="image-outline" size={24} color={colors.textMuted} />
+          <TouchableOpacity onPress={() => setShowAttachmentSheet(true)} style={styles.attBtn} disabled={Boolean(chatLockReason)}>
+            <Ionicons name="add-circle-outline" size={24} color={colors.textMuted} />
           </TouchableOpacity>
           <TextInput
             style={[styles.msgInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-            placeholder={chatLockReason ? 'แชทนี้ถูกปิดแล้ว' : 'พิมพ์ข้อความ...'}
+            placeholder={chatLockReason ? 'แชทนี้ถูกปิดแล้ว' : 'พิมพ์ข้อความ หรือเลือกข้อความลัดด้านบน'}
             placeholderTextColor={colors.textMuted}
             value={text}
             onChangeText={setText}
@@ -774,6 +1061,66 @@ export function ChatRoomScreen({ navigation, route }: any) {
               <Text style={[styles.actionItemText, { color: colors.textSecondary }]}>ยกเลิก</Text>
             </TouchableOpacity>
           </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={showAttachmentSheet} transparent animationType="fade" onRequestClose={() => setShowAttachmentSheet(false)}>
+        <TouchableOpacity style={styles.actionOverlay} onPress={() => setShowAttachmentSheet(false)} activeOpacity={1}>
+          <View style={[styles.actionSheet, { backgroundColor: colors.surface }]}> 
+            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>แนบข้อมูลในแชท</Text>
+            <TouchableOpacity style={styles.actionItem} onPress={handleImagePick}>
+              <Ionicons name="image-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionItemText, { color: colors.text }]}>เลือกรูปจากเครื่อง</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionItem} onPress={handleOpenSavedDocuments}>
+              <Ionicons name="document-text-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionItemText, { color: colors.text }]}>ส่งเอกสารจากเอกสารของฉัน</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionItem} onPress={() => { setShowAttachmentSheet(false); setShowMapPicker(true); }}>
+              <Ionicons name="location-outline" size={20} color={colors.text} />
+              <Text style={[styles.actionItemText, { color: colors.text }]}>ส่งตำแหน่งแบบปักหมุด</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionItem, { borderTopWidth: 1, borderTopColor: colors.border }]}
+              onPress={() => setShowAttachmentSheet(false)}
+            >
+              <Ionicons name="close-outline" size={20} color={colors.textSecondary} />
+              <Text style={[styles.actionItemText, { color: colors.textSecondary }]}>ยกเลิก</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={showSavedDocsModal} transparent animationType="slide" onRequestClose={() => setShowSavedDocsModal(false)}>
+        <TouchableOpacity style={styles.actionOverlay} onPress={() => setShowSavedDocsModal(false)} activeOpacity={1}>
+          <TouchableOpacity activeOpacity={1} style={[styles.savedDocsSheet, { backgroundColor: colors.surface }]} onPress={() => {}}>
+            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>เลือกเอกสารที่อัปไว้แล้ว</Text>
+            {isLoadingSavedDocs ? (
+              <View style={styles.savedDocsLoading}><ActivityIndicator color={colors.primary} /></View>
+            ) : savedDocuments.length === 0 ? (
+              <View style={styles.savedDocsEmpty}>
+                <Text style={[styles.savedDocsEmptyText, { color: colors.textSecondary }]}>ยังไม่มีเอกสารในหน้าของฉัน</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={savedDocuments}
+                keyExtractor={(item) => item.id}
+                style={styles.savedDocsList}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={[styles.savedDocRow, { borderBottomColor: colors.border }]} onPress={() => handleSendSavedDocument(item)}>
+                    <View style={[styles.docIconWrap, { backgroundColor: colors.primaryBackground }]}>
+                      <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+                    </View>
+                    <View style={styles.savedDocMeta}>
+                      <Text style={[styles.savedDocName, { color: colors.text }]} numberOfLines={1}>{item.fileName || item.name}</Text>
+                      <Text style={[styles.savedDocSub, { color: colors.textMuted }]} numberOfLines={1}>{item.name} · {formatFileSize(item.fileSize)}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
 
@@ -842,6 +1189,12 @@ export function ChatRoomScreen({ navigation, route }: any) {
           </View>
         </View>
       </Modal>
+
+      <MapPickerModal
+        visible={showMapPicker}
+        onClose={() => setShowMapPicker(false)}
+        onConfirm={handleConfirmLocation}
+      />
     </SafeAreaView>
   );
 }
@@ -927,6 +1280,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 10,
   },
+  roomHeaderProfileTap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+  },
   roomHeaderCenter: { flex: 1, minWidth: 0 },
   roomHeaderName: { fontSize: 16, fontWeight: '700', color: '#FFF' },
   roomHeaderSub: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 1 },
@@ -941,6 +1301,25 @@ const styles = StyleSheet.create({
   bubbleText: { fontSize: 15, lineHeight: 21 },
   bubbleTime: { fontSize: 10, alignSelf: 'flex-end' },
   deletedText: { fontSize: 13, fontStyle: 'italic' },
+  docBubble: {
+    minWidth: 210,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 10,
+  },
+  docIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  docMeta: { flex: 1, minWidth: 0 },
+  docName: { fontSize: 14, fontWeight: '700' },
+  docHint: { marginTop: 2, fontSize: 12 },
   msgImage: { width: 200, height: 200, borderRadius: 12 },
   imageHintBadge: {
     position: 'absolute',
@@ -981,6 +1360,52 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  quickReplyRow: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  quickReplySection: {
+    paddingTop: 10,
+  },
+  quickReplyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    marginBottom: 2,
+  },
+  quickReplyHeaderIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  quickReplyHeaderTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  quickReplyHeaderHint: {
+    marginLeft: 'auto',
+    fontSize: 11,
+  },
+  quickReplyChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginRight: 8,
+  },
+  quickReplyChipIcon: {
+    marginRight: 6,
+  },
+  quickReplyChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   attBtn: { padding: 6, alignSelf: 'flex-end', marginBottom: 4 },
   msgInput: {
     flex: 1,
@@ -999,6 +1424,36 @@ const styles = StyleSheet.create({
   actionTitle: { textAlign: 'center', fontSize: 13, paddingVertical: 14 },
   actionItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, gap: 14 },
   actionItemText: { fontSize: 15, fontWeight: '500' },
+  savedDocsSheet: {
+    marginTop: 'auto',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 6,
+    paddingBottom: 24,
+    maxHeight: '72%',
+  },
+  savedDocsLoading: {
+    paddingVertical: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savedDocsEmpty: {
+    paddingVertical: 28,
+    alignItems: 'center',
+  },
+  savedDocsEmptyText: { fontSize: 14 },
+  savedDocsList: { maxHeight: 420 },
+  savedDocRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  savedDocMeta: { flex: 1, minWidth: 0 },
+  savedDocName: { fontSize: 14, fontWeight: '700' },
+  savedDocSub: { fontSize: 12, marginTop: 2 },
 
   imageViewerOverlay: {
     flex: 1,

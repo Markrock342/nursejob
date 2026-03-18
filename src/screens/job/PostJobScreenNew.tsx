@@ -3,7 +3,7 @@
 // 1. หาคนแทนเวร 2. รับสมัครบุคลากร 3. หาคนดูแลผู้ป่วย
 // ============================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -21,17 +21,18 @@ import { StatusBar, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
 import { KittenButton as Button, Input, Card, Chip, ModalContainer, CalendarPicker, PlaceAutocomplete, FirstVisitTip } from '../../components/common';
 import MapPickerModal, { PickedLocation } from '../../components/common/MapPickerModal';
 import { MultiDateCalendar } from '../../components/common/MultiDateCalendar';
 import CustomAlert, { AlertState, initialAlertState, createAlert } from '../../components/common/CustomAlert';
 import { createJob, updateJob } from '../../services/jobService';
-import { canUserPostToday, incrementPostCount, getUserSubscription, getPostExpiryDate } from '../../services/subscriptionService';
-import { JobPost, SUBSCRIPTION_PLANS, SubscriptionPlan } from '../../types';
-import {
-  ALL_PROVINCES,
-  POPULAR_PROVINCES,
-} from '../../constants/locations';
+import { canUseFreeUrgent, canUserPostToday, getUserCreatedPostCount, incrementPostCount, getUserSubscription, getPostExpiryDate, markFreeUrgentUsed } from '../../services/subscriptionService';
+
+import { useTabRefresh } from '../../hooks/useTabRefresh';
+import { JobContactMode, JobPost, PRICING, SUBSCRIPTION_PLANS, SubscriptionPlan } from '../../types';
+import { getCommerceAccessStatus } from '../../services/commerceService';
+import { ALL_PROVINCES, POPULAR_PROVINCES } from '../../constants/locations';
 import { getDistrictsForProvince } from '../../constants/districts';
 import {
   STAFF_TYPES,
@@ -45,9 +46,22 @@ import {
   RATE_TYPES,
   DURATION_OPTIONS,
   QUICK_TAGS,
+  TAGS_BY_POST_TYPE,
+  BENEFIT_GROUPS,
+  TagGroup,
   getStaffTypeLabel,
 } from '../../constants/jobOptions';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { trackEvent } from '../../services/analyticsService';
+import {
+  buildPostShifts,
+  detectExternalContactSignals,
+  formatLocalDateKey,
+  getSafeContactMode,
+  parseJobPostText,
+  parseStoredDate,
+  toLocalNoonIsoString,
+} from '../../utils/jobPostIntelligence';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -59,8 +73,10 @@ interface Props {
   route?: {
     params?: {
       editJob?: JobPost;
+      duplicateJob?: JobPost;
       paidUrgent?: boolean;
       formData?: FormData;
+      submissionToken?: string;
     };
   };
 }
@@ -72,23 +88,26 @@ const POST_TYPES = [
   {
     value: 'shift' as PostType,
     title: 'หาคนแทนเวร',
-    subtitle: 'แลกเวร / ขายเวร',
+    subtitle: 'ระบุวัน เวลา และรายละเอียดเวรที่ต้องการผู้ช่วยดูแลแทน',
     icon: 'swap-horizontal-outline' as const,
     color: '#3B82F6',
+    bgColor: '#EFF6FF',
   },
   {
     value: 'job' as PostType,
     title: 'รับสมัครบุคลากร',
-    subtitle: 'ประกาศรับสมัครงาน',
+    subtitle: 'ประกาศรับสมัครงานประจำ พร้อมเงินเดือนและสวัสดิการ',
     icon: 'briefcase-outline' as const,
     color: '#10B981',
+    bgColor: '#ECFDF5',
   },
   {
     value: 'homecare' as PostType,
     title: 'หาคนดูแลผู้ป่วย',
-    subtitle: 'เฝ้าไข้ / ดูแลที่บ้าน',
+    subtitle: 'เฝ้าไข้ / ดูแลผู้สูงอายุ / ดูแลที่บ้าน',
     icon: 'home-outline' as const,
     color: '#F59E0B',
+    bgColor: '#FFFBEB',
   },
 ];
 
@@ -106,6 +125,15 @@ const normalizePaymentType = (paymentType?: JobPost['paymentType']): PaymentType
       return 'NET';
   }
 };
+
+const toDateKey = (date: Date) => formatLocalDateKey(date);
+
+const CONTACT_MODE_OPTIONS: Array<{ value: JobContactMode; label: string; helper: string }> = [
+  { value: 'in_app', label: 'เริ่มคุยผ่านแอป', helper: 'จัดการแชทและติดตามงานได้สะดวกในที่เดียว' },
+  { value: 'phone', label: 'ให้เบอร์โทร', helper: 'แชร์เบอร์เมื่ออีกฝ่ายสนใจ เพื่อคุยต่อได้รวดเร็ว' },
+  { value: 'line', label: 'ให้ LINE', helper: 'แชร์ LINE เมื่ออีกฝ่ายสนใจ เพื่อคุยต่อได้สะดวก' },
+  { value: 'phone_or_line', label: 'เบอร์ + LINE', helper: 'เลือกช่องทางที่สะดวกที่สุดได้ภายหลัง' },
+];
 
 interface FormData {
   // Common
@@ -157,6 +185,14 @@ interface FormData {
   // Contact
   contactPhone: string;
   contactLine: string;
+  contactMode: JobContactMode;
+
+  // Campaign / parser
+  slotsNeeded: number;
+  campaignTitle: string;
+  campaignSummary: string;
+  scheduleNote: string;
+  sourceText: string;
   
   // Options
   isUrgent: boolean;
@@ -169,8 +205,11 @@ interface FormData {
 export default function PostJobScreen({ navigation, route }: Props) {
   const { user, isAuthenticated, isInitialized } = useAuth();
   const { colors, isDark } = useTheme();
+  const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
+  const submitLockRef = useRef(false);
+  const handledPaidSubmissionRef = useRef<string | null>(null);
   const headerBackground = isDark ? colors.surface : colors.primary;
   const headerButtonBackground = isDark ? colors.card : 'rgba(255,255,255,0.2)';
   const stepIndicatorBackground = isDark ? colors.backgroundSecondary : 'rgba(255,255,255,0.2)';
@@ -213,6 +252,8 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const errorTextColor = colors.error;
   
   const editJob = route?.params?.editJob;
+  const duplicateJob = route?.params?.duplicateJob;
+  const seedJob = duplicateJob || editJob;
   const isEditMode = Boolean(editJob);
 
   // กรองประเภทโพสต์ตาม role
@@ -238,44 +279,51 @@ export default function PostJobScreen({ navigation, route }: Props) {
   
   // Form data
   const [form, setForm] = useState<FormData>({
-    postType: (editJob?.postType as PostType) || (visiblePostTypes[0]?.value ?? 'shift'),
-    title: editJob?.title || '',
-    description: editJob?.description || '',
-    staffType: (editJob?.staffType as StaffType) || 'RN',
-    staffTypeOther: editJob?.staffTypeOther || '',
-    locationType: editJob?.locationType || 'HOSPITAL',
-    province: editJob?.location?.province || 'กรุงเทพมหานคร',
-    district: editJob?.location?.district || '',
-    hospital: editJob?.location?.hospital || '',
-    address: editJob?.location?.address || '',
-    department: editJob?.department || '',
-    shiftDate: editJob?.shiftDate ? new Date(editJob.shiftDate as any) : new Date(),
-    shiftDates: editJob?.shiftDates ? (editJob.shiftDates as any[]).map((d: any) => new Date(d)) : [new Date()],
-    shiftTime: editJob?.shiftTime || '08:00-16:00',
+    postType: (seedJob?.postType as PostType) || (visiblePostTypes[0]?.value ?? 'shift'),
+    title: seedJob?.title || '',
+    description: seedJob?.description || '',
+    staffType: (seedJob?.staffType as StaffType) || 'RN',
+    staffTypeOther: seedJob?.staffTypeOther || '',
+    locationType: seedJob?.locationType || 'HOSPITAL',
+    province: seedJob?.location?.province || 'กรุงเทพมหานคร',
+    district: seedJob?.location?.district || '',
+    hospital: seedJob?.location?.hospital || '',
+    address: seedJob?.location?.address || '',
+    department: seedJob?.department || '',
+    shiftDate: duplicateJob ? new Date() : (seedJob?.shiftDate ? new Date(seedJob.shiftDate as any) : new Date()),
+    shiftDates: duplicateJob ? [new Date()] : (seedJob?.shiftDates ? (seedJob.shiftDates as any[]).map((d: any) => new Date(d)) : [new Date()]),
+    shiftTime: seedJob?.shiftTime || '08:00-16:00',
     customStartTime: '08:00',
     customEndTime: '16:00',
-    shiftTimeSlots: {},  // populated per-date in step 2
-    duration: editJob?.duration || '',
-    shiftDateEnd: editJob?.shiftDateEnd ? new Date(editJob.shiftDateEnd as any) : null,
-    shiftRate: editJob?.shiftRate ? String(editJob.shiftRate) : '',
-    rateType: editJob?.rateType === 'month' ? 'month' : (editJob?.rateType as any) || 'shift',
-    paymentType: normalizePaymentType(editJob?.paymentType),
-    deductPercent: editJob?.deductPercent || 0,
-    salaryMin: editJob?.salary ? String(editJob.salary) : (editJob?.rateType === 'month' && editJob?.shiftRate ? String(editJob.shiftRate) : ''),
+    shiftTimeSlots: duplicateJob ? {} : (seedJob?.shiftTimeSlots || {}),
+    duration: seedJob?.duration || '',
+    shiftDateEnd: duplicateJob ? null : (seedJob?.shiftDateEnd ? new Date(seedJob.shiftDateEnd as any) : null),
+    shiftRate: seedJob?.shiftRate ? String(seedJob.shiftRate) : '',
+    rateType: seedJob?.rateType === 'month' ? 'month' : (seedJob?.rateType as any) || 'shift',
+    paymentType: normalizePaymentType(seedJob?.paymentType),
+    deductPercent: seedJob?.deductPercent || 0,
+    salaryMin: seedJob?.salary ? String(seedJob.salary) : (seedJob?.rateType === 'month' && seedJob?.shiftRate ? String(seedJob.shiftRate) : ''),
     salaryMax: '',
-    benefits: editJob?.benefits || [],
-    employmentType: editJob?.employmentType || editJob?.salaryType || 'full_time',
-    startDateNote: editJob?.startDateNote || '',
-    workHours: editJob?.workHours || (editJob?.postType === 'job' ? editJob?.shiftTime || '' : ''),
-    contactPhone: user?.phone || '',
-    contactLine: editJob?.contactLine || '',
-    isUrgent: editJob?.status === 'urgent' || editJob?.isUrgent || false,
-    tags: editJob?.tags || [],
+    benefits: seedJob?.benefits || [],
+    employmentType: seedJob?.employmentType || seedJob?.salaryType || 'full_time',
+    startDateNote: seedJob?.startDateNote || '',
+    workHours: seedJob?.workHours || (seedJob?.postType === 'job' ? seedJob?.shiftTime || '' : ''),
+    contactPhone: seedJob?.contactPhone || user?.phone || '',
+    contactLine: seedJob?.contactLine || '',
+    contactMode: getSafeContactMode(seedJob?.contactMode, Boolean(seedJob?.contactPhone), Boolean(seedJob?.contactLine)),
+    slotsNeeded: Math.max(1, seedJob?.slotsNeeded || 1),
+    campaignTitle: seedJob?.campaignTitle || seedJob?.title || '',
+    campaignSummary: seedJob?.campaignSummary || '',
+    scheduleNote: seedJob?.scheduleNote || '',
+    sourceText: seedJob?.sourceText || '',
+    isUrgent: duplicateJob ? false : (seedJob?.status === 'urgent' || seedJob?.isUrgent || false),
+    tags: seedJob?.tags || [],
   });
   
   // UI State
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<AlertState>(initialAlertState);
   const [showProvinceModal, setShowProvinceModal] = useState(false);
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
@@ -290,6 +338,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const [districtSearch, setDistrictSearch] = useState('');
   const [showAllProvinces, setShowAllProvinces] = useState(false);
   const [showMapPicker, setShowMapPicker] = useState(false);
+  const [customTagInput, setCustomTagInput] = useState('');
+  const [customBenefitInput, setCustomBenefitInput] = useState('');
+  const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   
   // Time options (every 30 minutes)
   const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
@@ -301,6 +352,21 @@ export default function PostJobScreen({ navigation, route }: Props) {
   // Subscription
   const [postsRemaining, setPostsRemaining] = useState<number | null>(null);
   const [userPlan, setUserPlan] = useState<SubscriptionPlan>('free');
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    trackEvent({
+      eventName: 'post_job_started',
+      screenName: 'PostJob',
+      subjectType: 'job_draft',
+      subjectId: editJob?.id || user.uid,
+      props: {
+        mode: isEditMode ? 'edit' : 'create',
+        defaultPostType: form.postType,
+        role: user.role || null,
+      },
+    });
+  }, [editJob?.id, form.postType, isEditMode, user?.role, user?.uid]);
   
   // Get total steps based on post type
   const getTotalSteps = () => {
@@ -329,22 +395,139 @@ export default function PostJobScreen({ navigation, route }: Props) {
     checkSubscription();
   }, [user?.uid]);
 
+  const refreshComposerState = useCallback(async () => {
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    setAlert(initialAlertState);
+    setErrors({});
+    setShowProvinceModal(false);
+    setShowDepartmentModal(false);
+    setShowDateModal(false);
+    setShowStartTimeModal(false);
+    setShowEndTimeModal(false);
+    setShowDistrictModal(false);
+    setShowMapPicker(false);
+
+    if (!user?.uid) return;
+
+    const [subscription, postStatus] = await Promise.all([
+      getUserSubscription(user.uid),
+      canUserPostToday(user.uid),
+    ]);
+    setUserPlan(subscription?.plan ?? 'free');
+    setPostsRemaining(postStatus.postsRemaining);
+  }, [user?.uid]);
+
+  useTabRefresh(refreshComposerState, {
+    scrollToTop: () => scrollViewRef.current?.scrollTo({ y: 0, animated: true }),
+  });
+
+  function createSubmissionToken() {
+    return `post-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function deserializeFormData(raw?: Partial<FormData> | null): FormData | undefined {
+    if (!raw) return undefined;
+
+    return {
+      ...(raw as FormData),
+      shiftDate: raw.shiftDate ? parseStoredDate(raw.shiftDate as any) : new Date(),
+      shiftDateEnd: raw.shiftDateEnd ? parseStoredDate(raw.shiftDateEnd as any) : null,
+      shiftDates: Array.isArray(raw.shiftDates)
+        ? raw.shiftDates.map((value: any) => parseStoredDate(value))
+        : (raw.shiftDate ? [parseStoredDate(raw.shiftDate as any)] : []),
+      shiftTimeSlots: raw.shiftTimeSlots || {},
+    };
+  }
+
+  const applySourceText = () => {
+    const rawText = form.sourceText.trim();
+    if (!rawText) {
+      setAlert(createAlert.info('ยังไม่มีข้อความ', 'วางข้อความจากโพสต์เดิมก่อน แล้วค่อยให้ระบบช่วยดึงข้อมูล') as AlertState);
+      return;
+    }
+
+    const parsed = parseJobPostText(rawText);
+    const nextShiftDates = parsed.shiftDates?.length
+      ? parsed.shiftDates.map((value) => new Date(value))
+      : form.shiftDates;
+    const nextShiftTimeSlots = Object.keys(parsed.shiftTimeSlots || {}).length > 0
+      ? parsed.shiftTimeSlots || {}
+      : form.shiftTimeSlots;
+    const nextContactMode = getSafeContactMode(
+      'in_app',
+      Boolean(parsed.contactPhone || form.contactPhone),
+      Boolean(parsed.contactLine || form.contactLine)
+    );
+
+    setForm((prev) => ({
+      ...prev,
+      title: prev.title || parsed.title || '',
+      description: parsed.description || prev.description,
+      staffType: parsed.staffType || prev.staffType,
+      department: parsed.department || prev.department,
+      province: parsed.province || prev.province,
+      district: parsed.district || prev.district,
+      hospital: parsed.hospital || prev.hospital,
+      shiftDates: nextShiftDates,
+      shiftDate: nextShiftDates[0] || prev.shiftDate,
+      shiftTimeSlots: nextShiftTimeSlots,
+      shiftRate: parsed.shiftRate ? String(parsed.shiftRate) : prev.shiftRate,
+      salaryMin: prev.postType === 'job' && parsed.shiftRate ? String(parsed.shiftRate) : prev.salaryMin,
+      rateType: parsed.rateType || prev.rateType,
+      slotsNeeded: parsed.slotsNeeded || prev.slotsNeeded,
+      campaignTitle: parsed.campaignTitle || prev.campaignTitle || parsed.title || prev.title,
+      campaignSummary: parsed.campaignSummary || prev.campaignSummary,
+      scheduleNote: parsed.scheduleNote || prev.scheduleNote,
+      contactPhone: prev.contactPhone || parsed.contactPhone || '',
+      contactLine: prev.contactLine || parsed.contactLine || '',
+      contactMode: nextContactMode,
+      tags: [...new Set([...(prev.tags || []), ...(parsed.tags || [])])],
+      sourceText: rawText,
+    }));
+    setParseWarnings(parsed.parseWarnings);
+    setAlert(createAlert.success('ดึงข้อมูลเบื้องต้นแล้ว', 'ตรวจทานวัน เวลา จังหวัด และค่าตอบแทนก่อนโพสต์จริง') as AlertState);
+  };
+
+  const externalContactSignals = detectExternalContactSignals(`${form.title}\n${form.description}\n${form.sourceText}`);
+
   // Handle return from Payment screen (serializable params)
   useEffect(() => {
     const paid = route?.params?.paidUrgent;
-    const paidForm = route?.params?.formData as FormData | undefined;
-    if (paid && paidForm) {
+    const paidForm = route?.params?.formData;
+    const submissionToken = route?.params?.submissionToken;
+    if (!paid || !paidForm) return;
+
+    const handledKey = submissionToken || JSON.stringify(paidForm);
+    if (handledPaidSubmissionRef.current === handledKey) return;
+    handledPaidSubmissionRef.current = handledKey;
+
+    const hydratedForm = deserializeFormData(paidForm);
+    if (!hydratedForm) return;
+
+    try {
+      navigation.setParams?.({ paidUrgent: undefined, formData: undefined, submissionToken: undefined });
+    } catch (e) {}
+
+    const submitPaidPost = async () => {
+      if (submitLockRef.current) return;
+
+      submitLockRef.current = true;
+      setIsSubmitting(true);
       try {
-        navigation.setParams?.({ paidUrgent: undefined, formData: undefined });
-      } catch (e) {}
-      createJobPost(true, paidForm);
-    }
-  }, [route?.params?.paidUrgent, route?.params?.formData]);
+        await createJobPost(true, hydratedForm);
+      } finally {
+        submitLockRef.current = false;
+        setIsSubmitting(false);
+      }
+    };
+
+    void submitPaidPost();
+  }, [navigation, route?.params?.paidUrgent, route?.params?.formData, route?.params?.submissionToken]);
   
   // Filter provinces
   const filteredProvinces = provinceSearch
-    ? ALL_PROVINCES.filter(p => p.includes(provinceSearch))
-    : (showAllProvinces ? ALL_PROVINCES : POPULAR_PROVINCES);
+    ? ALL_PROVINCES.filter((province: string) => province.includes(provinceSearch))
+    : Array.from(showAllProvinces ? ALL_PROVINCES : POPULAR_PROVINCES);
   
   // Get departments based on post type
   const getDepartments = () => {
@@ -392,14 +575,16 @@ export default function PostJobScreen({ navigation, route }: Props) {
           if (!form.employmentType) newErrors.employmentType = 'กรุณาเลือกรูปแบบการจ้าง';
           if (!form.workHours.trim()) newErrors.workHours = 'กรุณากรอกวันและเวลาทำงาน';
         } else {
+          if (!form.slotsNeeded || form.slotsNeeded < 1) {
+            newErrors.slotsNeeded = 'กรุณาระบุจำนวนคนที่ต้องการอย่างน้อย 1 คน';
+          }
           if (form.shiftDates.length === 0) {
             newErrors.shiftDates = 'กรุณาเลือกอย่างน้อย 1 วัน';
           }
           // Check each selected date has both start and end time
           {
-            const toKey = (d: Date) => d.toISOString().slice(0, 10);
             const missingTime = form.shiftDates.some(d => {
-              const s = form.shiftTimeSlots[toKey(d)];
+              const s = form.shiftTimeSlots[toDateKey(d)];
               return !s?.start || !s?.end;
             });
             if (missingTime) newErrors.shiftTimes = 'กรุณาระบุเวลาให้ครบทุกวัน';
@@ -426,8 +611,17 @@ export default function PostJobScreen({ navigation, route }: Props) {
         if (form.postType === 'job' && !form.description.trim()) {
           newErrors.description = 'กรุณากรอกรายละเอียดงาน';
         }
-        if (!form.contactPhone && !form.contactLine) {
-          newErrors.contact = 'กรุณากรอกเบอร์โทรหรือ LINE';
+        if (form.contactMode === 'phone' && !form.contactPhone.trim()) {
+          newErrors.contact = 'กรุณากรอกเบอร์โทร';
+        }
+        if (form.contactMode === 'line' && !form.contactLine.trim()) {
+          newErrors.contact = 'กรุณากรอก LINE ID';
+        }
+        if (form.contactMode === 'phone_or_line' && !form.contactPhone.trim() && !form.contactLine.trim()) {
+          newErrors.contact = 'กรุณากรอกเบอร์โทรหรือ LINE อย่างน้อย 1 ช่อง';
+        }
+        if (form.contactMode === 'in_app' && externalContactSignals.hasExternalContact) {
+          newErrors.contact = 'หากต้องการเริ่มคุยผ่านแอปก่อน กรุณาย้ายเบอร์โทร, LINE หรือ link ไปไว้ในช่องติดต่อ';
         }
         break;
     }
@@ -465,9 +659,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const serializeForm = (f: FormData) => {
     return {
       ...f,
-      shiftDate: f.shiftDate ? new Date(f.shiftDate).toISOString() : undefined,
-      shiftDateEnd: f.shiftDateEnd ? new Date(f.shiftDateEnd).toISOString() : undefined,
-      shiftDates: (f.shiftDates || []).map((d: any) => d instanceof Date ? d.toISOString() : d),
+      shiftDate: f.shiftDate ? toDateKey(f.shiftDate) : undefined,
+      shiftDateEnd: f.shiftDateEnd ? toDateKey(f.shiftDateEnd) : undefined,
+      shiftDates: (f.shiftDates || []).map((date) => toDateKey(date)),
     } as any;
   };
 
@@ -475,41 +669,109 @@ export default function PostJobScreen({ navigation, route }: Props) {
   
   // Submit
   const handleSubmit = async () => {
-    if (!user?.uid || !isInitialized) {
-      setAlert(createAlert.warning('กำลังยืนยันเซสชัน', 'กรุณารอสักครู่แล้วลองโพสต์อีกครั้ง') as AlertState);
+    if (submitLockRef.current || isLoading || isSubmitting) {
       return;
     }
-    
-    // Check posting limit
-    if (!isEditMode) {
-      const postStatus = await canUserPostToday(user.uid);
-      if (!postStatus.canPost) {
-        setAlert(createAlert.warning('ถึงลิมิตโพสต์แล้ว', 'อัพเกรดเป็น Premium เพื่อโพสต์ไม่จำกัด') as AlertState);
+
+    submitLockRef.current = true;
+    setIsSubmitting(true);
+
+    try {
+      if (!user?.uid || !isInitialized) {
+        setAlert(createAlert.warning('กำลังยืนยันเซสชัน', 'กรุณารอสักครู่แล้วลองโพสต์อีกครั้ง') as AlertState);
         return;
       }
+
+      // Check posting limit
+      if (!isEditMode) {
+        const postStatus = await canUserPostToday(user.uid);
+        if (!postStatus.canPost) {
+          setAlert(createAlert.warning('ถึงลิมิตโพสต์แล้ว', postStatus.reason || 'บัญชีนี้ใช้โควตาโพสต์ครบแล้วในเดือนนี้') as AlertState);
+          return;
+        }
+      }
+
+      // If urgent post selected, go to payment first
+      if (form.isUrgent && !isEditMode) {
+        const totalCreatedPosts = await getUserCreatedPostCount(user.uid);
+        const commerceStatus = await getCommerceAccessStatus();
+
+        if (totalCreatedPosts === 0 && !commerceStatus.freeAccessEnabled) {
+          await trackEvent({
+            eventName: 'post_job_submitted',
+            screenName: 'PostJob',
+            subjectType: 'job_draft',
+            subjectId: user.uid,
+            province: form.province,
+            props: {
+              step: 'urgent_deferred_first_post',
+              postType: form.postType,
+              isUrgent: true,
+              staffType: form.staffType,
+              locationType: form.locationType,
+            },
+          });
+
+          setAlert(
+            createAlert.info(
+              'โพสต์แรกจะลงให้ก่อนทันที',
+              'ระบบจะลงประกาศแบบปกติก่อน เพื่อไม่ให้การโพสต์ครั้งแรกสะดุด คุณสามารถกดโปรโมตเป็นประกาศด่วนภายหลังได้จากหน้าประกาศของฉัน'
+            ) as AlertState
+          );
+          await createJobPost(false, { ...form, isUrgent: false });
+          return;
+        }
+
+        if (commerceStatus.freeAccessEnabled) {
+          const canUseUrgent = await canUseFreeUrgent(user.uid);
+          if (!canUseUrgent) {
+            setAlert(createAlert.info('สิทธิ์ประกาศด่วนครบแล้ว', 'บัญชีนี้ใช้สิทธิ์ประกาศด่วนครบตามรอบปัจจุบันแล้ว คุณยังสามารถโพสต์แบบปกติได้') as AlertState);
+            return;
+          }
+
+          await createJobPost(true, undefined, true);
+          return;
+        }
+
+        await trackEvent({
+          eventName: 'post_job_submitted',
+          screenName: 'PostJob',
+          subjectType: 'job_draft',
+          subjectId: user.uid,
+          province: form.province,
+          props: {
+            step: 'payment_required',
+            postType: form.postType,
+            isUrgent: true,
+            staffType: form.staffType,
+            locationType: form.locationType,
+          },
+        });
+
+        navigation.navigate('Payment', {
+          type: 'urgent_post',
+          amount: PRICING.urgentPost,
+          title: 'ประกาศด่วน',
+          description: 'ติดป้าย "ด่วน" แสดงเด่นกว่าประกาศปกติ',
+          // pass only serializable data (no functions)
+          formData: serializeForm(form),
+          submissionToken: createSubmissionToken(),
+          // indicate which screen to return to after success
+          returnTo: 'PostJob',
+        });
+        return;
+      }
+
+      // Create job directly
+      await createJobPost(false);
+    } finally {
+      submitLockRef.current = false;
+      setIsSubmitting(false);
     }
-    
-    // If urgent post selected, go to payment first
-    if (form.isUrgent && !isEditMode) {
-      navigation.navigate('Payment', {
-        type: 'urgent_post',
-        amount: 49,
-        title: 'ประกาศด่วน',
-        description: 'ติดป้าย "ด่วน" แสดงเด่นกว่าประกาศปกติ',
-        // pass only serializable data (no functions)
-        formData: serializeForm(form),
-        // indicate which screen to return to after success
-        returnTo: 'PostJob',
-      });
-      return;
-    }
-    
-    // Create job directly
-    await createJobPost(false);
   };
   
   // Create job post function
-  const createJobPost = async (isPaidUrgent: boolean, formArg?: FormData) => {
+  const createJobPost = async (isPaidUrgent: boolean, formArg?: FormData, consumeUrgentEntitlement: boolean = false) => {
     if (!user?.uid || !isInitialized) {
       setAlert(createAlert.warning('กำลังยืนยันเซสชัน', 'กรุณารอสักครู่แล้วลองโพสต์อีกครั้ง') as AlertState);
       return;
@@ -524,15 +786,22 @@ export default function PostJobScreen({ navigation, route }: Props) {
       const expiresAt = getPostExpiryDate(planKey);
       
       // Build shift time — use first date's slot, fallback to customStartTime/End
-      const toKey = (d: Date) => d.toISOString().slice(0, 10);
       const firstSlot = usedForm.shiftDates.length > 0
-        ? usedForm.shiftTimeSlots[toKey(usedForm.shiftDates[0])]
+        ? usedForm.shiftTimeSlots[toDateKey(usedForm.shiftDates[0])]
         : undefined;
       const shiftTime = firstSlot
         ? `${firstSlot.start}-${firstSlot.end}`
         : (usedForm.shiftTime === 'custom'
             ? `${usedForm.customStartTime}-${usedForm.customEndTime}`
             : usedForm.shiftTime);
+      const shiftDatesIso = usedForm.postType === 'shift'
+        ? usedForm.shiftDates.map((date) => toLocalNoonIsoString(date))
+        : [];
+      const shifts = usedForm.postType === 'shift'
+        ? buildPostShifts(shiftDatesIso, usedForm.shiftTimeSlots, Math.max(1, usedForm.slotsNeeded || 1))
+        : undefined;
+      const totalShifts = shifts?.reduce((sum, slot) => sum + Math.max(1, slot.slotsNeeded || 1), 0);
+      const contactMode = getSafeContactMode(usedForm.contactMode, Boolean(usedForm.contactPhone), Boolean(usedForm.contactLine));
       
       // Build title if empty
       let title = usedForm.title;
@@ -547,7 +816,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         }
       }
       
-      const jobData = {
+      const jobData: Partial<JobPost> = {
         title,
         postType: usedForm.postType,
         staffType: usedForm.staffType,
@@ -568,7 +837,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         paymentType: usedForm.paymentType,
         deductPercent: usedForm.paymentType === 'DEDUCT_PERCENT' ? usedForm.deductPercent : undefined,
         shiftDate: usedForm.postType === 'job' ? new Date() : (usedForm.shiftDates[0] || usedForm.shiftDate),
-        shiftDates: usedForm.postType === 'shift' ? usedForm.shiftDates.map(d => d.toISOString()) : undefined,
+        shiftDates: usedForm.postType === 'shift' ? usedForm.shiftDates.map((date) => toLocalNoonIsoString(date)) : undefined,
         shiftTimeSlots: usedForm.postType === 'shift' ? usedForm.shiftTimeSlots : undefined,
         shiftDateEnd: usedForm.shiftDateEnd || undefined,
         shiftTime: usedForm.postType === 'shift' ? shiftTime : (usedForm.postType === 'job' ? usedForm.workHours : undefined),
@@ -583,6 +852,16 @@ export default function PostJobScreen({ navigation, route }: Props) {
         },
         contactPhone: usedForm.contactPhone,
         contactLine: usedForm.contactLine,
+        contactMode,
+        slotsNeeded: usedForm.postType === 'shift' ? Math.max(1, usedForm.slotsNeeded || 1) : undefined,
+        campaignTitle: usedForm.campaignTitle || title,
+        campaignSummary: usedForm.campaignSummary || undefined,
+        scheduleNote: usedForm.scheduleNote || undefined,
+        sourceText: usedForm.sourceText || undefined,
+        sourceChannel: usedForm.sourceText ? 'paste' : 'manual',
+        shifts,
+        totalShifts,
+        filledShifts: 0,
         status: (usedForm.isUrgent ? 'urgent' : 'active') as 'active' | 'urgent',
         tags: usedForm.tags,
         expiresAt,
@@ -590,11 +869,26 @@ export default function PostJobScreen({ navigation, route }: Props) {
       
       if (isEditMode && editJob) {
         await updateJob(editJob.id, jobData);
+        await trackEvent({
+          eventName: 'post_job_submitted',
+          screenName: 'PostJob',
+          subjectType: 'shift',
+          subjectId: editJob.id,
+          province: usedForm.province,
+          props: {
+            step: 'updated',
+            postType: usedForm.postType,
+            isUrgent: Boolean(usedForm.isUrgent),
+            staffType: usedForm.staffType,
+            userPlan: planKey,
+          },
+        });
+
         setAlert(createAlert.success('แก้ไขสำเร็จ!', 'อัปเดตประกาศเรียบร้อยแล้ว', [
           { text: 'ตกลง', onPress: () => navigation.goBack() }
         ]) as AlertState);
       } else {
-        await createJob({
+        const createdJobId = await createJob({
           ...jobData,
           posterId: user.uid,
           posterName: user.displayName || 'ไม่ระบุชื่อ',
@@ -603,9 +897,31 @@ export default function PostJobScreen({ navigation, route }: Props) {
           posterRole: user.role,
           posterOrgType: (user as any).orgType,
           posterStaffType: (user as any).staffType,
+          posterStaffTypes: (user as any).staffTypes || ((user as any).staffType ? [(user as any).staffType] : []),
           posterPlan: (user as any)?.subscription?.plan || 'free',
+          posterAdminTags: user.adminTags || [],
+          posterWarningTag: user.adminWarningTag || undefined,
         });
+        await trackEvent({
+          eventName: 'post_job_submitted',
+          screenName: 'PostJob',
+          subjectType: 'shift',
+          subjectId: createdJobId || user.uid,
+          jobId: createdJobId,
+          province: usedForm.province,
+          props: {
+            step: isPaidUrgent ? 'created_after_payment' : 'created',
+            postType: usedForm.postType,
+            isUrgent: Boolean(usedForm.isUrgent),
+            staffType: usedForm.staffType,
+            userPlan: planKey,
+          },
+        });
+
         await incrementPostCount(user.uid);
+        if (consumeUrgentEntitlement && usedForm.isUrgent) {
+          await markFreeUrgentUsed(user.uid);
+        }
         
         setAlert(createAlert.success('โพสต์สำเร็จ! 🎉', 'ประกาศของคุณถูกโพสต์แล้ว', [
           { text: 'ดูประกาศของฉัน', onPress: () => navigation.replace('MyPosts') }
@@ -621,6 +937,12 @@ export default function PostJobScreen({ navigation, route }: Props) {
   // Get step title
   const getStepTitle = () => {
     if (currentStep === 0) {
+      if (duplicateJob) {
+        return { title: 'สร้างร่างจากประกาศเดิม', subtitle: 'คัดลอกข้อมูลสำคัญไว้ให้แล้ว ปรับเฉพาะส่วนที่ต่างได้เลย' };
+      }
+      if (isEditMode) {
+        return { title: 'แก้ไขประกาศ', subtitle: 'อัปเดตรายละเอียดให้ตรงกับงานรอบนี้' };
+      }
       return { title: 'เลือกประเภทประกาศ', subtitle: 'คุณต้องการลงประกาศแบบไหน?' };
     }
     
@@ -670,7 +992,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={[styles.infoBox, { backgroundColor: roleTones.nurse.background, marginBottom: 12 }]}> 
           <Ionicons name="medical-outline" size={20} color={roleTones.nurse.icon} />
           <Text style={[styles.infoText, { color: roleTones.nurse.text }]}> 
-            สำหรับ“พยาบาล” ลงประกาศ“หาคนแทนเวร” เพื่อหาคนมารับงานแทนคุณ
+            สำหรับ“พยาบาล” ใช้ประกาศนี้เพื่อหาคนช่วยรับเวรต่อได้รวดเร็วและคุยรายละเอียดกันง่ายขึ้น
           </Text>
         </View>
       )}
@@ -683,42 +1005,72 @@ export default function PostJobScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {visiblePostTypes.map((type) => (
-        <TouchableOpacity
-          key={type.value}
-          style={[
-            styles.typeCard,
-            { backgroundColor: typeCardBackground },
-            { borderColor: form.postType === type.value ? type.color : colors.border },
-            form.postType === type.value && { backgroundColor: isDark ? `${type.color}20` : `${type.color}10` },
-          ]}
-          onPress={() => setForm({ ...form, postType: type.value as PostType })}
-        >
-          <View style={[styles.typeIconWrap, { backgroundColor: type.color + '18' }]}>
-            <Ionicons name={type.icon} size={30} color={type.color} />
-          </View>
-          <View style={styles.typeInfo}>
-            <Text style={[styles.typeTitle, { color: colors.text }]}>{type.title}</Text>
-            <Text style={[styles.typeSubtitle, { color: colors.textSecondary }]}>{type.subtitle}</Text>
-          </View>
-          <View style={[
-            styles.typeRadio,
-            { borderColor: form.postType === type.value ? type.color : colors.border },
-            form.postType === type.value && { backgroundColor: type.color },
-          ]}>
-            {form.postType === type.value && (
-              <Ionicons name="checkmark" size={16} color={colors.white} />
-            )}
-          </View>
-        </TouchableOpacity>
-      ))}
+      {visiblePostTypes.map((type) => {
+        const isSelected = form.postType === type.value;
+        return (
+          <TouchableOpacity
+            key={type.value}
+            activeOpacity={0.7}
+            style={[
+              styles.typeCard,
+              {
+                backgroundColor: isSelected
+                  ? isDark ? `${type.color}25` : type.bgColor
+                  : typeCardBackground,
+                borderColor: isSelected ? type.color : colors.border,
+                borderWidth: isSelected ? 2 : 1,
+              },
+            ]}
+            onPress={() => setForm({ ...form, postType: type.value as PostType })}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <View style={[styles.typeIconWrap, {
+                backgroundColor: isSelected ? type.color : type.color + '18',
+                width: 52,
+                height: 52,
+                borderRadius: 16,
+              }]}>
+                <Ionicons name={type.icon} size={28} color={isSelected ? '#FFFFFF' : type.color} />
+              </View>
+              <View style={[styles.typeInfo, { marginLeft: 14 }]}>
+                <Text style={[styles.typeTitle, {
+                  color: isSelected ? type.color : colors.text,
+                  fontSize: 16,
+                  fontWeight: '700',
+                }]}>{type.title}</Text>
+                <Text style={[styles.typeSubtitle, {
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                  marginTop: 2,
+                  lineHeight: 17,
+                }]}>{type.subtitle}</Text>
+              </View>
+            </View>
+            <View style={[
+              styles.typeRadio,
+              {
+                borderColor: isSelected ? type.color : colors.border,
+                borderWidth: 2,
+                width: 24,
+                height: 24,
+                borderRadius: 12,
+              },
+              isSelected && { backgroundColor: type.color },
+            ]}>
+              {isSelected && (
+                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+              )}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
       
       {/* Info box */}
       <View style={[styles.infoBox, { backgroundColor: colors.primaryBackground }]}>
         <Ionicons name="information-circle" size={20} color={colors.primary} />
         <Text style={[styles.infoText, { color: colors.primaryDark }]}>
           {form.postType === 'shift'
-            ? 'สำหรับหาคนมาแทนเวรเฉพาะวัน หรือขายเวรที่ไม่สะดวกทำ'
+            ? 'สำหรับเปิดประกาศหาผู้ช่วยขึ้นเวรแทนเฉพาะวัน พร้อมระบุเวลาและรายละเอียดงานให้ชัดเจน'
             : form.postType === 'job'
             ? 'สำหรับโรงพยาบาล/คลินิก รับสมัครพยาบาลประจำ'
             : 'สำหรับหาคนดูแลผู้ป่วยที่บ้าน เฝ้าไข้ทั่วไป'}
@@ -732,8 +1084,45 @@ export default function PostJobScreen({ navigation, route }: Props) {
   // ============================================
   const renderStep1 = () => (
     <View style={styles.stepContent}>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>วางข้อความจากโพสต์เดิม</Text>
+      <TextInput
+        style={[styles.textInput, styles.textArea, { borderColor: colors.border, color: colors.text, backgroundColor: inputSurface }]}
+        value={form.sourceText}
+        onChangeText={(value) => setForm({ ...form, sourceText: value })}
+        placeholder="วางข้อความจากกลุ่ม LINE, OpenChat หรือโพสต์เดิม แล้วให้ระบบช่วยดึง วัน เวลา จังหวัด เรท และจำนวนคน"
+        placeholderTextColor={colors.textMuted}
+        multiline
+        numberOfLines={5}
+      />
+      <View style={styles.parserActionRow}>
+        <TouchableOpacity
+          style={[styles.parserButton, { backgroundColor: colors.primary }]}
+          onPress={applySourceText}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="sparkles-outline" size={18} color={colors.white} />
+          <Text style={styles.parserButtonText}>ดึงข้อมูลอัตโนมัติ</Text>
+        </TouchableOpacity>
+      </View>
+      {parseWarnings.length > 0 && (
+        <View style={[styles.infoBox, { backgroundColor: colors.warningLight, marginTop: SPACING.sm }]}> 
+          <Ionicons name="alert-circle-outline" size={18} color={colors.warning} />
+          <Text style={[styles.infoText, { color: colors.warning }]}> 
+            {parseWarnings.join(' • ')}
+          </Text>
+        </View>
+      )}
+      {!!form.campaignSummary && (
+        <View style={[styles.infoBox, { backgroundColor: colors.primaryBackground, marginTop: SPACING.sm }]}> 
+          <Ionicons name="layers-outline" size={18} color={colors.primary} />
+          <Text style={[styles.infoText, { color: colors.primaryDark }]}> 
+            {form.campaignSummary}
+          </Text>
+        </View>
+      )}
+
       {/* Staff Type */}
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>
+      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}> 
         {form.postType === 'homecare' ? 'ต้องการบุคลากรประเภทใด?' : 'ประเภทบุคลากรที่ต้องการ'}
       </Text>
       <View style={styles.optionGrid}>
@@ -792,7 +1181,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       )}
       
       {/* Department / Care Type */}
-      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
+      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}> 
         {form.postType === 'homecare' ? 'ประเภทการดูแล' : 'แผนก'} <Text style={{ color: colors.error }}>*</Text>
       </Text>
       <TouchableOpacity
@@ -800,7 +1189,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         onPress={() => setShowDepartmentModal(true)}
       >
         <Ionicons name="medical-outline" size={20} color={errors.department ? colors.error : colors.primary} />
-        <Text style={[styles.inputButtonText, { color: form.department ? colors.text : colors.textMuted }]}>
+        <Text style={[styles.inputButtonText, { color: form.department ? colors.text : colors.textMuted }]}> 
           {form.department || (form.postType === 'homecare' ? 'เลือกประเภทการดูแล' : 'เลือกแผนก')}
         </Text>
         <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
@@ -866,8 +1255,6 @@ export default function PostJobScreen({ navigation, route }: Props) {
         </View>
       );
     }
-
-    const toKey = (d: Date) => d.toISOString().slice(0, 10);
     const formatDateTH = (d: Date) =>
       d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
 
@@ -886,7 +1273,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
           onChange={(dates) => {
             const newSlots: Record<string, { start: string; end: string }> = {};
             dates.forEach(d => {
-              const k = toKey(d);
+              const k = toDateKey(d);
               newSlots[k] = form.shiftTimeSlots[k] || { start: '', end: '' };
             });
             setForm({ ...form, shiftDates: dates, shiftDate: dates[0] || new Date(), shiftTimeSlots: newSlots });
@@ -906,7 +1293,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
               .slice()
               .sort((a, b) => a.getTime() - b.getTime())
               .map(date => {
-                const key = toKey(date);
+                const key = toDateKey(date);
                 const slot = form.shiftTimeSlots[key] || { start: '', end: '' };
                 const missing = !slot.start || !slot.end;
                 return (
@@ -1112,21 +1499,87 @@ export default function PostJobScreen({ navigation, route }: Props) {
           <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
             สวัสดิการ (เลือกได้หลายอัน)
           </Text>
-          <View style={styles.chipRow}>
-            {['ประกันสังคม', 'ประกันกลุ่ม', 'โบนัส', 'OT', 'ที่พัก', 'อาหาร', 'รถรับส่ง', 'วันหยุดตามปฏิทิน'].map((benefit) => (
-              <Chip
-                key={benefit}
-                label={benefit}
-                selected={form.benefits.includes(benefit)}
-                onPress={() => {
-                  if (form.benefits.includes(benefit)) {
-                    setForm({ ...form, benefits: form.benefits.filter(b => b !== benefit) });
-                  } else {
-                    setForm({ ...form, benefits: [...form.benefits, benefit] });
-                  }
-                }}
-              />
-            ))}
+          {BENEFIT_GROUPS.map((group) => (
+            <View key={group.title} style={{ marginBottom: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
+                <Ionicons name={group.icon as any} size={16} color={colors.primary} />
+                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>{group.title}</Text>
+              </View>
+              <View style={styles.chipRow}>
+                {group.benefits.map((benefit) => (
+                  <Chip
+                    key={benefit}
+                    label={benefit}
+                    selected={form.benefits.includes(benefit)}
+                    onPress={() => {
+                      if (form.benefits.includes(benefit)) {
+                        setForm({ ...form, benefits: form.benefits.filter(b => b !== benefit) });
+                      } else {
+                        setForm({ ...form, benefits: [...form.benefits, benefit] });
+                      }
+                    }}
+                  />
+                ))}
+              </View>
+            </View>
+          ))}
+          {/* Custom added benefits (not in presets) */}
+          {(() => {
+            const presetBenefits = BENEFIT_GROUPS.flatMap(g => g.benefits);
+            const customBenefits = form.benefits.filter(b => !presetBenefits.includes(b));
+            if (customBenefits.length === 0) return null;
+            return (
+              <View style={{ marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
+                  <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>สวัสดิการที่เพิ่มเอง</Text>
+                </View>
+                <View style={styles.chipRow}>
+                  {customBenefits.map((benefit) => (
+                    <Chip
+                      key={benefit}
+                      label={benefit}
+                      selected={true}
+                      onPress={() => setForm({ ...form, benefits: form.benefits.filter(b => b !== benefit) })}
+                    />
+                  ))}
+                </View>
+              </View>
+            );
+          })()}
+          {/* Custom benefit input */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <TextInput
+              style={[styles.textInput, { flex: 1, borderColor: colors.border, color: colors.text, marginBottom: 0 }]}
+              value={customBenefitInput}
+              onChangeText={setCustomBenefitInput}
+              placeholder="เพิ่มสวัสดิการอื่นๆ..."
+              placeholderTextColor={colors.textMuted}
+              onSubmitEditing={() => {
+                const val = customBenefitInput.trim();
+                if (val && !form.benefits.includes(val)) {
+                  setForm({ ...form, benefits: [...form.benefits, val] });
+                  setCustomBenefitInput('');
+                }
+              }}
+              returnKeyType="done"
+            />
+            <TouchableOpacity
+              style={{
+                width: 44, height: 44, borderRadius: 12,
+                backgroundColor: customBenefitInput.trim() ? colors.primary : colors.borderLight,
+                alignItems: 'center', justifyContent: 'center',
+              }}
+              onPress={() => {
+                const val = customBenefitInput.trim();
+                if (val && !form.benefits.includes(val)) {
+                  setForm({ ...form, benefits: [...form.benefits, val] });
+                  setCustomBenefitInput('');
+                }
+              }}
+            >
+              <Ionicons name="add" size={22} color={customBenefitInput.trim() ? colors.white : colors.textMuted} />
+            </TouchableOpacity>
           </View>
         </>
       )}
@@ -1249,48 +1702,150 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.md }]}>
         แท็ก (เลือกได้หลายอัน)
       </Text>
-      <View style={styles.chipRow}>
-        {QUICK_TAGS.slice(0, 8).map((tag) => (
-          <Chip
-            key={tag}
-            label={tag}
-            selected={form.tags.includes(tag)}
-            onPress={() => {
-              if (form.tags.includes(tag)) {
-                setForm({ ...form, tags: form.tags.filter(t => t !== tag) });
-              } else {
-                setForm({ ...form, tags: [...form.tags, tag] });
-              }
-            }}
-          />
-        ))}
+      {(TAGS_BY_POST_TYPE[form.postType] || []).map((group: TagGroup) => (
+        <View key={group.title} style={{ marginBottom: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
+            <Ionicons name={group.icon as any} size={16} color={colors.primary} />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>{group.title}</Text>
+          </View>
+          <View style={styles.chipRow}>
+            {group.tags.map((tag) => (
+              <Chip
+                key={tag}
+                label={tag}
+                selected={form.tags.includes(tag)}
+                onPress={() => {
+                  if (form.tags.includes(tag)) {
+                    setForm({ ...form, tags: form.tags.filter(t => t !== tag) });
+                  } else {
+                    setForm({ ...form, tags: [...form.tags, tag] });
+                  }
+                }}
+              />
+            ))}
+          </View>
+        </View>
+      ))}
+      {/* Custom added tags (not in presets) */}
+      {(() => {
+        const presetTags = (TAGS_BY_POST_TYPE[form.postType] || []).flatMap((g: TagGroup) => g.tags);
+        const customTags = form.tags.filter(t => !presetTags.includes(t));
+        if (customTags.length === 0) return null;
+        return (
+          <View style={{ marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
+              <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
+              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>แท็กที่เพิ่มเอง</Text>
+            </View>
+            <View style={styles.chipRow}>
+              {customTags.map((tag) => (
+                <Chip
+                  key={tag}
+                  label={tag}
+                  selected={true}
+                  onPress={() => setForm({ ...form, tags: form.tags.filter(t => t !== tag) })}
+                />
+              ))}
+            </View>
+          </View>
+        );
+      })()}
+      {/* Custom tag input */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+        <TextInput
+          style={[styles.textInput, { flex: 1, borderColor: colors.border, color: colors.text, marginBottom: 0 }]}
+          value={customTagInput}
+          onChangeText={setCustomTagInput}
+          placeholder="พิมพ์แท็กเพิ่มเอง..."
+          placeholderTextColor={colors.textMuted}
+          onSubmitEditing={() => {
+            const val = customTagInput.trim();
+            if (val && !form.tags.includes(val)) {
+              setForm({ ...form, tags: [...form.tags, val] });
+              setCustomTagInput('');
+            }
+          }}
+          returnKeyType="done"
+        />
+        <TouchableOpacity
+          style={{
+            width: 44, height: 44, borderRadius: 12,
+            backgroundColor: customTagInput.trim() ? colors.primary : colors.borderLight,
+            alignItems: 'center', justifyContent: 'center',
+          }}
+          onPress={() => {
+            const val = customTagInput.trim();
+            if (val && !form.tags.includes(val)) {
+              setForm({ ...form, tags: [...form.tags, val] });
+              setCustomTagInput('');
+            }
+          }}
+        >
+          <Ionicons name="add" size={22} color={customTagInput.trim() ? colors.white : colors.textMuted} />
+        </TouchableOpacity>
       </View>
       
       {/* Contact */}
-      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>ข้อมูลติดต่อ</Text>
-      <View style={styles.row}>
-        <View style={{ flex: 1, marginRight: SPACING.sm }}>
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>เบอร์โทร</Text>
-          <TextInput
-            style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
-            value={form.contactPhone}
-            onChangeText={(v) => setForm({ ...form, contactPhone: v })}
-            placeholder="08X-XXX-XXXX"
-            placeholderTextColor={colors.textMuted}
-            keyboardType="phone-pad"
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>LINE ID</Text>
-          <TextInput
-            style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
-            value={form.contactLine}
-            onChangeText={(v) => setForm({ ...form, contactLine: v })}
-            placeholder="@lineID"
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
+      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>ช่องทางพูดคุย</Text>
+      <View style={styles.contactModeGrid}>
+        {CONTACT_MODE_OPTIONS.map((option) => (
+          <TouchableOpacity
+            key={option.value}
+            style={[
+              styles.contactModeCard,
+              {
+                borderColor: form.contactMode === option.value ? colors.primary : colors.border,
+                backgroundColor: form.contactMode === option.value ? colors.primaryBackground : inputSurface,
+              },
+            ]}
+            onPress={() => setForm({ ...form, contactMode: option.value })}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.contactModeTitle, { color: form.contactMode === option.value ? colors.primary : colors.text }]}>{option.label}</Text>
+            <Text style={[styles.contactModeHelper, { color: colors.textSecondary }]}>{option.helper}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
+
+      {form.contactMode !== 'in_app' && (
+        <View style={styles.row}>
+          {(form.contactMode === 'phone' || form.contactMode === 'phone_or_line') && (
+            <View style={{ flex: 1, marginRight: form.contactMode === 'phone_or_line' ? SPACING.sm : 0 }}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>เบอร์โทร</Text>
+              <TextInput
+                style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
+                value={form.contactPhone}
+                onChangeText={(v) => setForm({ ...form, contactPhone: v })}
+                placeholder="08X-XXX-XXXX"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="phone-pad"
+              />
+            </View>
+          )}
+          {(form.contactMode === 'line' || form.contactMode === 'phone_or_line') && (
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>LINE ID</Text>
+              <TextInput
+                style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
+                value={form.contactLine}
+                onChangeText={(v) => setForm({ ...form, contactLine: v })}
+                placeholder="@lineID"
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+          )}
+        </View>
+      )}
+
+      <View style={[styles.infoBox, { backgroundColor: colors.primaryBackground, marginTop: SPACING.sm }]}> 
+        <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
+        <Text style={[styles.infoText, { color: colors.primaryDark }]}> 
+          เริ่มคุยผ่านแอปก่อนจะช่วยดูแลความเป็นส่วนตัว ติดตามรายละเอียดงานได้ง่าย และตอบกลับกันได้เร็วในที่เดียว
+        </Text>
+      </View>
+      {externalContactSignals.hasExternalContact && form.contactMode === 'in_app' && (
+        <Text style={[styles.errorText, { color: errorTextColor }]}>พบเบอร์โทร, LINE หรือ link ในรายละเอียดโพสต์ หากต้องการเริ่มคุยผ่านแอปก่อน แนะนำย้ายข้อมูลนี้ไปไว้ในช่องติดต่อ</Text>
+      )}
       {errors.contact && <Text style={[styles.errorText, { color: errorTextColor }]}>{errors.contact}</Text>}
       
       {/* Urgent Toggle */}
@@ -1307,10 +1862,10 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={{ flex: 1 }}>
           <Text style={[styles.urgentTitle, { color: colors.text }]}>ประกาศด่วน</Text>
           <Text style={[styles.urgentSubtitle, { color: colors.textMuted }]}>
-            แสดงเด่นกว่าประกาศปกติ ติดป้าย "ด่วน"
+            ขึ้นในโซนงานด่วนบนหน้าแรก ติดป้าย "ด่วน" และมีทางลัดให้คนกดดูรวมได้ทันที
           </Text>
           <View style={[styles.urgentPriceTag, { backgroundColor: urgentPriceTone.background }]}>
-            <Text style={[styles.urgentPriceText, { color: urgentPriceTone.text }]}>฿49</Text>
+            <Text style={[styles.urgentPriceText, { color: urgentPriceTone.text }]}>฿{PRICING.urgentPost}</Text>
           </View>
         </View>
         <Ionicons
@@ -1323,7 +1878,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={[styles.urgentNote, { backgroundColor: warningTone.background }]}> 
           <Ionicons name="information-circle" size={16} color={warningTone.text} />
           <Text style={[styles.urgentNoteText, { color: warningTone.text }]}> 
-            จะต้องชำระเงิน ฿49 ก่อนโพสต์
+            ป้ายด่วนจะเปิดให้ใช้งานตามสิทธิ์ของบัญชี เพื่อช่วยให้ประกาศสำคัญถูกมองเห็นได้เร็วขึ้น
           </Text>
         </View>
       )}
@@ -1349,6 +1904,17 @@ export default function PostJobScreen({ navigation, route }: Props) {
   };
   
   const stepInfo = getStepTitle();
+  const duplicateDraftBanner = duplicateJob ? (
+    <View style={[styles.duplicateBanner, { backgroundColor: colors.surface, borderColor: colors.warning }]}> 
+      <View style={[styles.duplicateBannerIcon, { backgroundColor: colors.warningLight }]}> 
+        <Ionicons name="copy-outline" size={20} color={colors.warning} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.duplicateBannerTitle, { color: colors.text }]}>ร่างนี้เริ่มจากประกาศเดิม</Text>
+        <Text style={[styles.duplicateBannerText, { color: colors.textSecondary }]}>ระบบคัดลอกข้อมูลสำคัญไว้ให้แล้ว และรีเซ็ตวัน เวลา กับสถานะด่วนเพื่อให้เริ่มรอบใหม่ได้ไวขึ้น</Text>
+      </View>
+    </View>
+  ) : null;
   
   return (
     <>
@@ -1402,12 +1968,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
               <FirstVisitTip
                 storageKey={`first_tip_post_job_${user.uid}`}
                 icon="create-outline"
-                title="หน้านี้จะพาคุณโพสต์งานทีละขั้น"
-                description="เลือกประเภทประกาศให้ตรง role ก่อน แล้วค่อยกรอกข้อมูลสำคัญ เช่น พื้นที่ เวลา ค่าตอบแทน และช่องทางติดต่อ ระบบจะช่วยจัด flow ให้เหมาะกับคุณ"
-                actionLabel="ดูคู่มือ"
-                onAction={() => navigation.navigate('OnboardingSurvey')}
+                title="โพสต์งานได้ไว พร้อมขั้นตอนที่ชัดเจน"
+                description="เลือกประเภทประกาศให้ตรงกับการใช้งาน แล้วกรอกข้อมูลสำคัญทีละขั้น ระบบจะช่วยจัดขั้นตอนที่ปลอดภัยและใช้งานง่ายให้คุณ"
+                actionLabel={onboardingSurveyEnabled ? 'ดูคู่มือ' : undefined}
+                onAction={onboardingSurveyEnabled ? () => navigation.navigate('OnboardingSurvey') : undefined}
               />
             )}
+            {duplicateDraftBanner}
             {renderStepContent()}
           </ScrollView>
         ) : (
@@ -1421,12 +1988,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
               <FirstVisitTip
                 storageKey={`first_tip_post_job_${user.uid}`}
                 icon="create-outline"
-                title="หน้านี้จะพาคุณโพสต์งานทีละขั้น"
-                description="เลือกประเภทประกาศให้ตรง role ก่อน แล้วค่อยกรอกข้อมูลสำคัญ เช่น พื้นที่ เวลา ค่าตอบแทน และช่องทางติดต่อ ระบบจะช่วยจัด flow ให้เหมาะกับคุณ"
-                actionLabel="ดูคู่มือ"
-                onAction={() => navigation.navigate('OnboardingSurvey')}
+                title="โพสต์งานได้ไว พร้อมขั้นตอนที่ชัดเจน"
+                description="เลือกประเภทประกาศให้ตรงกับการใช้งาน แล้วกรอกข้อมูลสำคัญทีละขั้น ระบบจะช่วยจัดขั้นตอนที่ปลอดภัยและใช้งานง่ายให้คุณ"
+                actionLabel={onboardingSurveyEnabled ? 'ดูคู่มือ' : undefined}
+                onAction={onboardingSurveyEnabled ? () => navigation.navigate('OnboardingSurvey') : undefined}
               />
             )}
+            {duplicateDraftBanner}
             {renderStepContent()}
           </ScrollView>
         )}
@@ -1455,21 +2023,21 @@ export default function PostJobScreen({ navigation, route }: Props) {
         )}
         <TouchableOpacity
           onPress={goNext}
-          disabled={isLoading}
+          disabled={isLoading || isSubmitting}
           style={{
             flex: 1,
             height: 48,
             borderRadius: 12,
-            backgroundColor: isLoading ? colors.textMuted : colors.primary,
+            backgroundColor: isLoading || isSubmitting ? colors.textMuted : colors.primary,
             justifyContent: 'center',
             alignItems: 'center',
-            opacity: isLoading ? 0.7 : 1,
+            opacity: isLoading || isSubmitting ? 0.7 : 1,
           }}
           activeOpacity={0.7}
         >
           <Text style={{ color: colors.white, fontWeight: 'bold', fontSize: 16 }}>
             {currentStep === 0 ? 'เริ่มต้น' :
-              currentStep === getTotalSteps() ? (isLoading ? 'กำลังโพสต์...' : '🚀 โพสต์เลย') : 
+              currentStep === getTotalSteps() ? ((isLoading || isSubmitting) ? 'กำลังดำเนินการ...' : (duplicateJob ? '🚀 สร้างจากร่างนี้' : '🚀 โพสต์เลย')) : 
               'ถัดไป'}
           </Text>
         </TouchableOpacity>
@@ -1494,7 +2062,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
           <>
             <Text style={[styles.modalSectionTitle, { color: colors.textMuted }]}>ยอดนิยม</Text>
             <View style={styles.chipRow}>
-              {POPULAR_PROVINCES.map((p) => (
+              {POPULAR_PROVINCES.map((p: string) => (
                 <Chip
                   key={p}
                   label={p}
@@ -1521,7 +2089,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         )}
         
         <ScrollView style={{ maxHeight: 350 }}>
-          {filteredProvinces.map((province) => (
+          {filteredProvinces.map((province: string) => (
             <TouchableOpacity
               key={province}
               style={[
@@ -1839,6 +2407,31 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     paddingBottom: 100,
   },
+  duplicateBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  duplicateBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  duplicateBannerTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  duplicateBannerText: {
+    fontSize: FONT_SIZES.sm,
+    lineHeight: 20,
+  },
   
   // Step Content
   stepContent: {
@@ -2096,6 +2689,24 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.sm,
     marginBottom: 4,
   },
+  parserActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginTop: SPACING.sm,
+  },
+  parserButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  parserButtonText: {
+    color: '#FFFFFF',
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+  },
   
   // Chips
   chipRow: {
@@ -2108,6 +2719,22 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  contactModeGrid: {
+    gap: SPACING.sm,
+  },
+  contactModeCard: {
+    borderWidth: 1,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+  },
+  contactModeTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+  },
+  contactModeHelper: {
+    fontSize: FONT_SIZES.sm,
+    marginTop: 2,
   },
   
   // Rate Type

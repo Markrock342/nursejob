@@ -1,5 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 
+export * from './analytics';
+
 // Re-export Timestamp so other files import from one place
 export type { Timestamp };
 
@@ -12,6 +14,8 @@ export interface PostShift {
   startTime: string;    // "08:00"
   endTime: string;      // "16:00"
   filled: boolean;      // มีคนรับเวรนี้แล้ว
+  slotsNeeded?: number; // จำนวนคนที่ต้องการใน slot นี้
+  filledCount?: number; // จำนวนที่ได้แล้ว
   applicantId?: string; // uid ของคนที่รับ
   applicantName?: string;
 }
@@ -27,6 +31,7 @@ export interface PostShift {
 // B2C = nurse / B2B = hospital roles
 export type SubscriptionPlan =
   | 'free'
+  | 'premium'
   | 'nurse_pro'
   | 'hospital_starter'
   | 'hospital_pro'
@@ -37,14 +42,34 @@ export type LegacyPlan = 'premium';
 
 export type BillingCycle = 'monthly' | 'annual';
 
+export type SubscriptionUsageFeature =
+  | 'post_create'
+  | 'job_application'
+  | 'chat_start'
+  | 'urgent_post'
+  | 'extend_post'
+  | 'boost_post';
+
+export interface SubscriptionUsageCounter {
+  periodKey: string;
+  used: number;
+}
+
+export type UserAdminTag = 'RN' | 'PN' | 'NA' | 'ANES' | 'CLINIC' | 'AGENCY';
+
+export type JobContactMode = 'in_app' | 'phone' | 'line' | 'phone_or_line';
+
 export interface Subscription {
   plan: SubscriptionPlan;
   billingCycle?: BillingCycle;
   expiresAt?: Date | Timestamp | null;
   startedAt?: Date;
+  isEarlyAccess?: boolean;
+  sourcePlan?: SubscriptionPlan;
   // Post tracking (free / starter)
   postsToday?: number;
   lastPostDate?: string; // YYYY-MM-DD
+  monthlyUsage?: Partial<Record<SubscriptionUsageFeature, SubscriptionUsageCounter>>;
   // Urgent bonus — resets monthly for Pro+
   freeUrgentUsed?: boolean;
   freeUrgentMonthReset?: string; // YYYY-MM
@@ -55,24 +80,24 @@ export interface Subscription {
 // ============================================
 export const PRICING = {
   // ── B2C: พยาบาล ───────────────────────────
-  nursePro: 59,
-  nurseProAnnual: 590,           // ประหยัด ฿118 (2 เดือนฟรี)
+  nursePro: 79,
+  nurseProAnnual: 790,
 
   // ── B2B: โรงพยาบาล / เอเจนซี่ ────────────
-  hospitalStarter: 299,
-  hospitalStarterAnnual: 2990,   // ประหยัด ฿598
-  hospitalPro: 799,
-  hospitalProAnnual: 7990,       // ประหยัด ฿1,598
-  hospitalEnterprise: 1799,
-  hospitalEnterpriseAnnual: 17990, // ประหยัด ฿3,598
+  hospitalStarter: 390,
+  hospitalStarterAnnual: 3900,
+  hospitalPro: 990,
+  hospitalProAnnual: 9900,
+  hospitalEnterprise: 2900,
+  hospitalEnterpriseAnnual: 29000,
 
   // ── Add-ons (ทุก role) ────────────────────
-  urgentPost: 49,
+  urgentPost: 39,
   extendPost: 19,
   extraPost: 29,
 
   // ── Legacy (backward compat) ──────────────
-  subscription: 59,  // was 89 — mapped to nursePro now
+  subscription: 79,
 } as const;
 
 // ============================================
@@ -90,10 +115,28 @@ export const SUBSCRIPTION_PLANS = {
     maxApplyPerDay: 3,
     urgentPerMonth: 0,
     features: [
-      'สมัครงาน 3 ครั้ง/วัน',
       'โพสต์ได้ 2 ครั้ง/วัน',
       'โพสต์อยู่ 3 วัน',
-      'ปุ่มด่วน ฿49/ครั้ง',
+      'ซื้อโพสต์เพิ่ม ต่ออายุ และป้ายด่วนได้แยกเป็นครั้ง',
+      'เหมาะกับการเริ่มใช้งานและทดลองลงประกาศ',
+    ],
+  },
+
+  // ─── B2C: PREMIUM ─────────────────────────
+  premium: {
+    name: 'Premium',
+    audience: 'both' as const,
+    price: 79,
+    annualPrice: 790,
+    postExpiryDays: 30,
+    maxPostsPerDay: null,
+    maxApplyPerDay: null,
+    urgentPerMonth: 1,
+    features: [
+      'โพสต์ได้ไม่จำกัด',
+      'โพสต์อยู่ 30 วัน',
+      'ใช้ป้ายด่วนฟรี 1 ครั้ง/เดือน',
+      'เหมาะกับผู้ใช้ที่ต้องการสิทธิ์ใช้งานมากขึ้นโดยไม่ผูกกับสายงานพยาบาล',
     ],
   },
 
@@ -101,19 +144,17 @@ export const SUBSCRIPTION_PLANS = {
   nurse_pro: {
     name: 'Nurse Pro',
     audience: 'nurse' as const,
-    price: 59,
-    annualPrice: 590,
+    price: 79,
+    annualPrice: 790,
     postExpiryDays: 30,
     maxPostsPerDay: null,        // ไม่จำกัด
     maxApplyPerDay: null,
     urgentPerMonth: 1,           // ปุ่มด่วนฟรี 1 ครั้ง/เดือน
     features: [
-      'โพสต์ขาย/แลกเวรไม่จำกัด',
-      'สมัครงานไม่จำกัด',
+      'โพสต์ได้ไม่จำกัด',
       'โพสต์อยู่ 30 วัน',
-      '⚡ ปุ่มด่วนฟรี 1 ครั้ง/เดือน',
-      '✓ Verified badge บนโปรไฟล์',
-      'แจ้งเตือนงานใกล้บ้าน real-time',
+      'ใช้ป้ายด่วนฟรี 1 ครั้ง/เดือน',
+      'เหมาะกับพยาบาลที่ลงเวรหรือหางานต่อเนื่อง',
     ],
   },
 
@@ -121,8 +162,8 @@ export const SUBSCRIPTION_PLANS = {
   hospital_starter: {
     name: 'Starter',
     audience: 'hospital' as const,
-    price: 299,
-    annualPrice: 2990,
+    price: 390,
+    annualPrice: 3900,
     postExpiryDays: 30,
     maxPostsPerDay: null,
     maxPostsPerMonth: 5,
@@ -130,10 +171,8 @@ export const SUBSCRIPTION_PLANS = {
     urgentPerMonth: 0,
     features: [
       'ลงประกาศงาน 5 ครั้ง/เดือน',
-      'ดูผู้สมัครทั้งหมด',
       'โพสต์อยู่ 30 วัน',
-      'โปรไฟล์องค์กร',
-      'รับสมัครผ่านแชท',
+      'เหมาะกับองค์กรที่ลงงานเป็นรอบ ไม่ได้ลงทุกวัน',
     ],
   },
 
@@ -141,8 +180,8 @@ export const SUBSCRIPTION_PLANS = {
   hospital_pro: {
     name: 'Professional',
     audience: 'hospital' as const,
-    price: 799,
-    annualPrice: 7990,
+    price: 990,
+    annualPrice: 9900,
     postExpiryDays: 30,
     maxPostsPerDay: null,
     maxPostsPerMonth: null,      // ไม่จำกัด
@@ -150,11 +189,9 @@ export const SUBSCRIPTION_PLANS = {
     urgentPerMonth: 3,           // ปุ่มด่วนฟรี 3 ครั้ง/เดือน
     features: [
       'ลงประกาศงานไม่จำกัด',
-      'ดูผู้สมัครทั้งหมด',
-      '⚡ ปุ่มด่วนฟรี 3 ครั้ง/เดือน',
-      'Analytics รายงานสถิติ',
-      '✓ Verified badge องค์กร',
-      'Priority support',
+      'โพสต์อยู่ 30 วัน',
+      'ใช้ป้ายด่วนฟรี 3 ครั้ง/เดือน',
+      'เหมาะกับองค์กรที่เปิดรับหลายตำแหน่งต่อเนื่อง',
     ],
   },
 
@@ -162,8 +199,8 @@ export const SUBSCRIPTION_PLANS = {
   hospital_enterprise: {
     name: 'Enterprise',
     audience: 'hospital' as const,
-    price: 1799,
-    annualPrice: 17990,
+    price: 2900,
+    annualPrice: 29000,
     postExpiryDays: 30,
     maxPostsPerDay: null,
     maxPostsPerMonth: null,
@@ -171,12 +208,9 @@ export const SUBSCRIPTION_PLANS = {
     urgentPerMonth: 10,
     features: [
       'ลงประกาศงานไม่จำกัด',
-      'หลาย account ในองค์กร',
-      '⚡ ปุ่มด่วนฟรี 10 ครั้ง/เดือน',
-      'Branded profile & banner',
-      'Dedicated account manager',
-      'รายงาน analytics แบบ custom',
-      'Priority support 24/7',
+      'โพสต์อยู่ 30 วัน',
+      'ใช้ป้ายด่วนฟรี 10 ครั้ง/เดือน',
+      'เหมาะกับองค์กรที่ต้องดันประกาศหลายชิ้นพร้อมกัน',
     ],
   },
 } as const;
@@ -200,6 +234,71 @@ export interface ReferralRecord {
   createdAt: Date | Timestamp;
   rewardGranted: boolean;     // true เมื่อ referee upgrade แล้ว
   rewardGrantedAt?: Date | Timestamp;
+}
+
+// ============================================
+// CAMPAIGN / PROMO CODE TYPES
+// ============================================
+export type CampaignCodeBenefitType =
+  | 'percent_discount'
+  | 'fixed_discount'
+  | 'free_urgent'
+  | 'free_post'
+  | 'bonus_days';
+
+export type CampaignCodeRole = 'user' | 'nurse' | 'hospital' | 'admin';
+
+export type CampaignCodePackage =
+  | 'premium_monthly'
+  | 'premium_annual'
+  | 'nurse_pro_monthly'
+  | 'nurse_pro_annual'
+  | 'hospital_starter_monthly'
+  | 'hospital_starter_annual'
+  | 'hospital_pro_monthly'
+  | 'hospital_pro_annual'
+  | 'hospital_enterprise_monthly'
+  | 'hospital_enterprise_annual'
+  | 'extra_post'
+  | 'extend_post'
+  | 'urgent_post';
+
+export interface CampaignCodeRule {
+  allowedRoles: CampaignCodeRole[];
+  allowedPackages: CampaignCodePackage[];
+  firstPurchaseOnly: boolean;
+  minSpend: number;
+  maxUses: number | null;
+  expiresAt?: Date | Timestamp | null;
+}
+
+export interface AppliedCampaignCode {
+  code: string;
+  title: string;
+  description?: string;
+  benefitType: CampaignCodeBenefitType;
+  benefitValue: number;
+  packageKey: CampaignCodePackage;
+  packageLabel: string;
+  originalAmount: number;
+  finalAmount: number;
+  discountAmount: number;
+  appliedAt?: Date | Timestamp | null;
+}
+
+export interface CampaignCode {
+  id: string;
+  code: string;
+  title: string;
+  description?: string;
+  benefitType: CampaignCodeBenefitType;
+  benefitValue: number;
+  usedCount: number;
+  isActive: boolean;
+  rule: CampaignCodeRule;
+  createdBy?: string;
+  createdAt?: Date | Timestamp | null;
+  updatedAt?: Date | Timestamp | null;
 }
 
 // User Types
@@ -240,11 +339,24 @@ export interface UserProfile {
   completedJobs?: number;
   isVerified?: boolean;
   isActive?: boolean;
+  privacy?: {
+    profileVisible?: boolean;
+    showOnlineStatus?: boolean;
+  };
+  notificationPreferences?: {
+    pushEnabled?: boolean;
+    newJobs?: boolean;
+    messages?: boolean;
+    applications?: boolean;
+    marketing?: boolean;
+  };
   settings?: {
     notifications: boolean;
     emailNotifications: boolean;
     jobAlerts: boolean;
   };
+  pendingCampaignCode?: AppliedCampaignCode | null;
+  legalConsent?: LegalConsentRecord;
   // Subscription
   subscription?: Subscription;
   createdAt: Date | Timestamp;
@@ -257,8 +369,23 @@ export interface UserProfile {
     lat: number;
     lng: number;
     geohash4: string;
+    province?: string;
+    staffTypes?: string[];
+    minRate?: number;
+    maxRate?: number;
     updatedAt?: Date;
   };
+}
+
+export interface LegalConsentAcceptance {
+  version: string;
+  acceptedAt: Date | Timestamp;
+}
+
+export interface LegalConsentRecord {
+  terms: LegalConsentAcceptance;
+  privacy: LegalConsentAcceptance;
+  acceptedFrom?: string;
 }
 
 // Job Types - บอร์ดหาคนแทน
@@ -275,7 +402,10 @@ export interface JobPost {
   posterRole?: 'user' | 'nurse' | 'hospital' | 'admin' | string;
   posterOrgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency' | string;
   posterStaffType?: string;
+  posterStaffTypes?: string[];
   posterPlan?: string;
+  posterAdminTags?: UserAdminTag[];
+  posterWarningTag?: string;
   
   // ประเภทบุคลากรที่ต้องการ
   staffType?: 'RN' | 'PN' | 'NA' | 'CG' | 'SITTER' | 'OTHER' | string;
@@ -336,6 +466,13 @@ export interface JobPost {
   shifts?: PostShift[];
   totalShifts?: number;
   filledShifts?: number;
+  slotsNeeded?: number;
+  campaignTitle?: string;
+  campaignSummary?: string;
+  scheduleNote?: string;
+  contactMode?: JobContactMode;
+  sourceText?: string;
+  sourceChannel?: 'manual' | 'paste';
 
   // Geolocation (ใหม่: สำหรับ proximity search)
   geohash?: string;       // geohash precision 5 (~5km) for indexing
@@ -345,6 +482,7 @@ export interface JobPost {
   // Metadata
   createdAt: Date | Timestamp;
   updatedAt?: Date | Timestamp;
+  boostedAt?: Date | Timestamp | null;
   expiresAt?: Date | Timestamp | null;
   status: 'active' | 'closed' | 'urgent' | 'expired' | 'deleted';
   isUrgent?: boolean;
@@ -368,6 +506,23 @@ export interface ShiftContact {
   contactedAt: Date;
   notes?: string;
   jobDeleted?: boolean; // true when job post was deleted
+}
+
+export interface JobCompletion {
+  id: string;
+  jobId: string;
+  jobTitle?: string;
+  posterId: string;
+  posterName?: string;
+  posterPhotoURL?: string;
+  hiredUserId: string;
+  hiredUserName?: string;
+  hiredUserPhotoURL?: string;
+  selectedApplicationId: string;
+  participantIds: string[];
+  status: 'completed';
+  completedAt: Date | Timestamp;
+  completedBy: string;
 }
 
 // Chat Types
@@ -475,9 +630,10 @@ export interface JobFilters {
 export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
-  JobDetail: { job?: JobPost; jobId?: string };
+  JobDetail: { job?: JobPost; jobId?: string; source?: string };
   ChatRoom: { 
     conversationId: string; 
+    recipientId?: string;
     recipientName?: string;
     recipientPhoto?: string;
     jobTitle?: string;
@@ -488,16 +644,18 @@ export type RootStackParamList = {
   Notifications: undefined;
   Favorites: undefined;
   MyPosts: undefined;
-  Shop: undefined; // ร้านค้า / ซื้อบริการ
+  Shop: undefined; // สิทธิ์และแพ็กเกจ
   ThemeSelection: undefined; // เลือกโทนสี
   Documents: undefined;
-  Applicants: undefined;
+  Applicants: { jobId?: string } | undefined;
   Reviews: {
     hospitalId?: string;
     hospitalName?: string;
     targetUserId?: string;
     targetName?: string;
     targetRole?: string;
+    completionId?: string;
+    relatedJobId?: string;
   };
   Help: undefined;
   Terms: undefined;
@@ -514,8 +672,13 @@ export type RootStackParamList = {
     amount?: number;
     title?: string;
     description?: string;
+    packageKey?: CampaignCodePackage;
+    plan?: SubscriptionPlan;
+    billingCycle?: BillingCycle;
     formData?: any;
+    jobId?: string;
     returnTo?: string;
+    submissionToken?: string;
   };
   MapJobs: undefined; // แผนที่งานใกล้ตัว
   NearbyJobAlert: undefined; // ตั้งค่าแจ้งเตือนงานใกล้ตัว
@@ -535,6 +698,7 @@ export type AuthStackParamList = {
       email?: string;
       password?: string;
       displayName?: string;
+      legalConsent?: LegalConsentRecord;
     };
   };
   ChooseRole: { phone?: string; phoneVerified?: boolean; fromGoogle?: boolean; registrationData?: any };
@@ -544,7 +708,9 @@ export type AuthStackParamList = {
     role?: 'user' | 'nurse' | 'hospital';
     staffType?: string;   // nurse: ประเภทบุคลากรที่เลือก
     orgType?: 'public_hospital' | 'private_hospital' | 'clinic' | 'agency'; // hospital/agency
-    registrationData?: any;
+    registrationData?: {
+      legalConsent?: LegalConsentRecord;
+    };
   };
   Terms: undefined;
   Privacy: undefined;
@@ -575,9 +741,22 @@ export interface RegisterForm {
 }
 
 export interface PostJobForm {
-  title: string;
+  type?: 'text' | 'image' | 'file' | 'document' | 'saved_document' | 'location' | 'system';
   department: string;
   description: string;
+  imageUrl?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  documentType?: string;
+  location?: {
+    lat: number;
+    lng: number;
+    address: string;
+    province?: string;
+    district?: string;
+  };
   requirements: string[];
   benefits: string[];
   salaryMin: string;

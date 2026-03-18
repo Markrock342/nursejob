@@ -81,6 +81,10 @@ export interface UserProfile {
     lat: number;
     lng: number;
     geohash4: string; // geohash precision 4 สำหรับ query
+    province?: string;
+    staffTypes?: string[];
+    minRate?: number;
+    maxRate?: number;
     updatedAt?: Date;
   };
   pushToken?: string; // Expo push token

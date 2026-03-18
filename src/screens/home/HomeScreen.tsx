@@ -1,4 +1,4 @@
-﻿// ============================================
+// ============================================
 // HOME SCREEN - Production Ready
 // ============================================
 
@@ -29,8 +29,6 @@ import {
   ScrollView,
   Alert,
   Dimensions,
-  Animated,
-  Platform,
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
@@ -38,7 +36,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { JobCard } from '../../components/job/JobCard';
-import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, FAB, FirstVisitTip } from '../../components/common';
+import { Loading, EmptyState, ModalContainer, Chip, KittenButton as Button, Avatar, FAB, FirstVisitTip, StickyInboxPanel } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import {
   ALL_PROVINCES,
@@ -59,11 +57,21 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useTheme } from '../../context/ThemeContext';
-import { getJobs, searchJobs, subscribeToJobs, getUserPosts } from '../../services/jobService';
+import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
+import { useScreenPerformance } from '../../hooks/useScreenPerformance';
+import { useTabRefresh } from '../../hooks/useTabRefresh';
+import { getJobs, getJobsNearby, subscribeToJobs, getUserPosts } from '../../services/jobService';
 import { subscribeToNotifications } from '../../services/notificationsService';
 import { subscribeToFavorites, toggleFavorite, Favorite } from '../../services/favoritesService';
 import { JobPost, MainTabParamList, JobFilters } from '../../types';
-import { debounce } from '../../utils/helpers';
+import { trackEvent } from '../../services/analyticsService';
+import { StickyInboxItem, subscribeStickyInboxItems } from '../../services/communicationsService';
+import {
+  SavedJobFilterPreset,
+  loadSavedJobFilterPresets,
+  removeSavedJobFilterPreset,
+  saveJobFilterPreset,
+} from '../../services/workflowPreferencesService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -114,8 +122,14 @@ interface Props {
 // ============================================
 interface UrgentBannerProps {
   urgentJobs: JobPost[];
+  totalUrgentJobs: number;
   onPress: (job: JobPost) => void;
+  onViewAll: () => void;
 }
+
+const URGENT_CARD_WIDTH = Math.min(SCREEN_WIDTH * 0.46, 176);
+const URGENT_CARD_GAP = SPACING.sm;
+const URGENT_AUTO_SCROLL_INTERVAL = 3200;
 
 function getUrgentJobDateLabel(job: JobPost) {
   if (job.postType === 'job') {
@@ -137,135 +151,193 @@ function getRateUnit(rateType?: string) {
   return rateType === 'hour' ? '/ชม.' : rateType === 'day' ? '/วัน' : rateType === 'month' ? '/เดือน' : '/เวร';
 }
 
-function UrgentJobsBanner({ urgentJobs, onPress }: UrgentBannerProps) {
+function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: UrgentBannerProps) {
+  if (urgentJobs.length === 0) return null;
+
+  const remainingCount = Math.max(totalUrgentJobs - urgentJobs.length, 0);
+  const previewJobs = urgentJobs.slice(0, 5);
   const scrollRef = useRef<ScrollView>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const autoScrollIndexRef = useRef(0);
+  const hasUserInteractedRef = useRef(false);
+  const totalSlides = previewJobs.length + (remainingCount > 0 ? 1 : 0);
+  const [activeSlide, setActiveSlide] = useState(0);
 
-  // Auto-scroll every 4 seconds
   useEffect(() => {
-    if (urgentJobs.length <= 1) return;
+    autoScrollIndexRef.current = 0;
+    hasUserInteractedRef.current = false;
+    setActiveSlide(0);
 
-    const supportsNativeDriver = Platform.OS !== 'web';
+    if (totalSlides <= 1) return;
 
     const interval = setInterval(() => {
-      setCurrentIndex((prev) => {
-        const nextIndex = (prev + 1) % urgentJobs.length;
-        
-        // Animate fade
-        Animated.sequence([
-          Animated.timing(fadeAnim, {
-            toValue: 0.3,
-            duration: 150,
-            useNativeDriver: supportsNativeDriver,
-          }),
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 150,
-            useNativeDriver: supportsNativeDriver,
-          }),
-        ]).start();
+      if (hasUserInteractedRef.current) return;
 
-        // Scroll to next item
-        scrollRef.current?.scrollTo({
-          x: nextIndex * (SCREEN_WIDTH - 32),
-          animated: true,
-        });
-
-        return nextIndex;
+      autoScrollIndexRef.current = (autoScrollIndexRef.current + 1) % totalSlides;
+      setActiveSlide(autoScrollIndexRef.current);
+      scrollRef.current?.scrollTo({
+        x: autoScrollIndexRef.current * (URGENT_CARD_WIDTH + URGENT_CARD_GAP),
+        animated: true,
       });
-    }, 4000);
+    }, URGENT_AUTO_SCROLL_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [urgentJobs.length, fadeAnim]);
+  }, [totalSlides]);
 
-  if (urgentJobs.length === 0) return null;
+  const stopAutoScroll = () => {
+    hasUserInteractedRef.current = true;
+  };
+
+  const handleMomentumScrollEnd = (event: any) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const nextIndex = Math.round(offsetX / (URGENT_CARD_WIDTH + URGENT_CARD_GAP));
+    autoScrollIndexRef.current = nextIndex;
+    setActiveSlide(nextIndex);
+  };
 
   return (
     <View style={urgentStyles.container}>
+      <View pointerEvents="none" style={urgentStyles.backgroundGlowPrimary} />
+      <View pointerEvents="none" style={urgentStyles.backgroundGlowSecondary} />
       <View style={urgentStyles.header}>
-        <View style={urgentStyles.headerLeft}>
-          <Ionicons name="flash" size={18} color="#FF6B6B" />
-          <Text style={urgentStyles.headerTitle}>งานด่วน!</Text>
-          <View style={urgentStyles.badge}>
-            <Text style={urgentStyles.badgeText}>PREMIUM</Text>
+        <View style={urgentStyles.headerCopy}>
+          <View style={urgentStyles.headerLeft}>
+            <View style={urgentStyles.flashIconWrap}>
+              <Ionicons name="flash" size={16} color="#FFFFFF" />
+            </View>
+            <Text style={urgentStyles.headerTitle}>งานด่วน</Text>
+            <View style={urgentStyles.badge}>
+              <Text style={urgentStyles.badgeText}>{totalUrgentJobs} รายการ</Text>
+            </View>
           </View>
+          <Text style={urgentStyles.headerSubtitle} numberOfLines={1}>
+            รวมงานเร่งด่วนที่ควรดูตอนนี้ และเปิดทั้งหมดได้ทันที
+          </Text>
         </View>
-        <View style={urgentStyles.dots}>
-          {urgentJobs.map((_, index) => (
-            <View
-              key={index}
-              style={[
-                urgentStyles.dot,
-                index === currentIndex && urgentStyles.dotActive,
-              ]}
-            />
-          ))}
-        </View>
+
+        <TouchableOpacity
+          style={urgentStyles.viewAllButton}
+          onPress={onViewAll}
+          onPressIn={stopAutoScroll}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="menu-outline" size={15} color="#FFFFFF" />
+          <Text style={urgentStyles.viewAllButtonText}>ดูทั้งหมด</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
         ref={scrollRef}
         horizontal
-        pagingEnabled
         showsHorizontalScrollIndicator={false}
-        scrollEventThrottle={16}
-        decelerationRate="fast"
-        snapToInterval={SCREEN_WIDTH - 32}
         contentContainerStyle={urgentStyles.scrollContent}
-        onMomentumScrollEnd={(e) => {
-          const newIndex = Math.round(e.nativeEvent.contentOffset.x / (SCREEN_WIDTH - 32));
-          setCurrentIndex(newIndex);
-        }}
+        decelerationRate="fast"
+        onScrollBeginDrag={stopAutoScroll}
+        onMomentumScrollEnd={handleMomentumScrollEnd}
       >
-        {urgentJobs.map((job, index) => (
-          <Animated.View
+        {previewJobs.map((job, index) => (
+          <TouchableOpacity
             key={job.id}
-            style={[
-              urgentStyles.card,
-              { opacity: index === currentIndex ? fadeAnim : 0.7 },
-            ]}
+            style={urgentStyles.card}
+            onPress={() => onPress(job)}
+            onPressIn={stopAutoScroll}
+            activeOpacity={0.86}
           >
-            <TouchableOpacity
-              style={urgentStyles.cardInner}
-              onPress={() => onPress(job)}
-              activeOpacity={0.8}
-            >
-              <View style={urgentStyles.cardLeft}>
-                <Text style={urgentStyles.cardTitle} numberOfLines={1}>
-                  {job.title || job.department}
-                </Text>
-                <Text style={urgentStyles.cardLocation} numberOfLines={1}>
-                  {job.location?.hospital || job.location?.district}
-                </Text>
-                <View style={urgentStyles.cardMeta}>
-                  <Text style={urgentStyles.cardDate}>
-                    {job.postType === 'job' ? 'เริ่มงาน ' : 'วันที่ '}{getUrgentJobDateLabel(job)}
-                  </Text>
-                  <Text style={urgentStyles.cardTime}>
-                    {job.postType === 'job' ? 'เวลางาน ' : 'เวลา '}{getUrgentJobTimeLabel(job)}
-                  </Text>
+            <View pointerEvents="none" style={urgentStyles.cardAccentBar} />
+            <View style={urgentStyles.cardTopRow}>
+              <View style={urgentStyles.rankBadge}>
+                <Text style={urgentStyles.rankBadgeText}>#{index + 1}</Text>
+              </View>
+              <View style={urgentStyles.urgentBadge}>
+                <Ionicons name="flash" size={12} color="#FFF" />
+                <Text style={urgentStyles.urgentBadgeText}>ด่วน</Text>
+              </View>
+            </View>
+
+            <Text style={urgentStyles.cardTitle} numberOfLines={1}>
+              {job.title || job.department}
+            </Text>
+            <View style={urgentStyles.locationRow}>
+              <View style={urgentStyles.locationIconWrap}>
+                <Ionicons name="location-outline" size={12} color="#F43F5E" />
+              </View>
+              <Text style={urgentStyles.cardLocation} numberOfLines={1}>
+                {job.location?.hospital || job.location?.district || job.location?.province || 'ไม่ระบุสถานที่'}
+              </Text>
+            </View>
+
+            <View style={urgentStyles.cardMetaStack}>
+              <View style={urgentStyles.cardMetaPill}>
+                <View style={urgentStyles.cardMetaIconWrap}>
+                  <Ionicons name="calendar-outline" size={12} color="#F43F5E" />
                 </View>
-                {(job as any)._distanceKm !== undefined ? (
+                <Text style={urgentStyles.cardMetaLabel}>{job.postType === 'job' ? 'เริ่มงาน' : 'วันที่'}</Text>
+                <Text style={urgentStyles.cardMetaText} numberOfLines={1}>
+                  {getUrgentJobDateLabel(job)}
+                </Text>
+              </View>
+              <View style={urgentStyles.cardMetaPill}>
+                <View style={urgentStyles.cardMetaIconWrap}>
+                  <Ionicons name="time-outline" size={12} color="#F43F5E" />
+                </View>
+                <Text style={urgentStyles.cardMetaLabel}>{job.postType === 'job' ? 'เวลางาน' : 'เวลา'}</Text>
+                <Text style={urgentStyles.cardMetaText} numberOfLines={1}>
+                  {getUrgentJobTimeLabel(job)}
+                </Text>
+              </View>
+              {(job as any)._distanceKm !== undefined ? (
+                <View style={[urgentStyles.cardMetaPill, urgentStyles.cardMetaPillAccent]}>
+                  <View style={[urgentStyles.cardMetaIconWrap, urgentStyles.cardMetaIconWrapAccent]}>
+                    <Ionicons name="navigate-outline" size={12} color="#EA580C" />
+                  </View>
+                  <Text style={urgentStyles.cardMetaLabel}>ระยะทาง</Text>
                   <Text style={urgentStyles.cardDistance}>
-                    ห่าง {((job as any)._distanceKm as number) < 1 ? `${Math.round(((job as any)._distanceKm as number) * 1000)} ม.` : `${((job as any)._distanceKm as number).toFixed(1)} กม.`}
+                    {((job as any)._distanceKm as number) < 1 ? `${Math.round(((job as any)._distanceKm as number) * 1000)} ม.` : `${((job as any)._distanceKm as number).toFixed(1)} กม.`}
                   </Text>
-                ) : null}
-              </View>
-              <View style={urgentStyles.cardRight}>
-                <Text style={urgentStyles.cardPrice}>
-                  ฿{job.shiftRate?.toLocaleString()}
-                </Text>
-                <Text style={urgentStyles.cardPriceUnit}>{getRateUnit(job.rateType)}</Text>
-                <View style={urgentStyles.urgentBadge}>
-                  <Ionicons name="flash" size={12} color="#FFF" />
-                  <Text style={urgentStyles.urgentBadgeText}>ด่วน</Text>
                 </View>
+              ) : null}
+            </View>
+
+            <View style={urgentStyles.cardBottomRow}>
+              <View style={urgentStyles.cardPriceBlock}>
+                <Text style={urgentStyles.cardPrice}>฿{job.shiftRate?.toLocaleString()}</Text>
+                <Text style={urgentStyles.cardPriceUnit}>{getRateUnit(job.rateType)}</Text>
               </View>
-            </TouchableOpacity>
-          </Animated.View>
+              <View style={urgentStyles.cardActionPill}>
+                <Text style={urgentStyles.cardActionText}>ดูงาน</Text>
+                <Ionicons name="arrow-forward" size={12} color="#FFFFFF" />
+              </View>
+            </View>
+          </TouchableOpacity>
         ))}
+
+        {remainingCount > 0 ? (
+          <TouchableOpacity style={urgentStyles.moreCard} onPress={onViewAll} onPressIn={stopAutoScroll} activeOpacity={0.86}>
+            <View style={urgentStyles.moreCardTopRow}>
+              <View style={urgentStyles.moreCardIconWrap}>
+                <Ionicons name="list-outline" size={18} color="#FFFFFF" />
+              </View>
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            </View>
+            <Text style={urgentStyles.moreCardTitle}>ดูทั้งหมด</Text>
+            <Text style={urgentStyles.moreCardCount}>+{remainingCount} งาน</Text>
+            <Text style={urgentStyles.moreCardSub}>เปิดรายการงานด่วนทั้งหมด</Text>
+          </TouchableOpacity>
+        ) : null}
       </ScrollView>
+
+      {totalSlides > 1 && (
+        <View style={urgentStyles.pagination}>
+          {Array.from({ length: totalSlides }).map((_, index) => (
+            <View
+              key={`urgent-dot-${index}`}
+              style={[
+                urgentStyles.paginationDot,
+                index === activeSlide && urgentStyles.paginationDotActive,
+              ]}
+            />
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -273,124 +345,337 @@ function UrgentJobsBanner({ urgentJobs, onPress }: UrgentBannerProps) {
 const urgentStyles = StyleSheet.create({
   container: {
     marginBottom: SPACING.md,
-    backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    backgroundColor: '#0F172A',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.22)',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  backgroundGlowPrimary: {
+    position: 'absolute',
+    top: -34,
+    right: -24,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(251,113,133,0.22)',
+  },
+  backgroundGlowSecondary: {
+    position: 'absolute',
+    left: -36,
+    bottom: -52,
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: 'rgba(249,115,22,0.16)',
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.sm,
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 8,
+  },
+  headerCopy: {
+    gap: 3,
+    flex: 1,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexWrap: 'wrap',
+  },
+  flashIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#F43F5E',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#F43F5E',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 4,
   },
   headerTitle: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '700',
-    color: '#FF6B6B',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  headerSubtitle: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.72)',
+    lineHeight: 13,
   },
   badge: {
-    backgroundColor: '#FFD700',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
   badgeText: {
     fontSize: 9,
     fontWeight: '800',
-    color: '#000',
+    color: '#FFE4E6',
   },
-  dots: {
+  viewAllButton: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-  },
-  dotActive: {
-    backgroundColor: '#0EA5E9',
-    width: 18,
+  viewAllButtonText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   scrollContent: {
     gap: SPACING.sm,
+    paddingBottom: 2,
+  },
+  pagination: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  paginationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.26)',
+  },
+  paginationDotActive: {
+    width: 18,
+    backgroundColor: '#FB7185',
   },
   card: {
-    width: SCREEN_WIDTH - 32,
-  },
-  cardInner: {
-    flexDirection: 'row',
-    backgroundColor: '#1a1a2e',
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
+    width: URGENT_CARD_WIDTH,
+    backgroundColor: '#FFFDFD',
+    borderRadius: 18,
+    padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
+    borderColor: 'rgba(251,113,133,0.18)',
     ...SHADOWS.sm,
+    overflow: 'hidden',
+    position: 'relative',
   },
-  cardLeft: {
-    flex: 1,
-    gap: 4,
+  cardAccentBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: '#FB7185',
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  rankBadge: {
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  rankBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   cardTitle: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '700',
-    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0F172A',
+    minHeight: 18,
+    lineHeight: 17,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  locationIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF1F2',
   },
   cardLocation: {
-    fontSize: FONT_SIZES.sm,
-    color: 'rgba(255,255,255,0.7)',
+    fontSize: 10,
+    color: '#475569',
+    flex: 1,
   },
-  cardMeta: {
+  cardMetaStack: {
+    gap: 5,
+  },
+  cardMetaPill: {
     flexDirection: 'row',
-    gap: SPACING.md,
-    marginTop: 4,
+    alignItems: 'center',
+    backgroundColor: '#FFF5F7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FFE4E6',
+    paddingHorizontal: 7,
+    paddingVertical: 5,
   },
-  cardDate: {
-    fontSize: FONT_SIZES.xs,
-    color: 'rgba(255,255,255,0.6)',
+  cardMetaPillAccent: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FED7AA',
   },
-  cardTime: {
-    fontSize: FONT_SIZES.xs,
-    color: 'rgba(255,255,255,0.6)',
+  cardMetaIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 5,
+  },
+  cardMetaIconWrapAccent: {
+    backgroundColor: '#FFFFFF',
+  },
+  cardMetaLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#9F1239',
+    minWidth: 40,
+    marginRight: 4,
+  },
+  cardMetaText: {
+    fontSize: 9,
+    color: '#334155',
+    fontWeight: '700',
+    flex: 1,
   },
   cardDistance: {
-    fontSize: FONT_SIZES.xs,
-    color: '#93C5FD',
-    marginTop: 4,
-    fontWeight: '600',
+    fontSize: 9,
+    color: '#C2410C',
+    fontWeight: '800',
+    flex: 1,
   },
-  cardRight: {
-    alignItems: 'flex-end',
+  cardBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    marginTop: 8,
+    gap: 6,
+  },
+  cardPriceBlock: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   cardPrice: {
-    fontSize: FONT_SIZES.xl,
+    fontSize: 15,
     fontWeight: '800',
-    color: '#4ADE80',
+    color: '#FFFFFF',
   },
   cardPriceUnit: {
-    fontSize: FONT_SIZES.xs,
-    color: 'rgba(255,255,255,0.5)',
-    marginTop: -4,
+    fontSize: 9,
+    color: '#FDA4AF',
+    marginTop: 1,
+  },
+  cardActionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F43F5E',
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#FB7185',
+  },
+  cardActionText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   urgentBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FF6B6B',
-    paddingHorizontal: 8,
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: 12,
+    borderRadius: 999,
     gap: 4,
-    marginTop: SPACING.xs,
   },
   urgentBadgeText: {
-    fontSize: 10,
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#E11D48',
+  },
+  moreCard: {
+    width: 132,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    padding: 10,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  moreCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  moreCardIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(251,113,133,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  moreCardTitle: {
+    fontSize: 11,
     fontWeight: '700',
-    color: '#FFF',
+    color: '#FFFFFF',
+  },
+  moreCardCount: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFE4E6',
+    marginTop: 2,
+  },
+  moreCardSub: {
+    fontSize: 9,
+    lineHeight: 12,
+    color: 'rgba(255,255,255,0.72)',
+    marginTop: 5,
   },
 });
 
@@ -398,6 +683,8 @@ const urgentStyles = StyleSheet.create({
 // Component
 // ============================================
 export default function HomeScreen({ navigation }: Props) {
+  useScreenPerformance('Home');
+  const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
   // Nearby location
   const { location, loading: locationLoading, error: locationError, getLocation } = useLocation();
   const [nearbyMode, setNearbyMode] = useState(false); // true = ใกล้ฉัน
@@ -416,6 +703,7 @@ export default function HomeScreen({ navigation }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const jobsListRef = useRef<FlatList<JobPost>>(null);
   const lastDocRef = useRef<any>(null);
   const hasMoreRef = useRef(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -425,6 +713,8 @@ export default function HomeScreen({ navigation }: Props) {
   const [showExpiryPopup, setShowExpiryPopup] = useState(false);
   const [expiringPosts, setExpiringPosts] = useState<JobPost[]>([]);
   const [showNearbyPromo, setShowNearbyPromo] = useState(false);
+  const [stickyInboxItems, setStickyInboxItems] = useState<StickyInboxItem[]>([]);
+  const [savedFilterPresets, setSavedFilterPresets] = useState<SavedJobFilterPreset[]>([]);
   const nearbyRadiusKm = user?.nearbyJobAlert?.radiusKm ?? 20;
   const hasSavedNearbyLocation = user?.nearbyJobAlert?.lat != null && user?.nearbyJobAlert?.lng != null;
   const hasNearbyAlertSetup = Boolean(user?.nearbyJobAlert?.enabled && hasSavedNearbyLocation);
@@ -445,6 +735,11 @@ export default function HomeScreen({ navigation }: Props) {
 
   // Get urgent jobs for banner (paid premium placement)
   // Fetch location silently on mount — enables distance badges on all job cards
+  useEffect(() => {
+    const unsubscribe = subscribeStickyInboxItems('home', setStickyInboxItems);
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     if (!location) {
       getLocation().catch(() => {}); // silent fail — if denied, distances just won't show
@@ -479,7 +774,7 @@ export default function HomeScreen({ navigation }: Props) {
     }
 
     if (!resolvedLocation) {
-      toast.error(locationError || 'ต้องตั้งค่าตำแหน่งงานใกล้ฉันก่อนใช้งาน');
+      toast.error(locationError || 'ตั้งค่าตำแหน่งสำหรับงานใกล้คุณก่อน เพื่อให้ระบบช่วยเรียงงานได้แม่นขึ้น');
       openNearbySettings();
       return false;
     }
@@ -490,6 +785,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   // Fetch jobs (infinite scroll + nearby)
   const fetchJobs = useCallback(async (showRefresh = false, loadMore = false) => {
+    if (!nearbyMode && loadMore) return;
     if (loadMore && !hasMoreRef.current) return;
     if (loadMore) setIsLoadingMore(true);
     else if (showRefresh) { setIsRefreshing(true); lastDocRef.current = null; hasMoreRef.current = true; }
@@ -500,11 +796,15 @@ export default function HomeScreen({ navigation }: Props) {
       const nearbyBaseLocation = getNearbyBaseLocation();
 
       if (nearbyMode && nearbyBaseLocation) {
-        const { getJobsNearby } = await import('../../services/jobService');
-        fetchedJobs = await getJobsNearby(nearbyBaseLocation.latitude, nearbyBaseLocation.longitude, nearbyRadiusKm);
-        if (filters.postType) {
-          fetchedJobs = fetchedJobs.filter(j => j.postType === filters.postType);
-        }
+        fetchedJobs = await getJobsNearby(
+          nearbyBaseLocation.latitude,
+          nearbyBaseLocation.longitude,
+          nearbyRadiusKm,
+          {
+            screenName: 'Home',
+            source: 'home:nearby_fetch',
+          },
+        );
         lastDocRef.current = null;
         hasMoreRef.current = false;
         setJobs(fetchedJobs);
@@ -514,11 +814,11 @@ export default function HomeScreen({ navigation }: Props) {
         setJobs([]);
       } else {
         const cursor = loadMore ? lastDocRef.current : null;
-        const result = await getJobs(filters, cursor);
+        const result = await getJobs(undefined, cursor, undefined, {
+          screenName: 'Home',
+          source: loadMore ? 'home:feed_load_more' : 'home:feed_fetch',
+        });
         fetchedJobs = result.jobs;
-        if (filters.postType) {
-          fetchedJobs = fetchedJobs.filter(j => j.postType === filters.postType);
-        }
         lastDocRef.current = result.lastDoc;
         hasMoreRef.current = result.lastDoc !== null && fetchedJobs.length > 0;
 
@@ -541,12 +841,21 @@ export default function HomeScreen({ navigation }: Props) {
       setIsRefreshing(false);
       setIsLoadingMore(false);
     }
-  }, [filters, getNearbyBaseLocation, nearbyMode, nearbyRadiusKm]);
+  }, [getNearbyBaseLocation, nearbyMode, nearbyRadiusKm]);
 
   // Initial load — only for nearbyMode (normal mode uses subscription below)
   useEffect(() => {
     if (nearbyMode) fetchJobs();
   }, [fetchJobs, nearbyMode]);
+
+  useTabRefresh(
+    useCallback(() => {
+      fetchJobs(true);
+    }, [fetchJobs]),
+    {
+      scrollToTop: () => jobsListRef.current?.scrollToOffset({ offset: 0, animated: true }),
+    },
+  );
 
   // Real-time notification subscription
   useEffect(() => {
@@ -559,6 +868,9 @@ export default function HomeScreen({ navigation }: Props) {
     const unsubscribe = subscribeToNotifications(user.uid, (notifications) => {
       const unreadCount = notifications.filter(n => !n.isRead).length;
       setNotificationCount(unreadCount);
+    }, {
+      screenName: 'Home',
+      source: 'home:notifications_subscription',
     });
 
     return () => unsubscribe();
@@ -573,6 +885,9 @@ export default function HomeScreen({ navigation }: Props) {
 
     const unsubscribe = subscribeToFavorites(user.uid, (favorites: Favorite[]) => {
       setFavoriteIds(favorites.map(f => f.jobId));
+    }, {
+      screenName: 'Home',
+      source: 'home:favorites_subscription',
     });
 
     return () => unsubscribe();
@@ -581,6 +896,8 @@ export default function HomeScreen({ navigation }: Props) {
   // Check for expiring posts on app load
   useEffect(() => {
     // Show nearby job alert promo popup once per install (only for logged-in users)
+    let promoTimer: ReturnType<typeof setTimeout> | null = null;
+
     const checkNearbyPromo = async () => {
       if (!user?.uid) return;
       // If already set up, never show
@@ -588,12 +905,15 @@ export default function HomeScreen({ navigation }: Props) {
       try {
         const shown = await AsyncStorage.getItem(`nearby_promo_shown_${user.uid}`);
         if (!shown) {
-          setTimeout(() => setShowNearbyPromo(true), 1800);
+          promoTimer = setTimeout(() => setShowNearbyPromo(true), 1800);
         }
       } catch (_) {}
     };
     checkNearbyPromo();
   // ใช้ nearbyJobAlert?.enabled เป็น dep ด้วย เพื่อซ่อน banner ทันทีที่ user save ตั้งค่า
+    return () => {
+      if (promoTimer) clearTimeout(promoTimer);
+    };
   }, [user?.uid, user?.nearbyJobAlert?.enabled]);
 
   const dismissNearbyPromo = useCallback(async (navigate = false) => {
@@ -606,13 +926,35 @@ export default function HomeScreen({ navigation }: Props) {
     }
   }, [user?.uid, navigation]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadPresets = async () => {
+      if (!user?.uid) {
+        if (isMounted) setSavedFilterPresets([]);
+        return;
+      }
+
+      const presets = await loadSavedJobFilterPresets(user.uid);
+      if (isMounted) setSavedFilterPresets(presets);
+    };
+
+    loadPresets();
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.uid]);
+
   // Check for expiring posts on app load
   useEffect(() => {
     const checkExpiringPosts = async () => {
       if (!user?.uid) return;
       
       try {
-        const userPosts = await getUserPosts(user.uid);
+        const userPosts = await getUserPosts(user.uid, {
+          screenName: 'Home',
+          source: 'home:user_posts_check',
+        });
         const now = new Date();
         
         // Filter posts that are expiring within 1 day (changed from 3 days)
@@ -650,118 +992,61 @@ export default function HomeScreen({ navigation }: Props) {
     
     // Subscribe to jobs updates
     const unsubscribe = subscribeToJobs((newJobs) => {
-      // ถ้าไม่มี filters ให้แสดงงานทั้งหมด
-      let filteredJobs = newJobs.filter(job => job.status === 'active' || job.status === 'urgent');
-      
-      // Apply filters only if they have values
-      if (filters.province && filters.province.length > 0) {
-        filteredJobs = filteredJobs.filter(job => job.location?.province === filters.province);
-      }
-      if (filters.district && filters.district.length > 0) {
-        filteredJobs = filteredJobs.filter(job => job.location?.district === filters.district);
-      }
-      if (filters.department && filters.department.length > 0) {
-        filteredJobs = filteredJobs.filter(job => job.department === filters.department);
-      }
-      if (filters.urgentOnly === true) {
-        filteredJobs = filteredJobs.filter(job => job.status === 'urgent');
-      }
-      if (filters.verifiedOnly === true) {
-        filteredJobs = filteredJobs.filter(job => job.posterVerified === true);
-      }
-      if (filters.minRate && filters.minRate > 0) {
-        filteredJobs = filteredJobs.filter(job => job.shiftRate >= filters.minRate!);
-      }
-      if (filters.maxRate && filters.maxRate > 0) {
-        filteredJobs = filteredJobs.filter(job => job.shiftRate <= filters.maxRate!);
-      }
-      
-      // NEW: Filter by staff type
-      if (filters.staffType) {
-        filteredJobs = filteredJobs.filter(job => job.staffType === filters.staffType);
-      }
-      
-      // NEW: Filter by location type
-      if (filters.locationType) {
-        filteredJobs = filteredJobs.filter(job => job.locationType === filters.locationType);
-      }
-      
-      // NEW: Filter by payment type
-      if (filters.paymentType) {
-        filteredJobs = filteredJobs.filter(job => job.paymentType === filters.paymentType);
-      }
-      
-      // NEW: Filter home care only
-      if (filters.homeCareOnly) {
-        filteredJobs = filteredJobs.filter(job => job.locationType === 'HOME');
-      }
-
-      // Filter by postType (category tab)
-      if (filters.postType) {
-        filteredJobs = filteredJobs.filter(job => job.postType === filters.postType);
-      }
-      
-      // Filter by shift time (morning/night) - only if explicitly selected
-      if (filters.sortBy === 'morning') {
-        filteredJobs = filteredJobs.filter(job => {
-          const startHour = parseInt(job.shiftTime?.split(':')[0] || '8');
-          return startHour >= 5 && startHour < 12;
-        });
-      } else if (filters.sortBy === 'night') {
-        filteredJobs = filteredJobs.filter(job => {
-          const startHour = parseInt(job.shiftTime?.split(':')[0] || '8');
-          return startHour >= 18 || startHour < 5;
-        });
-      }
-      
-      // Sort
-      if (filters.sortBy === 'highestPay') {
-        filteredJobs = filteredJobs.sort((a, b) => (b.shiftRate || 0) - (a.shiftRate || 0));
-      }
-      
-      console.log(`Jobs loaded: ${newJobs.length} total, ${filteredJobs.length} after filter`);
-      setJobs(filteredJobs);
+      console.log(`Jobs loaded: ${newJobs.length} total`);
+      setJobs(newJobs);
       setIsLoading(false);
+    }, {
+      screenName: 'Home',
+      source: 'home:jobs_subscription',
     });
 
     return () => unsubscribe();
-  }, [filters, nearbyMode]);
-
-  // Debounced search
-  const debouncedSearch = useMemo(
-    () => debounce(async (query: string) => {
-      if (!query.trim()) {
-        fetchJobs();
-        return;
-      }
-      
-      setIsLoading(true);
-      try {
-        const results = await searchJobs(query);
-        setJobs(results);
-      } catch (error) {
-        console.error('Search error:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 500),
-    [fetchJobs]
-  );
+  }, [nearbyMode]);
 
   // Handle search
   const handleSearch = (text: string) => {
     setSearchQuery(text);
-    debouncedSearch(text);
+
+    if (text.trim().length >= 2) {
+      trackEvent({
+        eventName: 'search_filter_applied',
+        screenName: 'Home',
+        props: {
+          queryLength: text.trim().length,
+          hasProvinceFilter: Boolean(filters.province),
+          hasStaffTypeFilter: Boolean(filters.staffType),
+          urgentOnly: Boolean(filters.urgentOnly),
+        },
+      });
+    }
   };
 
   // Handle job press
   const handleJobPress = (job: JobPost) => {
+    trackEvent({
+      eventName: 'job_detail_view',
+      screenName: 'Home',
+      subjectType: 'shift',
+      subjectId: job.id,
+      jobId: job.id,
+      province: job.location?.province,
+      props: {
+        source: filters.urgentOnly ? 'urgent_filter' : 'home_feed',
+        postType: job.postType || 'shift',
+        staffType: job.staffType || null,
+        isUrgent: Boolean(job.status === 'urgent' || job.isUrgent),
+      },
+    });
+
     const serializedJob = {
       ...job,
       shiftDate: job.shiftDate ? (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : job.shiftDate) : undefined,
       shiftDateEnd: (job as any).shiftDateEnd ? ((job as any).shiftDateEnd instanceof Date ? (job as any).shiftDateEnd.toISOString() : (job as any).shiftDateEnd) : undefined,
     } as any;
-    (navigation as any).navigate('JobDetail', { job: serializedJob });
+    (navigation as any).navigate('JobDetail', {
+      job: serializedJob,
+      source: filters.urgentOnly ? 'home_urgent_filter' : 'home_feed',
+    });
   };
 
   // Handle save job (toggle favorite)
@@ -770,6 +1055,20 @@ export default function HomeScreen({ navigation }: Props) {
       if (!user?.uid) return;
       
       try {
+        await trackEvent({
+          eventName: 'search_filter_applied',
+          screenName: 'Home',
+          subjectType: 'shift',
+          subjectId: job.id,
+          jobId: job.id,
+          province: job.location?.province,
+          props: {
+            action: 'favorite_toggle',
+            postType: job.postType || 'shift',
+            staffType: job.staffType || null,
+          },
+        });
+
         const isNowFavorite = await toggleFavorite(user.uid, job.id);
         if (isNowFavorite) {
           toast.success(`เพิ่ม "${job.title}" ไปยังรายการโปรดแล้ว`, 'บันทึกแล้ว');
@@ -783,7 +1082,7 @@ export default function HomeScreen({ navigation }: Props) {
   };
 
   // Apply filters
-  const applyFilters = async (nextNearbyMode = nearbyMode) => {
+  const applyFilters = async (nextNearbyMode = nearbyMode, nextFilters = filters) => {
     if (nextNearbyMode) {
       const enabled = await enableNearbyMode();
       if (!enabled) return;
@@ -792,7 +1091,94 @@ export default function HomeScreen({ navigation }: Props) {
     }
 
     setShowFilters(false);
+
+    trackEvent({
+      eventName: 'search_filter_applied',
+      screenName: 'Home',
+      props: {
+        province: nextFilters.province || null,
+        district: nextFilters.district || null,
+        department: nextFilters.department || null,
+        staffType: nextFilters.staffType || null,
+        locationType: nextFilters.locationType || null,
+        paymentType: nextFilters.paymentType || null,
+        urgentOnly: Boolean(nextFilters.urgentOnly),
+        verifiedOnly: Boolean(nextFilters.verifiedOnly),
+        nearbyMode: Boolean(nextNearbyMode),
+        sortBy: nextFilters.sortBy || 'latest',
+        activeFilterCount:
+          (nextFilters.province ? 1 : 0) +
+          (nextFilters.district ? 1 : 0) +
+          (nextFilters.department ? 1 : 0) +
+          (nextFilters.urgentOnly ? 1 : 0) +
+          (nextFilters.verifiedOnly ? 1 : 0) +
+          (nextFilters.minRate || nextFilters.maxRate ? 1 : 0) +
+          (nextFilters.staffType ? 1 : 0) +
+          (nextFilters.locationType ? 1 : 0) +
+          (nextFilters.homeCareOnly ? 1 : 0) +
+          (nextFilters.paymentType ? 1 : 0),
+      },
+    });
   };
+
+  const handleSaveCurrentFilterPreset = useCallback(async (nextFilters: JobFilters, nextNearbyMode: boolean) => {
+    if (!user?.uid) {
+      toast.info('เข้าสู่ระบบก่อนเพื่อบันทึกตัวกรองโปรด');
+      return;
+    }
+
+    const hasMeaningfulFilter = Boolean(
+      nextNearbyMode ||
+      nextFilters.province ||
+      nextFilters.district ||
+      nextFilters.department ||
+      nextFilters.staffType ||
+      nextFilters.locationType ||
+      nextFilters.paymentType ||
+      nextFilters.postType ||
+      nextFilters.minRate ||
+      nextFilters.maxRate ||
+      nextFilters.urgentOnly ||
+      nextFilters.verifiedOnly
+    );
+
+    if (!hasMeaningfulFilter) {
+      toast.info('ตั้งค่าตัวกรองก่อน แล้วค่อยบันทึกเป็นตัวกรองโปรด');
+      return;
+    }
+
+    const presets = await saveJobFilterPreset(user.uid, nextFilters, nextNearbyMode);
+    setSavedFilterPresets(presets);
+    toast.success('บันทึกชุดตัวกรองไว้แล้ว เรียกใช้ซ้ำได้จากหน้าแรก');
+  }, [toast, user?.uid]);
+
+  const applySavedFilterPreset = useCallback(async (preset: SavedJobFilterPreset) => {
+    setFilters(preset.filters);
+    setNearbyMode(preset.nearbyMode);
+    await applyFilters(preset.nearbyMode, preset.filters);
+    toast.success(`เรียกใช้ชุด \"${preset.label}\" เรียบร้อยแล้ว`);
+  }, [toast]);
+
+  const handleRemoveSavedFilterPreset = useCallback((preset: SavedJobFilterPreset) => {
+    if (!user?.uid) return;
+
+    Alert.alert(
+      'ลบตัวกรองโปรด',
+      `ต้องการลบ \"${preset.label}\" หรือไม่?`,
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'ลบ',
+          style: 'destructive',
+          onPress: async () => {
+            const presets = await removeSavedJobFilterPreset(user.uid, preset.id);
+            setSavedFilterPresets(presets);
+            toast.info('นำชุดตัวกรองนี้ออกจากรายการแล้ว');
+          },
+        },
+      ],
+    );
+  }, [toast, user?.uid]);
 
   // Clear filters
   const clearFilters = () => {
@@ -844,9 +1230,91 @@ export default function HomeScreen({ navigation }: Props) {
     });
   }, [jobs, location, user?.nearbyJobAlert?.lat, user?.nearbyJobAlert?.lng]);
 
+  const visibleJobs = useMemo(() => {
+    let filteredJobs = jobsWithDistance;
+    const query = searchQuery.trim().toLowerCase();
+
+    if (filters.province) {
+      filteredJobs = filteredJobs.filter(job => job.location?.province === filters.province);
+    }
+    if (filters.district) {
+      filteredJobs = filteredJobs.filter(job => job.location?.district === filters.district);
+    }
+    if (filters.department) {
+      filteredJobs = filteredJobs.filter(job => job.department === filters.department);
+    }
+    if (filters.urgentOnly) {
+      filteredJobs = filteredJobs.filter(job => job.status === 'urgent');
+    }
+    if (filters.verifiedOnly) {
+      filteredJobs = filteredJobs.filter(job => job.posterVerified === true);
+    }
+    if (filters.minRate && filters.minRate > 0) {
+      filteredJobs = filteredJobs.filter(job => job.shiftRate >= filters.minRate!);
+    }
+    if (filters.maxRate && filters.maxRate > 0) {
+      filteredJobs = filteredJobs.filter(job => job.shiftRate <= filters.maxRate!);
+    }
+    if (filters.staffType) {
+      filteredJobs = filteredJobs.filter(job => job.staffType === filters.staffType);
+    }
+    if (filters.locationType) {
+      filteredJobs = filteredJobs.filter(job => job.locationType === filters.locationType);
+    }
+    if (filters.paymentType) {
+      filteredJobs = filteredJobs.filter(job => job.paymentType === filters.paymentType);
+    }
+    if (filters.homeCareOnly) {
+      filteredJobs = filteredJobs.filter(job => job.locationType === 'HOME');
+    }
+    if (filters.postType) {
+      filteredJobs = filteredJobs.filter(job => job.postType === filters.postType);
+    }
+    if (filters.sortBy === 'morning') {
+      filteredJobs = filteredJobs.filter(job => {
+        const startHour = parseInt(job.shiftTime?.split(':')[0] || '8');
+        return startHour >= 5 && startHour < 12;
+      });
+    } else if (filters.sortBy === 'night') {
+      filteredJobs = filteredJobs.filter(job => {
+        const startHour = parseInt(job.shiftTime?.split(':')[0] || '8');
+        return startHour >= 18 || startHour < 5;
+      });
+    }
+
+    if (query) {
+      filteredJobs = filteredJobs.filter((job) => {
+        const searchableFields = [
+          job.title,
+          job.department,
+          job.description,
+          job.posterName,
+          job.location?.hospital,
+          job.location?.district,
+          job.location?.province,
+        ];
+
+        return searchableFields.some((value) => String(value || '').toLowerCase().includes(query));
+      });
+    }
+
+    if (filters.sortBy === 'highestPay') {
+      return [...filteredJobs].sort((a, b) => (b.shiftRate || 0) - (a.shiftRate || 0));
+    }
+
+    return filteredJobs;
+  }, [filters, jobsWithDistance, searchQuery]);
+
   const urgentJobs = useMemo(() => {
-    return jobsWithDistance.filter(job => job.status === 'urgent').slice(0, 5);
-  }, [jobsWithDistance]);
+    return visibleJobs.filter(job => job.status === 'urgent');
+  }, [visibleJobs]);
+
+  const featuredUrgentJobs = useMemo(() => {
+    return urgentJobs.slice(0, 8);
+  }, [urgentJobs]);
+
+  const totalUrgentJobs = urgentJobs.length;
+  const favoriteIdSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
 
   const nearbyInfoMessage = useMemo(() => {
     if (hasNearbyAlertSetup) {
@@ -855,18 +1323,18 @@ export default function HomeScreen({ navigation }: Props) {
     if (locationLoading) {
       return 'กำลังตรวจสอบตำแหน่งของคุณ...';
     }
-    return 'ต้องเปิดสิทธิ์ตำแหน่งและตั้งค่ารัศมีที่หน้า งานใกล้ฉัน ก่อนใช้งาน';
+    return 'เปิดสิทธิ์ตำแหน่งและตั้งค่ารัศมีที่หน้า งานใกล้คุณ ก่อน เพื่อให้ระบบช่วยหางานได้เร็วขึ้น';
   }, [hasNearbyAlertSetup, locationLoading, nearbyRadiusKm]);
 
   // Render job item
-  const renderJobItem = ({ item }: { item: JobPost }) => (
+  const renderJobItem = useCallback(({ item }: { item: JobPost }) => (
     <JobCard
       job={item}
       onPress={() => handleJobPress(item)}
       onSave={() => handleSaveJob(item)}
-      isSaved={favoriteIds.includes(item.id)}
+      isSaved={favoriteIdSet.has(item.id)}
     />
-  );
+  ), [favoriteIdSet, handleJobPress, handleSaveJob]);
 
   // Render header
   const renderHeader = () => {
@@ -889,15 +1357,15 @@ export default function HomeScreen({ navigation }: Props) {
           storageKey={`first_tip_home_${user.uid}`}
           icon="compass-outline"
           title="หน้าแรกคือศูนย์รวมการค้นหางานของคุณ"
-          description="ใช้ช่องค้นหา ตัวกรอง และโหมดงานใกล้ฉันเพื่อเจองานที่ตรงเร็วขึ้น ถ้ายังใหม่กับแอป กดดูคู่มือเพื่อเห็นภาพรวมทั้งหมดได้"
+          description="ใช้ช่องค้นหา ตัวกรอง และโหมดงานใกล้คุณเพื่อเจองานที่ตรงได้เร็วขึ้น พร้อมเริ่มคุยต่อผ่านแอปได้สะดวกในที่เดียว"
           actionLabel="ดูคู่มือ"
-          onAction={() => (navigation as any).navigate('OnboardingSurvey')}
+          onAction={onboardingSurveyEnabled ? () => (navigation as any).navigate('OnboardingSurvey') : undefined}
           containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: 10 }}
         />
       )}
 
       {/* Onboarding Banner — แสดงตอนเข้าแอปครั้งแรก */}
-      {user && !user.onboardingCompleted && (
+      {user && !user.onboardingCompleted && onboardingSurveyEnabled && (
         <TouchableOpacity
           style={styles.onboardingBanner}
           onPress={() => (navigation as any).navigate('OnboardingSurvey')}
@@ -913,7 +1381,7 @@ export default function HomeScreen({ navigation }: Props) {
                 <Ionicons name="sparkles" size={16} color="#FFF" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.onboardingBannerTag}>คู่มือเริ่มต้นใช้งาน</Text>
+                <Text style={styles.onboardingBannerTag}>เริ่มใช้งานได้เร็ว</Text>
                 <Text style={styles.onboardingBannerTitle}>{onboardingTitle}</Text>
                 <Text style={styles.onboardingBannerSub}>{onboardingSub}</Text>
               </View>
@@ -946,9 +1414,9 @@ export default function HomeScreen({ navigation }: Props) {
               <Ionicons name="location" size={20} color="#FFF" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.nearbyBannerTitle}>งานใกล้ฉัน</Text>
+              <Text style={styles.nearbyBannerTitle}>งานใกล้คุณ</Text>
               <Text style={styles.nearbyBannerSub}>
-                ตั้งค่าตำแหน่งและรัศมี เพื่อให้หน้าแรกเรียงงานใกล้ตัวสุดก่อน
+                ตั้งค่าตำแหน่งและรัศมี เพื่อให้ระบบเรียงงานใกล้ตัวและแจ้งเตือนได้เร็วขึ้น
               </Text>
             </View>
           </View>
@@ -958,12 +1426,17 @@ export default function HomeScreen({ navigation }: Props) {
           </View>
         </TouchableOpacity>
       )}
+
+      <StickyInboxPanel items={stickyInboxItems} maxItems={2} containerStyle={[styles.stickyAnnouncementWrap, { paddingHorizontal: SPACING.md }]} />
+
       {/* Urgent Jobs Banner - Premium Placement */}
       {urgentJobs.length > 0 && (
         <View style={{ paddingHorizontal: SPACING.md }}>
           <UrgentJobsBanner 
-            urgentJobs={urgentJobs} 
-            onPress={handleJobPress} 
+            urgentJobs={featuredUrgentJobs}
+            totalUrgentJobs={totalUrgentJobs}
+            onPress={handleJobPress}
+            onViewAll={() => setFilters((prev) => ({ ...prev, urgentOnly: true, sortBy: 'latest' }))}
           />
         </View>
       )}
@@ -980,7 +1453,7 @@ export default function HomeScreen({ navigation }: Props) {
           onPress={() => setFilters({ ...filters, urgentOnly: false, staffType: undefined, locationType: undefined, sortBy: 'latest' })}
         />
         <Chip
-          label="ด่วน"
+          label={totalUrgentJobs > 0 ? `ด่วน ${totalUrgentJobs}` : 'ด่วน'}
           selected={filters.urgentOnly}
           onPress={() => setFilters({ ...filters, urgentOnly: !filters.urgentOnly })}
         />
@@ -1041,7 +1514,7 @@ export default function HomeScreen({ navigation }: Props) {
             />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.nearbyHelperTitle}>ตั้งค่างานใกล้ฉันก่อนใช้งาน</Text>
+            <Text style={styles.nearbyHelperTitle}>เปิดงานใกล้คุณให้พร้อม</Text>
             <Text style={styles.nearbyHelperText}>{nearbyInfoMessage}</Text>
           </View>
           <View style={styles.nearbyHelperCTA}>
@@ -1057,11 +1530,11 @@ export default function HomeScreen({ navigation }: Props) {
           <Ionicons
             name={(CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.icon || 'apps-outline') as any}
             size={14}
-            color="#475569"
+            color={colors.textSecondary}
             style={{ marginRight: 4 }}
           />
           <Text style={styles.resultsText}>
-            พบ <Text style={styles.resultsCount}>{jobsWithDistance.length}</Text>{' '}
+            พบ <Text style={styles.resultsCount}>{visibleJobs.length}</Text>{' '}
             {CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.label ?? 'งาน'}
           </Text>
         </View>
@@ -1121,7 +1594,6 @@ export default function HomeScreen({ navigation }: Props) {
             </TouchableOpacity>
           </View>
         </View>
-
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <View style={[styles.searchBar, { backgroundColor: colors.surface }]}> 
@@ -1151,6 +1623,63 @@ export default function HomeScreen({ navigation }: Props) {
             )}
           </TouchableOpacity>
         </View>
+
+        {savedFilterPresets.length > 0 && (
+          <View style={styles.savedPresetSection}>
+            <View style={styles.savedPresetHeader}>
+              <View style={styles.savedPresetHeaderLeft}>
+                <Ionicons name="sparkles-outline" size={14} color={headerTextColor} />
+                <Text style={[styles.savedPresetHeaderTitle, { color: headerTextColor }]}>ชุดที่ใช้บ่อย</Text>
+              </View>
+              <Text style={[styles.savedPresetHeaderHint, { color: 'rgba(255,255,255,0.82)' }]}>แตะเพื่อใช้ซ้ำ • กดค้างเพื่อลบ</Text>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.savedPresetRow}
+            >
+              {savedFilterPresets.map((preset) => {
+                const isPresetActive = JSON.stringify(filters) === JSON.stringify(preset.filters) && nearbyMode === preset.nearbyMode;
+                return (
+                  <TouchableOpacity
+                    key={preset.id}
+                    style={[
+                      styles.savedPresetChip,
+                      {
+                        backgroundColor: isPresetActive ? colors.white : 'rgba(255,255,255,0.14)',
+                        borderColor: isPresetActive ? colors.white : 'rgba(255,255,255,0.22)',
+                      },
+                    ]}
+                    onPress={() => applySavedFilterPreset(preset)}
+                    onLongPress={() => handleRemoveSavedFilterPreset(preset)}
+                    activeOpacity={0.85}
+                  >
+                    <View style={[
+                      styles.savedPresetIconBadge,
+                      { backgroundColor: isPresetActive ? 'rgba(14,165,233,0.12)' : 'rgba(255,255,255,0.16)' },
+                    ]}>
+                      <Ionicons
+                        name={isPresetActive ? 'star' : 'sparkles-outline'}
+                        size={13}
+                        color={isPresetActive ? colors.primary : headerTextColor}
+                      />
+                    </View>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.savedPresetText,
+                        { color: isPresetActive ? colors.primary : headerTextColor },
+                      ]}
+                    >
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Category Tabs */}
         <ScrollView
@@ -1203,7 +1732,8 @@ export default function HomeScreen({ navigation }: Props) {
         <Loading text="กำลังโหลดงาน..." />
       ) : (
         <FlatList
-          data={jobsWithDistance}
+          ref={jobsListRef}
+          data={visibleJobs}
           renderItem={renderJobItem}
           keyExtractor={(item) => item.id}
           ListHeaderComponent={renderHeader}
@@ -1211,8 +1741,8 @@ export default function HomeScreen({ navigation }: Props) {
             <EmptyState
               icon="😢"
               title={nearbyMode ? `ยังไม่พบงานในรัศมี ${nearbyRadiusKm} กม.` : 'ไม่พบเวรที่ตรงกับเงื่อนไข'}
-              description={nearbyMode ? 'ลองขยายรัศมีหรืออัปเดตตำแหน่งที่หน้า งานใกล้ฉัน' : 'ลองเปลี่ยนตัวกรองหรือคำค้นหาดูนะ'}
-              actionText={nearbyMode ? 'ตั้งค่างานใกล้ฉัน' : 'ล้างตัวกรอง'}
+              description={nearbyMode ? 'ลองขยายรัศมีหรืออัปเดตตำแหน่งที่หน้า งานใกล้คุณ เพื่อเห็นตัวเลือกมากขึ้น' : 'ลองเปลี่ยนตัวกรองหรือคำค้นหา เพื่อให้เจองานที่ตรงได้เร็วขึ้น'}
+              actionText={nearbyMode ? 'ตั้งค่างานใกล้คุณ' : 'ล้างตัวกรอง'}
               onAction={nearbyMode ? openNearbySettings : clearFilters}
             />
           }
@@ -1226,7 +1756,7 @@ export default function HomeScreen({ navigation }: Props) {
           }
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          onEndReached={() => fetchJobs(false, true)}
+          onEndReached={nearbyMode ? () => fetchJobs(false, true) : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={
             isLoadingMore ? (
@@ -1234,9 +1764,9 @@ export default function HomeScreen({ navigation }: Props) {
                 <ActivityIndicator size="small" color={colors.primary} />
                 <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 6 }}>โหลดเพิ่มเติม...</Text>
               </View>
-            ) : jobs.length > 0 && !hasMoreRef.current ? (
+            ) : visibleJobs.length > 0 && !hasMoreRef.current ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 12 }}>— แสดงทั้งหมด {jobsWithDistance.length} รายการ —</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>— แสดงทั้งหมด {visibleJobs.length} รายการ —</Text>
               </View>
             ) : null
           }
@@ -1253,6 +1783,7 @@ export default function HomeScreen({ navigation }: Props) {
         setFilters={setFilters}
         onApply={applyFilters}
         onClear={clearFilters}
+        onSaveCurrent={handleSaveCurrentFilterPreset}
         nearbyMode={nearbyMode}
         setNearbyMode={setNearbyMode}
       />
@@ -1269,17 +1800,17 @@ export default function HomeScreen({ navigation }: Props) {
             <Ionicons name="location" size={44} color={colors.primary} />
           </View>
 
-          <Text style={[styles.promoTitle, { color: colors.text }]}>รู้ก่อนใคร! งานใกล้คุณ</Text>
+          <Text style={[styles.promoTitle, { color: colors.text }]}>รู้ไวขึ้นกับงานใกล้คุณ</Text>
           <Text style={[styles.promoDesc, { color: colors.textSecondary }]}>
-            เมื่อมีคนโพสต์งานในรัศมีที่คุณกำหนด{`\n`}
-            แอปจะส่ง Push Notification ให้คุณทันที
+            เมื่อมีงานใหม่ในรัศมีที่คุณกำหนด{`\n`}
+            แอปจะส่งแจ้งเตือนให้คุณอย่างรวดเร็ว เพื่อไม่พลาดโอกาสสำคัญ
           </Text>
 
           {/* Feature list */}
           {[
-            { icon: 'notifications', text: 'แจ้งเตือนแบบ Real-time ทันทีที่มีงานใหม่' },
-            { icon: 'resize', text: 'กำหนดรัศมีเองได้ 1–50 กม.' },
-            { icon: 'location-outline', text: 'ตั้งตำแหน่งจาก GPS ของมือถือ' },
+            { icon: 'notifications', text: 'รับแจ้งเตือนทันทีเมื่อมีงานใหม่ในพื้นที่ที่สนใจ' },
+            { icon: 'resize', text: 'กำหนดรัศมีเองได้ตามสไตล์การรับงานของคุณ' },
+            { icon: 'location-outline', text: 'ใช้ตำแหน่งจากมือถือเพื่อเรียงงานใกล้ตัวได้แม่นขึ้น' },
           ].map((f) => (
             <View key={f.icon} style={styles.promoFeatureRow}>
               <View style={[styles.promoFeatureDot, { backgroundColor: colors.primaryBackground }]}> 
@@ -1296,7 +1827,7 @@ export default function HomeScreen({ navigation }: Props) {
             activeOpacity={0.85}
           >
             <Ionicons name="location" size={18} color={colors.white} />
-            <Text style={styles.promoCTAText}>เปิดการแจ้งเตือนงานใกล้ฉัน</Text>
+            <Text style={styles.promoCTAText}>เปิดแจ้งเตือนงานใกล้คุณ</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1384,7 +1915,7 @@ export default function HomeScreen({ navigation }: Props) {
           },
           {
             icon: 'navigate-outline',
-            label: 'งานใกล้ฉัน',
+            label: 'งานใกล้คุณ',
             onPress: openNearbySettings,
             color: '#14B8A6',
           },
@@ -1415,12 +1946,13 @@ interface FilterModalProps {
   filters: JobFilters;
   setFilters: React.Dispatch<React.SetStateAction<JobFilters>>;
   onClear: () => void;
+  onSaveCurrent: (filters: JobFilters, nearbyMode: boolean) => void | Promise<void>;
   nearbyMode: boolean;
   setNearbyMode: (val: boolean) => void;
-  onApply: (nextNearbyMode?: boolean) => void | Promise<void>;
+  onApply: (nextNearbyMode?: boolean, nextFilters?: JobFilters) => void | Promise<void>;
 }
 
-function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, nearbyMode, setNearbyMode }: FilterModalProps) {
+function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, onSaveCurrent, nearbyMode, setNearbyMode }: FilterModalProps) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [provinceSearch, setProvinceSearch] = useState('');
@@ -1523,7 +2055,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
               style={styles.optionChip} />
             {LOCATION_TYPES.map((loc) => (
               <Chip key={loc.code}
-                label={`${loc.icon} ${loc.nameTH}`}
+                label={loc.nameTH}
                 selected={filters.locationType === loc.code}
                 onPress={() => setFilters({ ...filters, locationType: loc.code, homeCareOnly: loc.code === 'HOME' })}
                 style={styles.optionChip} />
@@ -1677,12 +2209,18 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
       }]}>
         <Button onPress={() => { onClear(); setMinRateText(''); setMaxRateText(''); }}
           variant="outline"
-          style={{ flex: 1, marginRight: SPACING.sm, borderRadius: 14, height: 50 }}>
+          style={{ flex: 1, marginRight: SPACING.xs, borderRadius: 14, height: 50 }}>
           ล้างตัวกรอง
         </Button>
         <Button
-          onPress={() => { onApply(nearbyPreset); }}
-          style={{ flex: 2, borderRadius: 14, height: 50 }}>
+          onPress={() => onSaveCurrent(filters, nearbyPreset)}
+          variant="outline"
+          style={{ flex: 1, marginHorizontal: SPACING.xs, borderRadius: 14, height: 50 }}>
+          บันทึกชุดนี้
+        </Button>
+        <Button
+          onPress={() => { onApply(nearbyPreset, filters); }}
+          style={{ flex: 1.4, marginLeft: SPACING.xs, borderRadius: 14, height: 50 }}>
           ค้นหา
         </Button>
       </View>
@@ -1769,6 +2307,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+    marginTop: SPACING.sm,
   },
   searchBar: {
     flex: 1,
@@ -1820,6 +2359,39 @@ const styles = StyleSheet.create({
     paddingTop: SPACING.md,
     paddingBottom: SPACING.xl,
   },
+  stickyAnnouncementWrap: {
+    gap: 10,
+    marginBottom: 12,
+  },
+  stickyAnnouncementCard: {
+    borderRadius: BORDER_RADIUS.lg,
+    padding: 14,
+    borderWidth: 1,
+    ...SHADOWS.sm,
+  },
+  stickyAnnouncementBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 10,
+  },
+  stickyAnnouncementBadgeText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '700',
+  },
+  stickyAnnouncementTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  stickyAnnouncementBody: {
+    fontSize: FONT_SIZES.sm,
+    lineHeight: 20,
+  },
   listHeader: {
     marginBottom: SPACING.sm,
   },
@@ -1828,6 +2400,55 @@ const styles = StyleSheet.create({
   quickFilters: {
     paddingHorizontal: SPACING.md,
     paddingBottom: SPACING.sm,
+  },
+  savedPresetRow: {
+    paddingTop: 8,
+    paddingBottom: 6,
+    paddingHorizontal: 2,
+  },
+  savedPresetSection: {
+    marginTop: 14,
+  },
+  savedPresetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  savedPresetHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  savedPresetHeaderTitle: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+  },
+  savedPresetHeaderHint: {
+    fontSize: FONT_SIZES.xs,
+  },
+  savedPresetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1,
+    paddingLeft: 10,
+    paddingRight: 14,
+    paddingVertical: 9,
+    marginRight: 8,
+    maxWidth: 240,
+  },
+  savedPresetIconBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  savedPresetText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
   },
 
   // Results
@@ -2197,12 +2818,14 @@ const styles = StyleSheet.create({
   // ── Category Tabs ─────────────────────────────────────────────────
   categoryTabs: {
     flexDirection: 'row' as const,
-    paddingLeft: 4,
-    paddingRight: 12,
-    paddingTop: 4,
+    paddingLeft: SPACING.md,
+    paddingRight: SPACING.md,
+    paddingTop: 12,
     paddingBottom: 10,
     backgroundColor: '#0EA5E9',
     gap: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   categoryTab: {
     flexDirection: 'row' as const,

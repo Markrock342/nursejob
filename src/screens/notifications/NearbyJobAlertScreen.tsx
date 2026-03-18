@@ -13,6 +13,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +27,7 @@ import { useNotifications } from '../../context/NotificationContext';
 import { useTheme } from '../../context/ThemeContext';
 import { encodeGeohash } from '../../utils/geohash';
 import { SPACING, BORDER_RADIUS, FONT_SIZES } from '../../theme';
+import { STAFF_TYPES } from '../../constants/jobOptions';
 
 // ─── Constants ────────────────────────────────
 const RADIUS_OPTIONS = [1, 3, 5, 10, 20, 50];
@@ -37,45 +39,29 @@ export default function NearbyJobAlertScreen() {
   const { hasPermission, registerForNotifications } = useNotifications();
   const { colors, isDark } = useTheme();
 
-  const heroTone = {
-    background: colors.primaryBackground,
-    icon: colors.primary,
-  };
-  const pushStatusTone = hasPermission
+  const permissionTone = hasPermission
     ? {
         background: colors.successLight,
-        border: colors.success,
-        icon: colors.success,
-        title: colors.success,
         text: colors.success,
       }
     : {
         background: colors.warningLight,
-        border: colors.warning,
-        icon: colors.warning,
-        title: colors.warning,
         text: colors.warning,
       };
-  const locationTone = {
-    background: isDark ? colors.card : colors.primaryBackground,
-    refreshBackground: colors.primaryBackground,
-    hintBackground: colors.warningLight,
-    hintText: colors.warning,
-  };
-  const infoTone = {
-    background: colors.infoLight,
-    border: colors.info,
-    text: colors.info,
-  };
 
   const [enabled, setEnabled] = useState(false);
   const [radiusKm, setRadiusKm] = useState(5);
   const [locationLabel, setLocationLabel] = useState<string | null>(null);
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
+  const [preferredProvince, setPreferredProvince] = useState('');
+  const [preferredStaffTypes, setPreferredStaffTypes] = useState<string[]>([]);
+  const [minRateText, setMinRateText] = useState('');
+  const [maxRateText, setMaxRateText] = useState('');
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const selectedSignalCount = Number(Boolean(preferredProvince)) + preferredStaffTypes.length + Number(Boolean(minRateText || maxRateText));
 
   // ─── Load existing settings ────────────────
   useEffect(() => {
@@ -93,6 +79,10 @@ export default function NearbyJobAlertScreen() {
       if (contextAlert) {
         setEnabled(Boolean(contextAlert.enabled));
         setRadiusKm(contextAlert.radiusKm ?? 5);
+        setPreferredProvince(contextAlert.province || '');
+        setPreferredStaffTypes(Array.isArray(contextAlert.staffTypes) ? contextAlert.staffTypes : []);
+        setMinRateText(contextAlert.minRate ? String(contextAlert.minRate) : '');
+        setMaxRateText(contextAlert.maxRate ? String(contextAlert.maxRate) : '');
         if (contextAlert.lat && contextAlert.lng) {
           setLat(contextAlert.lat);
           setLng(contextAlert.lng);
@@ -110,6 +100,10 @@ export default function NearbyJobAlertScreen() {
         if (alert) {
           setEnabled(Boolean(alert.enabled));
           setRadiusKm(alert.radiusKm ?? 5);
+          setPreferredProvince(alert.province || '');
+          setPreferredStaffTypes(Array.isArray(alert.staffTypes) ? alert.staffTypes : []);
+          setMinRateText(alert.minRate ? String(alert.minRate) : '');
+          setMaxRateText(alert.maxRate ? String(alert.maxRate) : '');
           if (alert.lat && alert.lng) {
             setLat(alert.lat);
             setLng(alert.lng);
@@ -181,6 +175,15 @@ export default function NearbyJobAlertScreen() {
       }
 
       const geohash4 = lat && lng ? encodeGeohash(lat, lng, 4) : '';
+      const minRate = minRateText ? Number(minRateText) || undefined : undefined;
+      const maxRate = maxRateText ? Number(maxRateText) || undefined : undefined;
+
+      if (minRate && maxRate && minRate > maxRate) {
+        Alert.alert('ช่วงค่าจ้างไม่ถูกต้อง', 'กรุณาตั้งค่าขั้นต่ำให้น้อยกว่าหรือเท่ากับค่าสูงสุด');
+        setIsSaving(false);
+        return;
+      }
+
       // updateUser เขียน Firestore + sync AuthContext + AsyncStorage ทันที
       await updateUser({
         nearbyJobAlert: {
@@ -189,19 +192,23 @@ export default function NearbyJobAlertScreen() {
           lat: lat ?? 0,
           lng: lng ?? 0,
           geohash4,
+          province: preferredProvince || undefined,
+          staffTypes: preferredStaffTypes,
+          minRate,
+          maxRate,
           updatedAt: new Date(),
         },
       });
 
       Alert.alert(
-        'บันทึกแล้ว',
+        'บันทึกแจ้งเตือนเรียบร้อย',
         enabled
-          ? `คุณจะได้รับแจ้งเตือนเมื่อมีงานใหม่ในรัศมี ${radiusKm} กม.`
-          : 'ปิดการแจ้งเตือนงานใกล้ฉันแล้ว',
+          ? `ระบบจะคัดงานใหม่ในระยะ ${radiusKm} กม. และใช้เงื่อนไขที่คุณเลือกก่อนส่งแจ้งเตือน`
+          : 'ปิดแจ้งเตือนงานใกล้คุณเรียบร้อยแล้ว',
         [{ text: 'ตกลง', onPress: () => navigation.goBack() }],
       );
     } catch (_) {
-      Alert.alert('เกิดข้อผิดพลาด', 'กรุณาลองใหม่อีกครั้ง');
+      Alert.alert('บันทึกไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsSaving(false);
     }
@@ -234,232 +241,219 @@ export default function NearbyJobAlertScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>งานใกล้ฉัน</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>งานใกล้คุณ</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* ── Hero section ─────────────────── */}
-        <View style={styles.hero}>
-          <View style={[styles.heroIcon, { backgroundColor: heroTone.background }]}>
-            <Ionicons name="location" size={38} color={heroTone.icon} />
-          </View>
-          <Text style={[styles.heroTitle, { color: colors.text }]}>แจ้งเตือนงานใกล้คุณ</Text>
-          <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>
-            เมื่อมีคนโพสต์งานเวรในรัศมีที่คุณกำหนด{'\n'}คุณจะได้รับ Push Notification ทันที
-          </Text>
-        </View>
-
-        {/* Push status */}
-        <View
-          style={[
-            styles.statusCard,
-            {
-              backgroundColor: pushStatusTone.background,
-              borderColor: pushStatusTone.border,
-            },
-          ]}
-        >
-          <Ionicons
-            name={hasPermission ? 'notifications-circle' : 'notifications-off-circle'}
-            size={22}
-            color={pushStatusTone.icon}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.statusTitle, { color: pushStatusTone.title }]}>
-              {hasPermission ? 'Push Notification พร้อมใช้งาน' : 'ยังไม่เปิดสิทธิ์แจ้งเตือน'}
-            </Text>
-            <Text style={[styles.statusSub, { color: pushStatusTone.text }]}>
-              {hasPermission
-                ? 'เมื่อมีงานใหม่ในรัศมีที่ตั้งไว้ ระบบจะส่งแจ้งเตือนทันที'
-                : 'กดบันทึกเพื่อขอสิทธิ์แจ้งเตือน และรับงานใหม่ใกล้ตัว'}
-            </Text>
-          </View>
-        </View>
-
-        {/* ── Toggle card ───────────────────── */}
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleLeft}>
-              <View style={[styles.toggleIconWrap, { backgroundColor: colors.primaryBackground }]}>
-                <Ionicons name="notifications" size={20} color={colors.primary} />
+        <View style={styles.content}>
+          <View style={[styles.quickIntro, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <View style={styles.quickIntroHeader}>
+              <View>
+                <Text style={[styles.quickEyebrow, { color: colors.primary }]}>Smart Alerts</Text>
+                <Text style={[styles.quickTitle, { color: colors.text }]}>ให้แจ้งเตือนเฉพาะงานที่ใช่</Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.toggleTitle, { color: colors.text }]}>
-                  เปิดการแจ้งเตือน
-                </Text>
-                <Text style={[styles.toggleSub, { color: colors.textSecondary }]}>
-                  {enabled ? 'แจ้งเตือนเมื่อมีงานใหม่ในรัศมีที่กำหนด' : 'ปิดอยู่'}
-                </Text>
+              <View style={[styles.quickIntroBadge, { backgroundColor: isDark ? colors.card : colors.primaryBackground }]}> 
+                <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+                <Text style={[styles.quickIntroBadgeText, { color: colors.primary }]}>ละเอียดขึ้น</Text>
               </View>
             </View>
-            <Switch
-              value={enabled}
-              onValueChange={setEnabled}
-              trackColor={{ false: colors.border, true: colors.primaryBackground }}
-              thumbColor={enabled ? colors.primary : colors.textMuted}
-            />
+            <Text style={[styles.quickSubtitle, { color: colors.textSecondary }]}> 
+              เลือกพื้นที่ สายงาน และเรตที่รับจริง ระบบจะช่วยกันแจ้งเตือนที่ไม่ตรงโจทย์ออกให้มากที่สุด
+            </Text>
+            <View style={styles.signalSummaryRow}>
+              <View style={[styles.signalSummaryPill, { backgroundColor: isDark ? colors.card : colors.background }]}> 
+                <Text style={[styles.signalSummaryValue, { color: colors.text }]}>{radiusKm}</Text>
+                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>กม.</Text>
+              </View>
+              <View style={[styles.signalSummaryPill, { backgroundColor: isDark ? colors.card : colors.background }]}> 
+                <Text style={[styles.signalSummaryValue, { color: colors.text }]}>{preferredStaffTypes.length || 0}</Text>
+                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>สายงาน</Text>
+              </View>
+              <View style={[styles.signalSummaryPill, { backgroundColor: isDark ? colors.card : colors.background }]}> 
+                <Text style={[styles.signalSummaryValue, { color: colors.text }]}>{selectedSignalCount}</Text>
+                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>เงื่อนไข</Text>
+              </View>
+            </View>
+            <View style={[styles.permissionPill, { backgroundColor: permissionTone.background }]}> 
+              <Ionicons
+                name={hasPermission ? 'notifications' : 'notifications-off'}
+                size={16}
+                color={permissionTone.text}
+              />
+              <Text style={[styles.permissionPillText, { color: permissionTone.text }]}> 
+                {hasPermission ? 'แจ้งเตือนพร้อมใช้งาน' : 'ระบบจะขอสิทธิ์แจ้งเตือนตอนบันทึก'}
+              </Text>
+            </View>
           </View>
-        </View>
 
-        {/* ── Location & radius (only when enabled) ── */}
-        {enabled && (
-          <>
-            {/* Location card */}
-            <View
-              style={[
-                styles.card,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.cardTitle, { color: colors.text }]}>ตำแหน่งของคุณ</Text>
-              <TouchableOpacity
-                style={[styles.locationRow, { backgroundColor: locationTone.background }]}
-                onPress={getLocation}
-                disabled={isLoadingLocation}
-                activeOpacity={0.7}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleCopy}> 
+                <Text style={[styles.cardTitle, { color: colors.text }]}>เปิดแจ้งเตือนงานใกล้คุณ</Text>
+                <Text style={[styles.cardHint, { color: colors.textSecondary }]}> 
+                  เมื่อมีงานใหม่ในระยะที่กำหนด ระบบจะส่งแจ้งเตือนให้ทันที
+                </Text>
+              </View>
+              <Switch
+                value={enabled}
+                onValueChange={setEnabled}
+                trackColor={{ false: colors.border, true: colors.primaryBackground }}
+                thumbColor={enabled ? colors.primary : colors.textMuted}
+              />
+            </View>
+          </View>
+
+          {enabled && (
+            <>
+              <View
+                style={[
+                  styles.card,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
               >
-                {isLoadingLocation ? (
-                  <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 8 }} />
-                ) : (
-                  <Ionicons
-                    name={lat ? 'location' : 'location-outline'}
-                    size={22}
-                    color={colors.primary}
-                    style={{ marginRight: 8 }}
-                  />
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      styles.locationText,
-                      { color: lat ? colors.text : colors.textMuted },
-                    ]}
-                  >
-                    {isLoadingLocation
-                      ? 'กำลังหาตำแหน่ง...'
-                      : locationLabel ?? 'แตะเพื่อหาตำแหน่งปัจจุบัน'}
-                  </Text>
-                  {lat !== null && lng !== null && (
-                    <Text style={[styles.coordText, { color: colors.textMuted }]}>
-                      {lat.toFixed(5)}, {lng.toFixed(5)}
-                    </Text>
-                  )}
-                </View>
-                <View style={[styles.refreshTag, { backgroundColor: locationTone.refreshBackground }]}> 
-                  <Ionicons name="refresh" size={14} color={colors.primary} />
-                  <Text style={[styles.refreshTagText, { color: colors.primary }]}>อัพเดท</Text>
-                </View>
-              </TouchableOpacity>
-
-              {!lat && (
-                <View style={[styles.locationHint, { backgroundColor: locationTone.hintBackground }]}> 
-                  <Ionicons name="information-circle-outline" size={14} color={locationTone.hintText} />
-                  <Text style={[styles.locationHintText, { color: locationTone.hintText }]}> 
-                    ต้องการตำแหน่งของคุณเพื่อแจ้งเตือนงานใกล้เคียง
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Radius picker card */}
-            <View
-              style={[
-                styles.card,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.cardTitle, { color: colors.text }]}>
-                รัศมีการแจ้งเตือน
-              </Text>
-
-              <View style={styles.radiusHeroRow}>
-                <View
-                  style={[
-                    styles.radiusBigWrap,
-                    { backgroundColor: colors.primaryBackground, borderColor: colors.primary },
-                  ]}
+                <Text style={[styles.cardTitle, { color: colors.text }]}>ตำแหน่ง</Text>
+                <Text style={[styles.cardHint, { color: colors.textSecondary }]}> 
+                  ใช้เป็นจุดศูนย์กลางสำหรับหางานใกล้ตัว ไม่ได้แสดงให้ผู้ใช้คนอื่นเห็น
+                </Text>
+                <TouchableOpacity
+                  style={[styles.locationButton, { backgroundColor: isDark ? colors.card : colors.primaryBackground }]}
+                  onPress={getLocation}
+                  disabled={isLoadingLocation}
+                  activeOpacity={0.8}
                 >
-                  <Text style={[styles.radiusBig, { color: colors.primary }]}>{radiusKm}</Text>
-                  <Text style={[styles.radiusUnit, { color: colors.primaryDark }]}>กม.</Text>
-                </View>
-                <View style={styles.radiusMetaWrap}>
-                  <Text style={[styles.radiusMetaTitle, { color: colors.textSecondary }]}>โหมดครอบคลุม</Text>
-                  <Text style={[styles.radiusMetaValue, { color: colors.text }]}>
-                    {radiusKm <= 3 ? 'แม่นยำสูง' : radiusKm <= 10 ? 'สมดุล' : 'ครอบคลุมกว้าง'}
-                  </Text>
-                  <Text style={[styles.radiusMetaHint, { color: colors.textSecondary }]}>ปรับระยะได้ตามความต้องการรับงาน</Text>
-                </View>
+                  {isLoadingLocation ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons name={lat ? 'location' : 'location-outline'} size={20} color={colors.primary} />
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.locationPrimary, { color: lat ? colors.text : colors.textMuted }]}> 
+                      {isLoadingLocation
+                        ? 'กำลังหาตำแหน่ง...'
+                        : locationLabel ?? 'แตะเพื่อใช้ตำแหน่งปัจจุบัน'}
+                    </Text>
+                    <Text style={[styles.locationSecondary, { color: colors.textSecondary }]}> 
+                      {lat !== null && lng !== null
+                        ? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+                        : 'ยังไม่ได้เลือกตำแหน่ง'}
+                    </Text>
+                  </View>
+                  <Ionicons name="refresh" size={18} color={colors.primary} />
+                </TouchableOpacity>
               </View>
 
-              <View style={styles.radiusGrid}>
-                {RADIUS_OPTIONS.map((r) => {
-                  const isActive = radiusKm === r;
-                  return (
-                    <TouchableOpacity
-                      key={r}
-                      style={[
-                        styles.radiusChip,
-                        {
-                          backgroundColor: isActive ? colors.primary : (isDark ? colors.card : colors.background),
-                          borderColor: isActive ? colors.primary : colors.border,
-                        },
-                      ]}
-                      onPress={() => setRadiusKm(r)}
-                      activeOpacity={0.75}
-                    >
-                      <Text
+              <View
+                style={[
+                  styles.card,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.cardTitle, { color: colors.text }]}>รัศมีแจ้งเตือน</Text>
+                <Text style={[styles.cardHint, { color: colors.textSecondary }]}> 
+                  ตอนนี้จะคัดงานใหม่ในระยะประมาณ {radiusKm} กม. จากจุดที่คุณเลือก
+                </Text>
+                <View style={styles.radiusGrid}>
+                  {RADIUS_OPTIONS.map((r) => {
+                    const isActive = radiusKm === r;
+                    return (
+                      <TouchableOpacity
+                        key={r}
                         style={[
-                          styles.radiusChipText,
-                          { color: isActive ? colors.white : colors.textSecondary },
+                          styles.radiusChip,
+                          {
+                            backgroundColor: isActive ? colors.primary : (isDark ? colors.card : colors.background),
+                            borderColor: isActive ? colors.primary : colors.border,
+                          },
                         ]}
+                        onPress={() => setRadiusKm(r)}
+                        activeOpacity={0.75}
                       >
-                        {r} กม.
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                        <Text
+                          style={[
+                            styles.radiusChipText,
+                            { color: isActive ? colors.white : colors.textSecondary },
+                          ]}
+                        >
+                          {r} กม.
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
 
-              {/* visual scale bar */}
-              <View style={styles.scaleBar}>
-                <View style={[styles.scaleTrack, { backgroundColor: colors.border }]}>
-                  <View
-                    style={[
-                      styles.scaleFill,
-                      {
-                        backgroundColor: colors.primary,
-                        width: `${(RADIUS_OPTIONS.indexOf(radiusKm) + 1) / RADIUS_OPTIONS.length * 100}%`,
-                      },
-                    ]}
+              <View
+                style={[
+                  styles.card,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.cardTitle, { color: colors.text }]}>กรองงานที่อยากรับจริง</Text>
+                <Text style={[styles.cardHint, { color: colors.textSecondary }]}>เพิ่มชั้นกรองให้ระบบส่งเฉพาะงานที่เข้าใกล้สิ่งที่คุณกำลังมองหา</Text>
+
+                <Text style={[styles.fieldLabel, { color: colors.text }]}>จังหวัดที่สนใจ</Text>
+                <TextInput
+                  style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: isDark ? colors.card : colors.background }]}
+                  placeholder="เช่น กรุงเทพมหานคร"
+                  placeholderTextColor={colors.textMuted}
+                  value={preferredProvince}
+                  onChangeText={setPreferredProvince}
+                />
+                <Text style={[styles.fieldHint, { color: colors.textMuted }]}>เว้นว่างได้ ถ้าต้องการดูทุกจังหวัดรอบตำแหน่งของคุณ</Text>
+
+                <Text style={[styles.fieldLabel, { color: colors.text }]}>ประเภทบุคลากร</Text>
+                <View style={styles.staffTypeWrap}>
+                  {STAFF_TYPES.map((item) => {
+                    const selected = preferredStaffTypes.includes(item.code);
+                    return (
+                      <TouchableOpacity
+                        key={item.code}
+                        style={[
+                          styles.filterChip,
+                          {
+                            backgroundColor: selected ? colors.primary : (isDark ? colors.card : colors.background),
+                            borderColor: selected ? colors.primary : colors.border,
+                          },
+                        ]}
+                        onPress={() => setPreferredStaffTypes((prev) => selected ? prev.filter((code) => code !== item.code) : [...prev, item.code])}
+                      >
+                        <Text style={[styles.filterChipText, { color: selected ? colors.white : colors.textSecondary }]}>{item.shortName}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text style={[styles.fieldLabel, { color: colors.text }]}>ค่าตอบแทนที่ต้องการ</Text>
+                <View style={styles.rateRow}>
+                  <TextInput
+                    style={[styles.input, styles.rateInput, { borderColor: colors.border, color: colors.text, backgroundColor: isDark ? colors.card : colors.background }]}
+                    placeholder="ขั้นต่ำ"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="numeric"
+                    value={minRateText}
+                    onChangeText={setMinRateText}
+                  />
+                  <Text style={[styles.rateSeparator, { color: colors.textMuted }]}>-</Text>
+                  <TextInput
+                    style={[styles.input, styles.rateInput, { borderColor: colors.border, color: colors.text, backgroundColor: isDark ? colors.card : colors.background }]}
+                    placeholder="สูงสุด"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="numeric"
+                    value={maxRateText}
+                    onChangeText={setMaxRateText}
                   />
                 </View>
-                <View style={styles.scaleLabels}>
-                  <Text style={[styles.scaleLabel, { color: colors.textMuted }]}>1 กม.</Text>
-                  <Text style={[styles.scaleLabel, { color: colors.textMuted }]}>50 กม.</Text>
-                </View>
+                <Text style={[styles.fieldHint, { color: colors.textMuted }]}>ใส่ช่วงเรตที่รับจริง เพื่อช่วยลดแจ้งเตือนที่เรตต่ำหรือสูงเกินโจทย์</Text>
               </View>
-
-              <Text style={[styles.radiusHint, { color: colors.textMuted }]}>
-                งานที่โพสต์ภายในรัศมี {radiusKm} กม. จากตำแหน่งของคุณ
-              </Text>
-            </View>
-
-            {/* Info box */}
-            <View style={[styles.infoBox, { backgroundColor: infoTone.background, borderLeftColor: infoTone.border }]}> 
-              <Ionicons name="bulb-outline" size={18} color={infoTone.border} style={{ marginTop: 2 }} />
-              <Text style={[styles.infoText, { color: infoTone.text }]}> 
-                ระบบจะส่ง Push Notification ทันทีเมื่อมีการโพสต์งานใหม่ภายในรัศมีที่คุณกำหนด
-                ตำแหน่งของคุณจะถูกใช้เพื่อคำนวณระยะทางเท่านั้น
-              </Text>
-            </View>
-          </>
-        )}
+            </>
+          )}
+        </View>
 
         {/* ── Save button ───────────────────── */}
         <TouchableOpacity
@@ -487,6 +481,10 @@ export default function NearbyJobAlertScreen() {
 // ─── Styles ───────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  content: {
+    padding: SPACING.md,
+    gap: SPACING.md,
+  },
 
   header: {
     flexDirection: 'row',
@@ -499,201 +497,164 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, justifyContent: 'center' },
   headerTitle: { fontSize: FONT_SIZES.lg, fontWeight: '700' },
 
-  hero: {
-    alignItems: 'center',
-    paddingTop: SPACING.xl,
-    paddingBottom: SPACING.lg,
-    paddingHorizontal: SPACING.xl,
+  quickIntro: {
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    padding: SPACING.md,
+    gap: SPACING.sm,
   },
-  heroIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.md,
+  quickIntroHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  heroTitle: {
-    fontSize: FONT_SIZES.xl,
+  quickEyebrow: {
+    fontSize: FONT_SIZES.xs,
     fontWeight: '700',
-    marginBottom: SPACING.xs,
-    textAlign: 'center',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    letterSpacing: 0.4,
   },
-  heroSubtitle: {
-    fontSize: FONT_SIZES.sm,
-    textAlign: 'center',
-    lineHeight: 22,
+  quickTitle: { fontSize: FONT_SIZES.lg, fontWeight: '700' },
+  quickSubtitle: { fontSize: FONT_SIZES.sm, lineHeight: 20 },
+  quickIntroBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
+  quickIntroBadgeText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '700',
+  },
+  signalSummaryRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  signalSummaryPill: {
+    flex: 1,
+    borderRadius: BORDER_RADIUS.md,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  signalSummaryValue: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+  },
+  signalSummaryLabel: {
+    fontSize: FONT_SIZES.xs,
+    marginTop: 2,
+  },
+  permissionPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  permissionPillText: { fontSize: FONT_SIZES.xs, fontWeight: '600' },
 
   card: {
-    marginHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
     borderWidth: 1,
   },
-  statusCard: {
-    marginHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 2,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  statusTitle: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '700',
-  },
-  statusSub: {
-    marginTop: 2,
-    fontSize: FONT_SIZES.xs,
-    lineHeight: 16,
-  },
   cardTitle: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
-    marginBottom: SPACING.md,
+  },
+  cardHint: {
+    fontSize: FONT_SIZES.xs,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  fieldLabel: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+    marginTop: SPACING.md,
+    marginBottom: 8,
+  },
+  fieldHint: {
+    fontSize: FONT_SIZES.xs,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    fontSize: FONT_SIZES.md,
+  },
+  staffTypeWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  filterChipText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+  },
+  rateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  rateInput: {
+    flex: 1,
+  },
+  rateSeparator: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
   },
 
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: SPACING.md,
   },
-  toggleLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
+  toggleCopy: {
     flex: 1,
-    marginRight: SPACING.sm,
   },
-  toggleIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toggleTitle: { fontSize: FONT_SIZES.md, fontWeight: '600' },
-  toggleSub: { fontSize: FONT_SIZES.xs, marginTop: 2 },
 
-  locationRow: {
+  locationButton: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  locationText: { fontSize: FONT_SIZES.sm, fontWeight: '500' },
-  coordText: { fontSize: 11, marginTop: 2 },
-  refreshTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-    marginLeft: SPACING.sm,
-  },
-  refreshTagText: { fontSize: 11, fontWeight: '600' },
-  locationHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: SPACING.sm,
-    borderRadius: BORDER_RADIUS.sm,
-    padding: SPACING.sm,
-  },
-  locationHintText: { fontSize: FONT_SIZES.xs, flex: 1 },
+  locationPrimary: { fontSize: FONT_SIZES.sm, fontWeight: '600' },
+  locationSecondary: { fontSize: FONT_SIZES.xs, marginTop: 2 },
 
-  radiusHeroRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-    gap: SPACING.md,
-  },
-  radiusBigWrap: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-  },
-  radiusBig: {
-    fontSize: 36,
-    fontWeight: '800',
-    lineHeight: 40,
-  },
-  radiusUnit: {
-    fontSize: FONT_SIZES.xs,
-    fontWeight: '700',
-  },
-  radiusMetaWrap: {
-    flex: 1,
-  },
-  radiusMetaTitle: {
-    fontSize: FONT_SIZES.xs,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  radiusMetaValue: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '800',
-  },
-  radiusMetaHint: {
-    marginTop: 4,
-    fontSize: FONT_SIZES.xs,
-  },
   radiusGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.sm,
-    justifyContent: 'center',
-    marginBottom: SPACING.md,
+    marginTop: SPACING.md,
   },
   radiusChip: {
     paddingHorizontal: 18,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 24,
     borderWidth: 1.5,
   },
   radiusChipText: { fontSize: FONT_SIZES.sm, fontWeight: '600' },
-
-  scaleBar: { marginBottom: SPACING.sm },
-  scaleTrack: {
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 4,
-  },
-  scaleFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  scaleLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  scaleLabel: { fontSize: 10 },
-  radiusHint: { fontSize: FONT_SIZES.xs, textAlign: 'center', marginTop: 4 },
-
-  infoBox: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    borderLeftWidth: 3,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: FONT_SIZES.xs,
-    lineHeight: 18,
-  },
 
   saveBtn: {
     flexDirection: 'row',

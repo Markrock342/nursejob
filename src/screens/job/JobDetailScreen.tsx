@@ -13,7 +13,9 @@ import {
   Linking,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
+import * as ExpoLinking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -24,15 +26,19 @@ import ReportModal from '../../components/report/ReportModal';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { contactForShift, deleteJob, updateJob, incrementViewCount, getShiftContacts, updateJobStatus, getJobById } from '../../services/jobService';
-import { getUserSubscription } from '../../services/subscriptionService';
-import { getOrCreateConversation } from '../../services/chatService';
+import { contactForShift, deleteJob, updateJob, incrementViewCount, getShiftContacts, getUserShiftContacts, updateJobStatus, getJobById, boostJobPost } from '../../services/jobService';
+import { canUseFreeUrgent, consumeFeatureUsage, extendPostExpiry, getFeatureUsageStatus, getUserSubscription, markFreeUrgentUsed } from '../../services/subscriptionService';
+import { getOrCreateConversationWithStatus, sendMessage, sendSavedDocument } from '../../services/chatService';
 import { toggleFavorite, isFavorited } from '../../services/favoritesService';
+import { Document as UserDocument, getUserDocuments } from '../../services/documentsService';
 import { useToast } from '../../context/ToastContext';
-import { JobPost, RootStackParamList, SubscriptionPlan, StaffType } from '../../types';
+import { JobPost, PRICING, RootStackParamList, SubscriptionPlan, StaffType } from '../../types';
 import { formatDate, formatRelativeTime, callPhone, openLine, openMapsDirections } from '../../utils/helpers';
 import { getStaffTypeLabel } from '../../constants/jobOptions';
-import { getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
+import { getAdminDisplayTagColors, getIdentityDisplayTags, getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
+import { trackEvent } from '../../services/analyticsService';
+import { getSafeContactMode } from '../../utils/jobPostIntelligence';
+import { getCommerceAccessStatus } from '../../services/commerceService';
 
 // ============================================
 // Types
@@ -92,12 +98,23 @@ const getJobTimeLabel = (job: JobPost): string => {
   return slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || 'ตามตกลง');
 };
 
+const getCampaignSummary = (job: JobPost): string | null => {
+  if (job.campaignSummary) return job.campaignSummary;
+  if (job.postType === 'job') return null;
+  const datesCount = job.shiftDates?.length || (job.shiftDate ? 1 : 0);
+  const slotsNeeded = Math.max(1, Number(job.slotsNeeded || 1));
+  if (!datesCount) return null;
+  if (datesCount === 1) return `ต้องการ ${slotsNeeded} คนในรอบนี้`;
+  return `ต้องการ ${slotsNeeded} คนต่อรอบ • ${datesCount} วัน`;
+};
+
 // ============================================
 // Component
 // ============================================
 export default function JobDetailScreen({ navigation, route }: Props) {
   const routeJob = route.params?.job ?? null;
   const routeJobId = route.params?.jobId || routeJob?.id;
+  const entrySource = route.params?.source || 'direct';
   const { user, requireAuth, isAuthenticated } = useAuth();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -114,6 +131,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [isStartingChat, setIsStartingChat] = useState(false);
+  const [isQuickApplying, setIsQuickApplying] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [alert, setAlert] = useState<AlertState>(initialAlertState);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
@@ -128,11 +146,20 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const [jobStatus, setJobStatus] = useState(routeJob?.status ?? 'active');
   const [posterPlan, setPosterPlan] = useState<SubscriptionPlan>('free');
   const [viewsCount, setViewsCount] = useState<number>(routeJob?.viewsCount ?? 0);
+  const [isApplyingAddon, setIsApplyingAddon] = useState(false);
   const roleLabel = getRoleLabel(job?.posterRole, job?.posterOrgType, job?.posterStaffType);
   const showRoleTag = hasRoleTag(job?.posterRole, job?.posterOrgType, job?.posterStaffType);
   const roleTagColors = getRoleTagColors(job?.posterRole);
   const premiumTagText = getPremiumTagText(job?.posterPlan || posterPlan);
   const premiumTagColors = getPremiumTagColors();
+  const adminDisplayTags = getIdentityDisplayTags({
+    role: job?.posterRole,
+    orgType: job?.posterOrgType,
+    staffType: job?.posterStaffType,
+    staffTypes: job?.posterStaffTypes,
+    adminTags: job?.posterAdminTags,
+    adminWarningTag: job?.posterWarningTag,
+  });
   const verificationTagText = getVerificationTagText({
     isVerified: job?.posterVerified,
     role: job?.posterRole,
@@ -180,6 +207,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   
   // Check if user is the owner of this job
   const isOwner = user && job && (user.uid === job.posterId || user.id === job.posterId);
+  const resolvedContactMode = getSafeContactMode(job?.contactMode, Boolean(job?.contactPhone), Boolean(job?.contactLine));
+  const canRevealExternalContact = Boolean(isOwner || hasContacted);
 
   // Increment view count when screen loads
   useEffect(() => {
@@ -223,6 +252,41 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     };
     loadApplicantsCount();
   }, [isOwner, job?.id]);
+
+  useEffect(() => {
+    const loadContactState = async () => {
+      if (!user?.uid || !job?.id || isOwner) return;
+      try {
+        const contacts = await getUserShiftContacts(user.uid);
+        setHasContacted(contacts.some((contact) => contact.jobId === job.id));
+      } catch (error) {
+        console.error('Error loading user contact state:', error);
+      }
+    };
+
+    loadContactState();
+  }, [isOwner, job?.id, user?.uid]);
+
+  useEffect(() => {
+    if (!job?.id) return;
+
+    trackEvent({
+      eventName: 'job_detail_view',
+      screenName: 'JobDetail',
+      subjectType: 'shift',
+      subjectId: job.id,
+      jobId: job.id,
+      province: job.location?.province,
+      props: {
+        source: entrySource,
+        postType: job.postType || 'shift',
+        staffType: job.staffType || null,
+        posterRole: job.posterRole || null,
+        status: job.status,
+        isUrgent: Boolean(job.isUrgent || job.status === 'urgent'),
+      },
+    });
+  }, [entrySource, job?.id, job?.location?.province, job?.postType, job?.staffType, job?.posterRole, job?.status, job?.isUrgent]);
 
   if (isLoadingJob) {
     return (
@@ -270,12 +334,36 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
     setIsContacting(true);
     try {
+      const applyUsage = await getFeatureUsageStatus(user.uid, 'job_application');
+      if (!applyUsage.canUse) {
+        setAlert(createAlert.info('ใช้สิทธิ์สมัครครบแล้ว', applyUsage.reason || 'บัญชีนี้ใช้สิทธิ์สมัครงานครบตามรอบเดือนนี้แล้ว') as AlertState);
+        return;
+      }
+
+      await trackEvent({
+        eventName: 'apply_cta_clicked',
+        screenName: 'JobDetail',
+        subjectType: 'shift',
+        subjectId: job.id,
+        jobId: job.id,
+        province: job.location?.province,
+        props: {
+          source: entrySource,
+          postType: job.postType || 'shift',
+          staffType: job.staffType || null,
+          posterRole: job.posterRole || null,
+        },
+      });
+
       await contactForShift(
         job.id, 
         user.uid, 
         user.displayName || 'ผู้ใช้',
         user.phone || ''
       );
+      if (applyUsage.limit != null) {
+        await consumeFeatureUsage(user.uid, 'job_application');
+      }
       setShowContactModal(false);
       setHasContacted(true);
       // Show success modal with contact options
@@ -315,11 +403,15 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
   // Navigate to applicants screen
   const handleViewApplicants = () => {
-    (navigation as any).navigate('Applicants');
+    (navigation as any).navigate('Applicants', { jobId: job.id });
   };
 
   // Handle call
   const handleCall = () => {
+    if (!canRevealExternalContact) {
+      setAlert(createAlert.info('ดูแลข้อมูลติดต่อไว้ก่อน', 'เริ่มแชทในแอปหรือแสดงความสนใจก่อน แล้วระบบจะเปิดเบอร์โทรตามที่ผู้โพสต์อนุญาต') as AlertState);
+      return;
+    }
     if (job.contactPhone) {
       callPhone(job.contactPhone);
     } else {
@@ -329,6 +421,10 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
   // Handle LINE
   const handleLine = () => {
+    if (!canRevealExternalContact) {
+      setAlert(createAlert.info('ดูแลข้อมูลติดต่อไว้ก่อน', 'เริ่มแชทในแอปหรือแสดงความสนใจก่อน แล้วระบบจะเปิด LINE ตามที่ผู้โพสต์อนุญาต') as AlertState);
+      return;
+    }
     if (job.contactLine) {
       openLine(job.contactLine);
     } else {
@@ -366,13 +462,28 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   // Handle share
   const handleShare = async () => {
     try {
+      await trackEvent({
+        eventName: 'share_job_clicked',
+        screenName: 'JobDetail',
+        subjectType: 'shift',
+        subjectId: job.id,
+        jobId: job.id,
+        province: job.location?.province,
+        props: {
+          source: entrySource,
+          postType: job.postType || 'shift',
+          staffType: job.staffType || null,
+          posterRole: job.posterRole || null,
+        },
+      });
+
       const rateText = formatShiftRate(job.shiftRate, job.rateType);
       const dateLabel = job.postType === 'job' ? 'เริ่มงาน' : 'วันที่';
       const timeLabel = job.postType === 'job' ? 'เวลางาน' : 'เวลา';
       const dateText = getJobStartLabel(job);
       const timeText = getJobTimeLabel(job);
-      const shareUrl = `https://nursego.app/job/${job.id}`;
-      const appLink = `nursego://job/${job.id}`;
+      const shareUrl = `https://nursego.co/job/${job.id}`;
+      const appLink = ExpoLinking.createURL(`/job/${job.id}`);
       await Share.share({
         message: `${job.title}\n${dateLabel}: ${dateText}\n${timeLabel}: ${timeText}\n${job.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}: ${rateText}\nสถานที่: ${job.location?.hospital || job.location?.province}\n\nดูรายละเอียด: ${shareUrl}\nเปิดตรงในแอป: ${appLink}`,
         title: job.title,
@@ -420,7 +531,29 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       
       setIsStartingChat(true);
       try {
-        const conversationId = await getOrCreateConversation(
+        const chatUsage = await getFeatureUsageStatus(user.uid, 'chat_start');
+        if (!chatUsage.canUse) {
+          setAlert(createAlert.info('ใช้สิทธิ์เริ่มแชทครบแล้ว', chatUsage.reason || 'บัญชีนี้ใช้สิทธิ์เริ่มแชทครบตามรอบเดือนนี้แล้ว') as AlertState);
+          return;
+        }
+
+        await trackEvent({
+          eventName: 'chat_cta_clicked',
+          screenName: 'JobDetail',
+          subjectType: 'shift',
+          subjectId: job.id,
+          jobId: job.id,
+          conversationId: undefined,
+          province: job.location?.province,
+          props: {
+            source: entrySource,
+            postType: job.postType || 'shift',
+            staffType: job.staffType || null,
+            posterRole: job.posterRole || null,
+          },
+        });
+
+        const { conversationId, created } = await getOrCreateConversationWithStatus(
           user.uid,
           user.displayName || 'ผู้ใช้',
           job.posterId,
@@ -429,11 +562,16 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           job.title,
           job.location?.hospital || undefined
         );
+        if (created && chatUsage.limit != null) {
+          await consumeFeatureUsage(user.uid, 'chat_start');
+        }
         
         // Navigate to chat room
         (navigation as any).navigate('ChatRoom', {
           conversationId,
+          recipientId: job.posterId,
           recipientName: job.posterName || 'ผู้โพสต์',
+          recipientPhoto: job.posterPhoto || undefined,
           jobTitle: job.title,
         });
       } catch (error: any) {
@@ -478,6 +616,123 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     (navigation as any).navigate('Main', { screen: 'PostJob', params: { editJob: serialized } });
   };
 
+  const handleDuplicatePost = () => {
+    const serialized = {
+      ...job,
+      shiftDate: job.shiftDate ? (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : job.shiftDate) : undefined,
+      shiftDateEnd: (job as any).shiftDateEnd ? ((job as any).shiftDateEnd instanceof Date ? (job as any).shiftDateEnd.toISOString() : (job as any).shiftDateEnd) : undefined,
+    } as any;
+    (navigation as any).navigate('Main', { screen: 'PostJob', params: { duplicateJob: serialized } });
+  };
+
+  const pickLatestQuickApplyDocument = (documents: UserDocument[]) => {
+    return [...documents]
+      .filter((item) => Boolean(item.fileUrl))
+      .sort((left, right) => {
+        const leftRank = left.status === 'approved' || left.isVerified ? 1 : 0;
+        const rightRank = right.status === 'approved' || right.isVerified ? 1 : 0;
+        if (leftRank !== rightRank) return rightRank - leftRank;
+        const leftTime = left.updatedAt?.getTime?.() || left.verifiedAt?.getTime?.() || left.createdAt?.getTime?.() || 0;
+        const rightTime = right.updatedAt?.getTime?.() || right.verifiedAt?.getTime?.() || right.createdAt?.getTime?.() || 0;
+        return rightTime - leftTime;
+      })[0];
+  };
+
+  const handleQuickApply = () => {
+    requireAuth(async () => {
+      if (!user || !job.posterId) return;
+      if (hasContacted) {
+        setAlert(createAlert.info('สมัครไว้แล้ว', 'คุณเคยแสดงความสนใจงานนี้แล้ว ลองเปิดแชทเพื่อคุยต่อได้เลย') as AlertState);
+        return;
+      }
+
+      setIsQuickApplying(true);
+      try {
+        const applyUsage = await getFeatureUsageStatus(user.uid, 'job_application');
+        if (!applyUsage.canUse) {
+          setAlert(createAlert.info('ใช้สิทธิ์สมัครครบแล้ว', applyUsage.reason || 'บัญชีนี้ใช้สิทธิ์สมัครงานครบตามรอบเดือนนี้แล้ว') as AlertState);
+          return;
+        }
+
+        const documents = await getUserDocuments(user.uid);
+        const latestDocument = pickLatestQuickApplyDocument(documents);
+        const quickApplyMessage = latestDocument
+          ? `สนใจงานนี้ครับ/ค่ะ ส่งเอกสารล่าสุด (${latestDocument.name}) ให้แล้ว หากสะดวกขอคุยรายละเอียดต่อได้เลยนะครับ/คะ`
+          : 'สนใจงานนี้ครับ/ค่ะ โปรไฟล์พร้อมเริ่มงาน หากสะดวกขอคุยรายละเอียดต่อได้เลยนะครับ/คะ';
+
+        await trackEvent({
+          eventName: 'apply_cta_clicked',
+          screenName: 'JobDetail',
+          subjectType: 'shift',
+          subjectId: job.id,
+          jobId: job.id,
+          province: job.location?.province,
+          props: {
+            source: `${entrySource}:quick_apply`,
+            postType: job.postType || 'shift',
+            staffType: job.staffType || null,
+            hasLatestDocument: Boolean(latestDocument),
+          },
+        });
+
+        await contactForShift(
+          job.id,
+          user.uid,
+          user.displayName || 'ผู้ใช้',
+          user.phone || '',
+          quickApplyMessage,
+        );
+
+        if (applyUsage.limit != null) {
+          await consumeFeatureUsage(user.uid, 'job_application');
+        }
+
+        let openedConversationId: string | null = null;
+        const chatUsage = await getFeatureUsageStatus(user.uid, 'chat_start').catch(() => null);
+        if (chatUsage?.canUse !== false) {
+          const { conversationId, created } = await getOrCreateConversationWithStatus(
+            user.uid,
+            user.displayName || 'ผู้ใช้',
+            job.posterId,
+            job.posterName || 'ผู้โพสต์',
+            job.id,
+            job.title,
+            job.location?.hospital || undefined,
+          );
+          openedConversationId = conversationId;
+
+          if (created && chatUsage?.limit != null) {
+            await consumeFeatureUsage(user.uid, 'chat_start').catch(() => {});
+          }
+
+          await sendMessage(conversationId, user.uid, user.displayName || 'ผู้ใช้', quickApplyMessage);
+          if (latestDocument?.fileUrl) {
+            await sendSavedDocument(
+              conversationId,
+              user.uid,
+              user.displayName || 'ผู้ใช้',
+              latestDocument.fileUrl,
+              latestDocument.fileName || latestDocument.name,
+              latestDocument.type,
+            );
+          }
+        }
+
+        setHasContacted(true);
+        setAlert(createAlert.success(
+          'ส่ง Quick Apply เรียบร้อยแล้ว',
+          openedConversationId
+            ? 'ระบบส่งความสนใจ ข้อความแนะนำตัว และเอกสารล่าสุดให้แล้ว เปิดแชทต่อได้ทันที'
+            : 'ระบบส่งความสนใจให้เรียบร้อยแล้ว หากต้องการแนบเอกสารเพิ่ม สามารถเริ่มแชทภายหลังได้'
+        ) as AlertState);
+      } catch (error: any) {
+        setAlert(createAlert.error('ส่ง Quick Apply ไม่สำเร็จ', error.message || 'กรุณาลองใหม่อีกครั้ง') as AlertState);
+      } finally {
+        setIsQuickApplying(false);
+      }
+    });
+  };
+
   // Handle mark as filled
   const handleMarkAsFilled = async () => {
     try {
@@ -489,16 +744,113 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     }
   };
 
-  // Guard: job not passed in route params
-  if (!job) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: colors.textSecondary }}>ไม่พบข้อมูลประกาศ</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const handleExtendAddon = async () => {
+    if (!job) return;
+    setIsApplyingAddon(true);
+    try {
+      const commerceStatus = await getCommerceAccessStatus();
+      if (commerceStatus.freeAccessEnabled) {
+        const usage = user?.uid ? await getFeatureUsageStatus(user.uid, 'extend_post') : null;
+        if (usage && !usage.canUse) {
+          setAlert(createAlert.info('ใช้สิทธิ์ต่ออายุครบแล้ว', usage.reason || 'บัญชีนี้ใช้สิทธิ์ต่ออายุประกาศครบตามรอบเดือนนี้แล้ว') as AlertState);
+          return;
+        }
+
+        const newExpiry = await extendPostExpiry(job.id, 1);
+        if (user?.uid && usage?.limit != null) {
+          await consumeFeatureUsage(user.uid, 'extend_post');
+        }
+        setJob((prev) => (prev ? { ...prev, expiresAt: newExpiry, updatedAt: new Date() } : prev));
+        setAlert(createAlert.success('ต่ออายุประกาศแล้ว', 'ประกาศนี้ถูกต่ออายุเพิ่มอีก 1 วันเรียบร้อยแล้ว') as AlertState);
+        return;
+      }
+
+      navigation.navigate('Payment', {
+        title: 'ต่ออายุประกาศ +1 วัน',
+        amount: PRICING.extendPost,
+        jobId: job.id,
+        type: 'extend_post',
+        description: 'ต่ออายุเวลาแสดงประกาศเพิ่มอีก 1 วัน',
+      });
+    } catch (error: any) {
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', error?.message || 'ไม่สามารถต่ออายุประกาศได้') as AlertState);
+    } finally {
+      setIsApplyingAddon(false);
+    }
+  };
+
+  const applyUrgentNow = async () => {
+    if (!job || !user) return;
+    await updateJobStatus(job.id, 'urgent');
+    await markFreeUrgentUsed(user.uid);
+    setJob((prev) => (prev ? { ...prev, status: 'urgent', isUrgent: true, updatedAt: new Date() } : prev));
+    setJobStatus('urgent');
+    setAlert(createAlert.success('เปิดป้ายด่วนแล้ว', 'ประกาศนี้ถูกทำเครื่องหมายด่วนเรียบร้อยแล้ว') as AlertState);
+  };
+
+  const handleUrgentAddon = async () => {
+    if (!job || !user) return;
+    setIsApplyingAddon(true);
+    try {
+      const commerceStatus = await getCommerceAccessStatus();
+      if (commerceStatus.freeAccessEnabled) {
+        const canUseUrgent = await canUseFreeUrgent(user.uid);
+        if (!canUseUrgent) {
+          setAlert(createAlert.info('ใช้สิทธิ์ป้ายด่วนครบแล้ว', 'ตอนนี้บัญชีนี้ใช้สิทธิ์ป้ายด่วนครบแล้ว แต่ยังจัดการประกาศอื่นได้ตามปกติ') as AlertState);
+          return;
+        }
+        await applyUrgentNow();
+        return;
+      }
+
+      navigation.navigate('Payment', {
+        title: 'ป้ายด่วน (Urgent)',
+        amount: PRICING.urgentPost,
+        jobId: job.id,
+        type: 'urgent_post',
+        description: 'ช่วยให้ประกาศนี้เด่นขึ้นในรายการประกาศ',
+      });
+    } catch (error: any) {
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', error?.message || 'ไม่สามารถเปิดป้ายด่วนได้') as AlertState);
+    } finally {
+      setIsApplyingAddon(false);
+    }
+  };
+
+  const handleBoostAddon = async () => {
+    if (!job || !user?.uid) return;
+    setIsApplyingAddon(true);
+    try {
+      const commerceStatus = await getCommerceAccessStatus();
+      if (commerceStatus.freeAccessEnabled) {
+        const usage = await getFeatureUsageStatus(user.uid, 'boost_post');
+        if (!usage.canUse) {
+          setAlert(createAlert.info('ใช้สิทธิ์ดันโพสต์ครบแล้ว', usage.reason || 'บัญชีนี้ใช้สิทธิ์ดันโพสต์ครบตามรอบเดือนนี้แล้ว') as AlertState);
+          return;
+        }
+
+        const boostedAt = await boostJobPost(job.id);
+        if (usage.limit != null) {
+          await consumeFeatureUsage(user.uid, 'boost_post');
+        }
+        setJob((prev) => (prev ? { ...prev, boostedAt, updatedAt: boostedAt } : prev));
+        setAlert(createAlert.success('ดันโพสต์แล้ว', 'ประกาศนี้ถูกดันขึ้นไปอยู่ลำดับบนสุดของรายการล่าสุดแล้ว') as AlertState);
+        return;
+      }
+
+      navigation.navigate('Payment', {
+        title: 'ดันโพสต์ขึ้นบนสุด',
+        amount: PRICING.extraPost,
+        jobId: job.id,
+        type: 'boost_post',
+        description: 'ดันประกาศนี้ขึ้นบนสุดของลำดับประกาศล่าสุดอีกครั้ง',
+      });
+    } catch (error: any) {
+      setAlert(createAlert.error('เกิดข้อผิดพลาด', error?.message || 'ไม่สามารถดันโพสต์ได้') as AlertState);
+    } finally {
+      setIsApplyingAddon(false);
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={[]}>
@@ -537,11 +889,18 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             }}
             activeOpacity={0.7}
           >
-            <Avatar 
-              uri={job.posterPhoto}
-              name={job.posterName}
-              size={60}
-            />
+            <View style={styles.posterAvatarWrap}>
+              <Avatar 
+                uri={job.posterPhoto}
+                name={job.posterName}
+                size={60}
+              />
+              {job.posterVerified ? (
+                <View style={[styles.posterVerifiedBadge, { backgroundColor: colors.card }]}> 
+                  <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+                </View>
+              ) : null}
+            </View>
             <View style={styles.posterInfo}>
               <View style={styles.posterNameRow}>
                 <Text style={styles.posterName}>{job.posterName}</Text>
@@ -567,6 +926,19 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                     <Text style={styles.posterTagText} numberOfLines={1}>{verificationTagText}</Text>
                   </View>
                 ) : null}
+                {adminDisplayTags.map((tag) => {
+                  const tone = getAdminDisplayTagColors(tag.tone);
+                  return (
+                    <View key={`${tag.tone}-${tag.label}`} style={[styles.posterTag, { backgroundColor: tone.backgroundColor }]}> 
+                      <Ionicons
+                        name={tag.tone === 'warning' ? 'alert-circle' : 'pricetag'}
+                        size={11}
+                        color={tone.textColor}
+                      />
+                      <Text style={[styles.posterTagText, { color: tone.textColor }]} numberOfLines={1}>{tag.label}</Text>
+                    </View>
+                  );
+                })}
               </View>
               <Text style={styles.postedTime}>โพสต์ {formatRelativeTime(job.createdAt)}</Text>
             </View>
@@ -762,6 +1134,17 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           </Card>
         )}
 
+        {getCampaignSummary(job) ? (
+          <Card style={styles.section}>
+            <View style={styles.sectionTitleRow}>
+              <Ionicons name="layers-outline" size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>ภาพรวมรอบงาน</Text>
+            </View>
+            <Text style={styles.detailValue}>{getCampaignSummary(job)}</Text>
+            {job.scheduleNote ? <Text style={styles.helperCopy}>{job.scheduleNote}</Text> : null}
+          </Card>
+        ) : null}
+
         {/* Owner Actions - Only show for job owner */}
         {isOwner && (
           <Card style={styles.ownerSection}>
@@ -790,6 +1173,43 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 <Text style={[styles.ownerButtonText, styles.deleteButtonText]}>ลบ</Text>
               </TouchableOpacity>
             </View>
+
+            <View style={styles.ownerAddonHeader}>
+              <Text style={styles.ownerAddonTitle}>บริการเสริมของประกาศนี้</Text>
+              <Text style={styles.ownerAddonHint}>จัดการ add-on ได้จากหน้านี้โดยไม่ต้องย้อนกลับไปหน้าโพสต์ของฉัน</Text>
+            </View>
+
+            <View style={styles.ownerAddonGrid}>
+              <TouchableOpacity style={styles.ownerAddonCard} onPress={handleBoostAddon} disabled={isApplyingAddon}>
+                <View style={[styles.ownerAddonIcon, { backgroundColor: colors.primaryBackground }]}> 
+                  <Ionicons name="arrow-up-circle-outline" size={20} color={colors.primary} />
+                </View>
+                <Text style={styles.ownerAddonCardTitle}>ดันโพสต์</Text>
+                <Text style={styles.ownerAddonCardSub}>ดันประกาศนี้ขึ้นบนสุดอีกครั้ง</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.ownerAddonCard} onPress={handleExtendAddon} disabled={isApplyingAddon || jobStatus === 'closed'}>
+                <View style={[styles.ownerAddonIcon, { backgroundColor: '#E8F5E9' }]}> 
+                  <Ionicons name="time-outline" size={20} color="#2E7D32" />
+                </View>
+                <Text style={styles.ownerAddonCardTitle}>ต่ออายุ</Text>
+                <Text style={styles.ownerAddonCardSub}>เพิ่มเวลาแสดงประกาศอีก 1 วัน</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.ownerAddonCard} onPress={handleUrgentAddon} disabled={isApplyingAddon || jobStatus === 'closed' || jobStatus === 'urgent'}>
+                <View style={[styles.ownerAddonIcon, { backgroundColor: colors.warningLight || '#FFF3E0' }]}> 
+                  <Ionicons name="flash-outline" size={20} color={colors.warning} />
+                </View>
+                <Text style={styles.ownerAddonCardTitle}>ป้ายด่วน</Text>
+                <Text style={styles.ownerAddonCardSub}>{jobStatus === 'urgent' ? 'ประกาศนี้เป็นด่วนอยู่แล้ว' : 'ทำให้ประกาศเด่นขึ้น'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.ownerAddonNoteBox, { backgroundColor: colors.backgroundSecondary }]}> 
+              <Text style={styles.ownerAddonNoteText}>
+                ป้ายด่วนตอนนี้ยังไม่มีเวลาหมดอายุแยก จะอยู่จนกว่าคุณปิดประกาศหรือประกาศหมดอายุเอง
+              </Text>
+            </View>
           </Card>
         )}
 
@@ -800,22 +1220,32 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="call-outline" size={18} color={colors.primary} />
               <Text style={styles.sectionTitle}>ช่องทางติดต่อ</Text>
             </View>
-            
-            <View style={styles.contactButtons}>
-              {job.contactPhone && (
-                <TouchableOpacity style={styles.contactButton} onPress={handleCall}>
-                  <Ionicons name="call" size={18} color={colors.primary} />
-                  <Text style={styles.contactText}>โทร {job.contactPhone}</Text>
-                </TouchableOpacity>
-              )}
-              
-              {job.contactLine && (
-                <TouchableOpacity style={styles.contactButton} onPress={handleLine}>
-                  <Ionicons name="chatbubble-ellipses" size={18} color={colors.success} />
-                  <Text style={styles.contactText}>LINE: {job.contactLine}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+
+            {!canRevealExternalContact ? (
+              <View style={[styles.lockedInlineCard, { backgroundColor: colors.primaryBackground }]}> 
+                <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.lockedInlineTitle}>เริ่มคุยผ่านแอปก่อน</Text>
+                  <Text style={styles.lockedInlineText}>เริ่มแชทหรือแสดงความสนใจก่อน เพื่อช่วยดูแลความเป็นส่วนตัวและค่อยเปิดช่องทางติดต่อที่ผู้โพสต์อนุญาต</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.contactButtons}>
+                {(resolvedContactMode === 'phone' || resolvedContactMode === 'phone_or_line') && job.contactPhone ? (
+                  <TouchableOpacity style={styles.contactButton} onPress={handleCall}>
+                    <Ionicons name="call" size={18} color={colors.primary} />
+                    <Text style={styles.contactText}>โทร {job.contactPhone}</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {(resolvedContactMode === 'line' || resolvedContactMode === 'phone_or_line') && job.contactLine ? (
+                  <TouchableOpacity style={styles.contactButton} onPress={handleLine}>
+                    <Ionicons name="chatbubble-ellipses" size={18} color={colors.success} />
+                    <Text style={styles.contactText}>LINE: {job.contactLine}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
           </Card>
         ) : (
           <Card style={styles.lockedSection}>
@@ -830,6 +1260,42 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 onPress={() => (navigation as any).navigate('Auth')}
                 style={{ marginTop: SPACING.md }}
               />
+            </View>
+          </Card>
+        )}
+
+        {!isOwner && isAuthenticated && !hasContacted && (
+          <Card style={styles.quickApplyCard}>
+            <View style={styles.quickApplyBadge}>
+              <Ionicons name="sparkles" size={14} color="#92400E" />
+              <Text style={styles.quickApplyBadgeText}>สมัครไวแบบโปรไฟล์พร้อมส่ง</Text>
+            </View>
+            <View style={styles.quickApplyRow}>
+              <View style={styles.quickApplyCopy}>
+                <Text style={styles.quickApplyTitle}>Quick Apply</Text>
+                <Text style={styles.quickApplyDescription}>
+                  ส่งความสนใจ พร้อมข้อความแนะนำตัวและเอกสารล่าสุดให้ครบในครั้งเดียว ช่วยให้เริ่มคุยงานต่อได้เร็วขึ้น
+                </Text>
+                <View style={styles.quickApplyHighlights}>
+                  <View style={styles.quickApplyHighlightPill}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={12} color="#92400E" />
+                    <Text style={styles.quickApplyHighlightText}>ข้อความแนะนำตัวอัตโนมัติ</Text>
+                  </View>
+                  <View style={styles.quickApplyHighlightPill}>
+                    <Ionicons name="document-text-outline" size={12} color="#92400E" />
+                    <Text style={styles.quickApplyHighlightText}>แนบเอกสารล่าสุดทันที</Text>
+                  </View>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.quickApplyButton, { backgroundColor: colors.accent || COLORS.accent }]}
+                onPress={handleQuickApply}
+                disabled={isQuickApplying}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="flash" size={16} color="#FFFFFF" />
+                <Text style={styles.quickApplyButtonText}>{isQuickApplying ? 'กำลังส่ง...' : 'ส่งเลย'}</Text>
+              </TouchableOpacity>
             </View>
           </Card>
         )}
@@ -873,7 +1339,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             
             {/* Contact Button */}
             <Button
-              title={hasContacted ? '✓ สนใจแล้ว' : 'สนใจงานนี้'}
+              title={hasContacted ? '✓ แสดงความสนใจแล้ว' : 'สนใจงานนี้'}
               onPress={handleContact}
               disabled={hasContacted}
               style={styles.contactMainButton}
@@ -890,7 +1356,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             >
               <Ionicons name="people-outline" size={18} color={colors.primary} />
               <Text style={[styles.applicantsButtonText, { color: colors.primary }]}>
-                ผู้สนใจ ({applicantsCount})
+                ผู้สมัคร ({applicantsCount})
               </Text>
             </TouchableOpacity>
 
@@ -948,7 +1414,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           
           <Text style={styles.modalNote}>
             กดยืนยันเพื่อบันทึกความสนใจ{'\n'}
-            จากนั้นติดต่อผู้โพสต์โดยตรง
+              {resolvedContactMode === 'in_app' ? 'จากนั้นคุยรายละเอียดงานต่อผ่านแอปได้ทันที ทั้งสะดวก เป็นส่วนตัว และตามงานต่อได้ง่าย' : 'จากนั้นดูช่องทางติดต่อที่ผู้โพสต์เปิดไว้ให้คุณ'}
           </Text>
 
           <View style={styles.modalActions}>
@@ -1027,11 +1493,11 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <Text style={styles.modalTitle}>เยี่ยมมาก!</Text>
           <Text style={styles.modalSubtitle}>
             ระบบบันทึกความสนใจของคุณแล้ว{'\n'}
-            ติดต่อผู้โพสต์ได้เลย
+              เลือกคุยต่อในแอปหรือช่องทางที่ผู้โพสต์อนุญาตได้เลย
           </Text>
           
           <View style={styles.contactOptionsContainer}>
-            {job.contactPhone && (
+              {canRevealExternalContact && (resolvedContactMode === 'phone' || resolvedContactMode === 'phone_or_line') && job.contactPhone && (
               <TouchableOpacity 
                 style={[styles.contactOptionButton, { backgroundColor: colors.success }]}
                 onPress={() => {
@@ -1045,7 +1511,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               </TouchableOpacity>
             )}
             
-            {job.contactLine && (
+            {canRevealExternalContact && (resolvedContactMode === 'line' || resolvedContactMode === 'phone_or_line') && job.contactLine && (
               <TouchableOpacity 
                 style={[styles.contactOptionButton, { backgroundColor: '#00B900' }]}
                 onPress={() => {
@@ -1102,6 +1568,56 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         <View style={{ paddingBottom: 8 }}>
           <TouchableOpacity
             style={styles.optionRow}
+            onPress={() => { setShowOptionsModal(false); handleBoostAddon(); }}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: colors.primaryBackground }]}> 
+              <Ionicons name="arrow-up-circle-outline" size={22} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>ดันโพสต์</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>ดันประกาศนี้ขึ้นบนสุดอีกครั้ง</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <View style={styles.optionDivider} />
+
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => { setShowOptionsModal(false); handleExtendAddon(); }}
+            disabled={jobStatus === 'closed'}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: '#E8F5E9' }]}> 
+              <Ionicons name="time-outline" size={22} color="#2E7D32" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>ต่ออายุประกาศ</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>เพิ่มเวลาแสดงอีก 1 วัน</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <View style={styles.optionDivider} />
+
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => { setShowOptionsModal(false); handleUrgentAddon(); }}
+            disabled={jobStatus === 'closed' || jobStatus === 'urgent'}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: colors.warningLight || '#FFF3E0' }]}> 
+              <Ionicons name="flash-outline" size={22} color={colors.warning} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>เปิดป้ายด่วน</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{jobStatus === 'urgent' ? 'ประกาศนี้เป็นด่วนอยู่แล้ว' : 'เพิ่มสถานะด่วนให้ประกาศนี้'}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <View style={styles.optionDivider} />
+
+          <TouchableOpacity
+            style={styles.optionRow}
             onPress={() => { setShowOptionsModal(false); handleEdit(); }}
           >
             <View style={[styles.optionIconWrap, { backgroundColor: '#EFF6FF' }]}>
@@ -1110,6 +1626,22 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: colors.text }]}>แก้ไขประกาศ</Text>
               <Text style={[styles.optionSub, { color: colors.textMuted }]}>เปลี่ยนรายละเอียดประกาศ</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <View style={styles.optionDivider} />
+
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => { setShowOptionsModal(false); handleDuplicatePost(); }}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: '#FFF7ED' }]}> 
+              <Ionicons name="copy-outline" size={22} color="#F59E0B" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>โพสต์คล้ายเดิม</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>เปิดเป็นร่างใหม่พร้อมคัดลอกข้อมูลสำคัญไว้ให้ แก้เฉพาะวันที่ เวลา หรือจุดที่ต่าง</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
@@ -1224,6 +1756,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.md,
   },
+  posterAvatarWrap: {
+    position: 'relative',
+  },
+  posterVerifiedBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    borderRadius: BORDER_RADIUS.full,
+  },
   posterInfo: {
     marginLeft: SPACING.md,
     flex: 1,
@@ -1334,6 +1875,12 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     lineHeight: 24,
   },
+  helperCopy: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.sm,
+    lineHeight: 20,
+  },
 
   // Shift schedule rows (multi-date)
   shiftSlotRow: {
@@ -1394,6 +1941,24 @@ const styles = StyleSheet.create({
   // Contact buttons
   contactButtons: {
     gap: SPACING.sm,
+  },
+  lockedInlineCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  lockedInlineTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  lockedInlineText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    lineHeight: 20,
   },
   contactButton: {
     flexDirection: 'row',
@@ -1580,6 +2145,88 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
     lineHeight: 20,
   },
+  quickApplyCard: {
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    backgroundColor: '#FFFBEA',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    shadowColor: '#F59E0B',
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  quickApplyBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: SPACING.sm,
+  },
+  quickApplyBadgeText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '700',
+    color: '#92400E',
+  },
+  quickApplyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.md,
+  },
+  quickApplyCopy: {
+    flex: 1,
+  },
+  quickApplyTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  quickApplyDescription: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    lineHeight: 20,
+  },
+  quickApplyHighlights: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  quickApplyHighlightPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  quickApplyHighlightText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '600',
+    color: '#92400E',
+  },
+  quickApplyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: BORDER_RADIUS.lg,
+    minWidth: 96,
+  },
+  quickApplyButtonText: {
+    color: '#FFFFFF',
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+  },
 
   // Owner Section
   ownerSection: {
@@ -1597,6 +2244,64 @@ const styles = StyleSheet.create({
   ownerActions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
+  },
+  ownerAddonHeader: {
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  ownerAddonTitle: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  ownerAddonHint: {
+    marginTop: 4,
+    fontSize: FONT_SIZES.xs + 1,
+    color: COLORS.textSecondary,
+    lineHeight: 18,
+  },
+  ownerAddonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  ownerAddonCard: {
+    flex: 1,
+    minWidth: 96,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SPACING.sm,
+  },
+  ownerAddonIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.xs,
+  },
+  ownerAddonCardTitle: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  ownerAddonCardSub: {
+    marginTop: 4,
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textSecondary,
+    lineHeight: 16,
+  },
+  ownerAddonNoteBox: {
+    marginTop: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.sm,
+  },
+  ownerAddonNoteText: {
+    fontSize: FONT_SIZES.xs + 1,
+    color: COLORS.textSecondary,
+    lineHeight: 18,
   },
   ownerButton: {
     flex: 1,
