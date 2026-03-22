@@ -2,7 +2,7 @@
 // LOADING OVERLAY - Fullscreen Loading State
 // ============================================
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Animated,
 } from 'react-native';
 import { COLORS, SPACING, FONT_SIZES } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import BrandSpinner from './BrandSpinner';
 
 // ============================================
@@ -30,7 +31,8 @@ export function LoadingOverlay({
   message = 'กำลังโหลด...', 
   transparent = true 
 }: LoadingOverlayProps) {
-  if (!visible) return null;
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
     if (visible && typeof document !== 'undefined') {
@@ -41,6 +43,8 @@ export function LoadingOverlay({
     }
   }, [visible]);
 
+  if (!visible) return null;
+
   return (
     <Modal
       visible={visible}
@@ -50,7 +54,7 @@ export function LoadingOverlay({
     >
       <View style={styles.overlay} accessibilityViewIsModal={true}>
         <View style={styles.container}>
-          <BrandSpinner size={56} color={COLORS.accentLight} />
+          <BrandSpinner size={56} color={colors.accentLight} />
           {message && <Text style={styles.message}>{message}</Text>}
         </View>
       </View>
@@ -67,10 +71,12 @@ interface InlineLoadingProps {
 }
 
 export function InlineLoading({ message, size = 'small' }: InlineLoadingProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const spinnerSize = size === 'large' ? 46 : 26;
   return (
     <View style={styles.inlineContainer}>
-      <BrandSpinner size={spinnerSize} color={COLORS.accent} />
+      <BrandSpinner size={spinnerSize} color={colors.accent} />
       {message && <Text style={styles.inlineMessage}>{message}</Text>}
     </View>
   );
@@ -86,10 +92,12 @@ interface ButtonLoadingProps {
 }
 
 export function ButtonLoading({ loading, children, loadingText }: ButtonLoadingProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   if (loading) {
     return (
       <View style={styles.buttonLoading}>
-        <BrandSpinner size={20} color={COLORS.white} />
+        <BrandSpinner size={20} color={colors.white} />
         {loadingText && <Text style={styles.buttonLoadingText}>{loadingText}</Text>}
       </View>
     );
@@ -113,6 +121,8 @@ export function Skeleton({
   borderRadius = 4,
   style 
 }: SkeletonProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const animatedValue = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -154,6 +164,8 @@ export function Skeleton({
 // Job Card Skeleton
 // ============================================
 export function JobCardSkeleton() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.cardSkeleton}>
       <View style={styles.cardHeader}>
@@ -177,10 +189,10 @@ export function JobCardSkeleton() {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: COLORS.overlay,
     justifyContent: 'center',
     alignItems: 'center',
   },

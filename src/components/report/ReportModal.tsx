@@ -133,7 +133,7 @@ export default function ReportModal({
           <Ionicons 
             name={targetType === 'job' ? 'briefcase' : targetType === 'user' ? 'person' : targetType === 'review' ? 'flag' : 'chatbubble'} 
             size={20} 
-            color={COLORS.primary} 
+            color={colors.primary} 
           />
           <Text style={styles.targetName} numberOfLines={2}>
             {targetName || targetId}
@@ -178,6 +178,7 @@ export default function ReportModal({
         <TextInput
           style={styles.textInput}
           placeholder="อธิบายเพิ่มเติมเกี่ยวกับปัญหาที่พบ..."
+          placeholderTextColor={colors.textMuted}
           value={additionalInfo}
           onChangeText={setAdditionalInfo}
           multiline

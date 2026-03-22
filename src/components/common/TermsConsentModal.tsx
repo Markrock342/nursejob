@@ -2,7 +2,7 @@
 // TERMS CONSENT MODAL - Must scroll to accept
 // ============================================
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   NativeScrollEvent,
 } from 'react-native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import {
   LEGAL_EFFECTIVE_DATE,
   LEGAL_LAST_UPDATED,
@@ -32,6 +33,8 @@ export default function TermsConsentModal({
   onAccept,
   onDecline,
 }: TermsConsentModalProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [hasScrolledToEnd, setHasScrolledToEnd] = useState(false);
   const [currentTab, setCurrentTab] = useState<'terms' | 'privacy'>('terms');
 
@@ -41,6 +44,13 @@ export default function TermsConsentModal({
         const active = document.activeElement as HTMLElement | null;
         if (active && active !== document.body) active.blur();
       } catch (e) {}
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (visible) {
+      setCurrentTab('terms');
+      setHasScrolledToEnd(false);
     }
   }, [visible]);
 
@@ -151,10 +161,10 @@ export default function TermsConsentModal({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: COLORS.overlay,
     justifyContent: 'center',
     alignItems: 'center',
     padding: SPACING.md,

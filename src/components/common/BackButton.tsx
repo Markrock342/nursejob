@@ -6,6 +6,7 @@ import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 
 interface BackButtonProps {
   onPress?: () => void;
@@ -17,10 +18,12 @@ interface BackButtonProps {
 export default function BackButton({ 
   onPress, 
   label = 'ย้อนกลับ',
-  color = COLORS.primary,
+  color,
   style,
 }: BackButtonProps) {
   const navigation = useNavigation();
+  const { colors } = useTheme();
+  const resolvedColor = color || colors.primary;
 
   const handlePress = () => {
     if (onPress) {
@@ -36,8 +39,8 @@ export default function BackButton({
       onPress={handlePress}
       activeOpacity={0.7}
     >
-      <Text style={[styles.arrow, { color }]}>←</Text>
-      <Text style={[styles.label, { color }]}>{label}</Text>
+      <Text style={[styles.arrow, { color: resolvedColor }]}>←</Text>
+      <Text style={[styles.label, { color: resolvedColor }]}>{label}</Text>
     </TouchableOpacity>
   );
 }

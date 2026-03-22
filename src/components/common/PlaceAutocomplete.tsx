@@ -2,7 +2,7 @@
 // PLACE AUTOCOMPLETE COMPONENT - Google Places API only
 // ============================================
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
+import { useTheme } from '../../context/ThemeContext';
 import { searchPlacesGoogle, getPlaceDetailsGoogle, PlaceResult } from '../../services/placesService';
 
 // Re-export PlaceResult type for compatibility
@@ -52,6 +53,8 @@ export function PlaceAutocomplete({
   label,
   error,
 }: PlaceAutocompleteProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [query, setQuery] = useState(value);
   const [results, setResults] = useState<LocalPlaceResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -147,7 +150,7 @@ export function PlaceAutocomplete({
       activeOpacity={0.7}
     >
       <View style={styles.resultIcon}>
-        <Ionicons name="location" size={20} color={COLORS.primary} />
+        <Ionicons name="location" size={20} color={colors.primary} />
       </View>
       <View style={styles.resultInfo}>
         <Text style={styles.resultName} numberOfLines={1}>
@@ -170,7 +173,7 @@ export function PlaceAutocomplete({
         <Ionicons
           name="search-outline"
           size={20}
-          color={COLORS.textMuted}
+          color={colors.textMuted}
           style={styles.searchIcon}
         />
         <TextInput
@@ -179,14 +182,14 @@ export function PlaceAutocomplete({
           value={query}
           onChangeText={handleTextChange}
           placeholder={placeholder}
-          placeholderTextColor={COLORS.textMuted}
+          placeholderTextColor={colors.textMuted}
           onFocus={() => query.length >= 2 && setShowResults(true)}
         />
         {isLoading ? (
-          <ActivityIndicator size="small" color={COLORS.primary} />
+          <ActivityIndicator size="small" color={colors.primary} />
         ) : query.length > 0 ? (
           <TouchableOpacity onPress={handleClear}>
-            <Ionicons name="close-circle" size={20} color={COLORS.textMuted} />
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         ) : null}
       </View>
@@ -216,13 +219,13 @@ export function PlaceAutocomplete({
         <View style={styles.noResultsContainer}>
           {apiError ? (
             <>
-              <Ionicons name="wifi-outline" size={28} color={COLORS.textMuted} />
+              <Ionicons name="wifi-outline" size={28} color={colors.textMuted} />
               <Text style={styles.noResultsText}>เชื่อมต่อ Google Maps ไม่ได้</Text>
               <Text style={styles.noResultsHint}>ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต</Text>
             </>
           ) : (
             <>
-              <Ionicons name="search-outline" size={28} color={COLORS.textMuted} />
+              <Ionicons name="search-outline" size={28} color={colors.textMuted} />
               <Text style={styles.noResultsText}>ไม่พบสถานที่</Text>
               <Text style={styles.noResultsHint}>ลองพิมพ์ชื่อเต็มหรือพิมพ์เป็นภาษาอังกฤษ</Text>
             </>
@@ -256,7 +259,7 @@ export function QuickPlacePicker(_props: QuickPlacePickerProps) {
 // ============================================
 // Styles
 // ============================================
-const styles = StyleSheet.create({
+const createStyles = (COLORS: any) => StyleSheet.create({
   container: {
     position: 'relative',
     zIndex: 100,
@@ -374,8 +377,6 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '700',
   },
-
-
 });
 
 export default PlaceAutocomplete;
