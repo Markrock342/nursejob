@@ -116,29 +116,12 @@ export async function createNotification(
   body: string,
   data?: Notification['data']
 ): Promise<string> {
-  try {
-    const currentUser = assertAuthUser();
-    // Client app should only create notifications for itself.
-    // Cross-user notifications must be sent by Cloud Functions/Admin SDK.
-    if (userId !== currentUser.uid) {
-      console.warn('[createNotification] blocked cross-user notification on client');
-      return '';
-    }
-
-    const docRef = await addDoc(collection(db, NOTIFICATIONS_COLLECTION), {
-      userId,
-      type,
-      title,
-      body,
-      data: data || {},
-      isRead: false,
-      createdAt: serverTimestamp(),
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating notification:', error);
-    throw error;
-  }
+  console.warn('[createNotification] client-side notification creation is disabled; use Cloud Functions/Admin SDK instead', {
+    userId,
+    type,
+    title,
+  });
+  return '';
 }
 
 // Get user notifications
@@ -462,19 +445,9 @@ export async function notifyLicenseVerification(
   status: 'approved' | 'rejected',
   reason?: string
 ): Promise<void> {
-  if (status === 'approved') {
-    await createNotification(
-      userId,
-      'license_approved',
-      'ใบประกอบวิชาชีพผ่านการตรวจสอบ',
-      'ใบประกอบวิชาชีพของคุณได้รับการอนุมัติแล้ว สามารถใช้งานระบบได้เต็มรูปแบบ',
-    );
-  } else {
-    await createNotification(
-      userId,
-      'license_rejected',
-      'ใบประกอบวิชาชีพไม่ผ่านการตรวจสอบ',
-      `ใบประกอบวิชาชีพของคุณไม่ผ่านการตรวจสอบ${reason ? ': ' + reason : ''} กรุณาตรวจสอบและส่งใหม่อีกครั้ง`,
-    );
-  }
+  console.warn('[notifyLicenseVerification] client-side verification notifications are disabled; rely on Firestore triggers in Cloud Functions', {
+    userId,
+    status,
+    reason,
+  });
 }
