@@ -29,7 +29,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Context Providers
-import { AuthProvider } from './src/context/AuthContext';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ToastProvider } from './src/context/ToastContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 
@@ -48,13 +48,15 @@ import { trackAppOpened } from './src/services/analyticsService';
 // APP CONTENT WITH THEME
 // ============================================
 function AppContent() {
+  const { isInitialized } = useAuth();
   const { colors, isDark } = useTheme();
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
-    const t = setTimeout(() => setShowSplash(false), 3000);
-    return () => clearTimeout(t);
-  }, []);
+    if (isInitialized) {
+      setShowSplash(false);
+    }
+  }, [isInitialized]);
 
   useEffect(() => {
     trackAppOpened();
@@ -64,15 +66,13 @@ function AppContent() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AuthProvider>
-        <ToastProvider>
-          <StatusBar
-            style={isDark ? 'light' : 'dark'}
-            backgroundColor={colors.background}
-          />
-          <AppNavigator />
-        </ToastProvider>
-      </AuthProvider>
+      <ToastProvider>
+        <StatusBar
+          style={isDark ? 'light' : 'dark'}
+          backgroundColor={colors.background}
+        />
+        <AppNavigator />
+      </ToastProvider>
     </View>
   );
 }
@@ -103,10 +103,12 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <IconRegistry icons={EvaIconsPack} />
-          <ThemedApplication>
-            <AppContent />
-          </ThemedApplication>
+          <AuthProvider>
+            <IconRegistry icons={EvaIconsPack} />
+            <ThemedApplication>
+              <AppContent />
+            </ThemedApplication>
+          </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

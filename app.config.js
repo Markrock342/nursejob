@@ -22,9 +22,20 @@ const FIREBASE = {
 
 const IOS_GOOGLE_SERVICES_FILE = './GoogleService-Info.plist';
 const IOS_GOOGLE_SERVICES_FALLBACK_FILE = './ios/NurseGo/GoogleService-Info.plist';
-const RESOLVED_IOS_GOOGLE_SERVICES_FILE = fs.existsSync(IOS_GOOGLE_SERVICES_FILE)
-  ? IOS_GOOGLE_SERVICES_FILE
-  : (fs.existsSync(IOS_GOOGLE_SERVICES_FALLBACK_FILE) ? IOS_GOOGLE_SERVICES_FALLBACK_FILE : null);
+const IOS_GOOGLE_SERVICES_ENV_FILE = process.env.EXPO_PUBLIC_IOS_GOOGLE_SERVICES_FILE;
+const IOS_GOOGLE_SERVICES_FILE_CANDIDATES = [
+  IOS_GOOGLE_SERVICES_ENV_FILE,
+  IOS_GOOGLE_SERVICES_FILE,
+  IOS_GOOGLE_SERVICES_FALLBACK_FILE,
+].filter(Boolean);
+const RESOLVED_IOS_GOOGLE_SERVICES_FILE = IOS_GOOGLE_SERVICES_FILE_CANDIDATES.find((filePath) => fs.existsSync(filePath)) || null;
+const ANDROID_GOOGLE_SERVICES_ENV_FILE = process.env.EXPO_PUBLIC_ANDROID_GOOGLE_SERVICES_FILE;
+const ANDROID_GOOGLE_SERVICES_FILE_CANDIDATES = [
+  ANDROID_GOOGLE_SERVICES_ENV_FILE,
+  './google-services.json',
+  './android/app/google-services.json',
+].filter(Boolean);
+const RESOLVED_ANDROID_GOOGLE_SERVICES_FILE = ANDROID_GOOGLE_SERVICES_FILE_CANDIDATES.find((filePath) => fs.existsSync(filePath)) || null;
 const PUBLIC_DOMAIN = 'nursego.co';
 const PUBLIC_WWW_DOMAIN = `www.${PUBLIC_DOMAIN}`;
 
@@ -111,7 +122,9 @@ module.exports = {
       },
       package: 'com.nursego.app',
       versionCode: ANDROID_VERSION_CODE,
-      googleServicesFile: './google-services.json',
+      ...(RESOLVED_ANDROID_GOOGLE_SERVICES_FILE
+        ? { googleServicesFile: RESOLVED_ANDROID_GOOGLE_SERVICES_FILE }
+        : {}),
       intentFilters: [
         {
           action: 'VIEW',
