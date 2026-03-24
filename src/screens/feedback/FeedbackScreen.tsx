@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   TextInput,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,8 +32,10 @@ import {
   FEEDBACK_STATUS_LABELS,
 } from '../../services/feedbackService';
 import { formatRelativeTime } from '../../utils/helpers';
+import { useI18n } from '../../i18n';
 
 export default function FeedbackScreen() {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { user } = useAuth();
   const { colors } = useTheme();
@@ -70,17 +73,17 @@ export default function FeedbackScreen() {
 
   const handleSubmit = async () => {
     if (!user) {
-      setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', 'คุณต้องเข้าสู่ระบบก่อนส่ง feedback') } as AlertState);
+      setAlert({ ...createAlert.warning(t('feedback.loginTitle'), t('feedback.loginMessage')) } as AlertState);
       return;
     }
 
     if (!title.trim()) {
-      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณากรอกหัวข้อ') } as AlertState);
+      setAlert({ ...createAlert.warning(t('feedback.validationTitle'), t('feedback.titleRequired')) } as AlertState);
       return;
     }
 
     if (!message.trim()) {
-      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณากรอกข้อความ') } as AlertState);
+      setAlert({ ...createAlert.warning(t('feedback.validationTitle'), t('feedback.messageRequired')) } as AlertState);
       return;
     }
 
@@ -88,7 +91,7 @@ export default function FeedbackScreen() {
     try {
       await createFeedback({
         userId: user.uid,
-        userName: user.displayName || 'ผู้ใช้',
+        userName: user.displayName || t('feedback.userFallback'),
         userEmail: user.email || '',
         rating,
         type: feedbackType,
@@ -99,11 +102,11 @@ export default function FeedbackScreen() {
       });
 
       setAlert({
-        ...createAlert.success('ส่ง Feedback สำเร็จ', 'ขอบคุณสำหรับความคิดเห็นของคุณ เราจะนำไปปรับปรุงแอพให้ดียิ่งขึ้น'),
+        ...createAlert.success(t('feedback.successTitle'), t('feedback.successMessage')),
         onConfirm: () => { closeAlert(); navigation.goBack(); },
       } as AlertState);
     } catch (error: any) {
-      setAlert({ ...createAlert.error('ข้อผิดพลาด', error.message) } as AlertState);
+      setAlert({ ...createAlert.error(t('feedback.errorTitle'), error.message) } as AlertState);
     } finally {
       setIsSubmitting(false);
     }
@@ -131,11 +134,11 @@ export default function FeedbackScreen() {
 
   const getRatingText = () => {
     switch (rating) {
-      case 1: return 'แย่มาก 😢';
-      case 2: return 'ไม่ดี 😕';
-      case 3: return 'ปานกลาง 😐';
-      case 4: return 'ดี 😊';
-      case 5: return 'ยอดเยี่ยม 🤩';
+      case 1: return t('feedback.rating1');
+      case 2: return t('feedback.rating2');
+      case 3: return t('feedback.rating3');
+      case 4: return t('feedback.rating4');
+      case 5: return t('feedback.rating5');
       default: return '';
     }
   };
@@ -158,7 +161,7 @@ export default function FeedbackScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Feedback & รีวิว</Text>
+        <Text style={styles.headerTitle}>{t('feedback.headerTitle')}</Text>
         <TouchableOpacity onPress={() => setShowHistory(!showHistory)}>
           <Ionicons 
             name={showHistory ? 'create-outline' : 'time-outline'} 
@@ -168,16 +171,17 @@ export default function FeedbackScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {showHistory ? (
           // History View
           <View>
-            <Text style={styles.sectionTitle}>ประวัติ Feedback ของคุณ</Text>
+            <Text style={styles.sectionTitle}>{t('feedback.historyTitle')}</Text>
             
             {myFeedback.length === 0 ? (
               <Card style={styles.emptyCard}>
                 <Ionicons name="chatbox-outline" size={48} color={colors.textMuted} />
-                <Text style={styles.emptyText}>ยังไม่มี feedback</Text>
+                <Text style={styles.emptyText}>{t('feedback.emptyHistory')}</Text>
               </Card>
             ) : (
               myFeedback.map((item) => (
@@ -206,7 +210,7 @@ export default function FeedbackScreen() {
                   
                   {item.adminResponse && (
                     <View style={styles.adminResponse}>
-                      <Text style={styles.adminResponseLabel}>📢 ตอบกลับจากทีมงาน:</Text>
+                      <Text style={styles.adminResponseLabel}>{t('feedback.adminResponseLabel')}</Text>
                       <Text style={styles.adminResponseText}>{item.adminResponse}</Text>
                     </View>
                   )}
@@ -221,21 +225,21 @@ export default function FeedbackScreen() {
               <Card style={styles.limitCard}>
                 <Ionicons name="time" size={32} color={colors.warning} />
                 <Text style={styles.limitText}>
-                  คุณส่ง feedback ไปแล้ววันนี้{'\n'}กรุณารอพรุ่งนี้
+                  {t('feedback.alreadySentToday')}
                 </Text>
               </Card>
             ) : (
               <>
                 {/* Rating */}
                 <Card style={styles.card}>
-                  <Text style={styles.cardTitle}>ให้คะแนนแอพของเรา</Text>
+                  <Text style={styles.cardTitle}>{t('feedback.rateTitle')}</Text>
                   {renderStars()}
                   <Text style={styles.ratingText}>{getRatingText()}</Text>
                 </Card>
 
                 {/* Feedback Type */}
                 <Card style={styles.card}>
-                  <Text style={styles.cardTitle}>ประเภท Feedback</Text>
+                  <Text style={styles.cardTitle}>{t('feedback.typeTitle')}</Text>
                   <View style={styles.typeContainer}>
                     {FEEDBACK_TYPES.map((type) => (
                       <TouchableOpacity
@@ -266,11 +270,11 @@ export default function FeedbackScreen() {
 
                 {/* Title & Message */}
                 <Card style={styles.card}>
-                  <Text style={styles.cardTitle}>ข้อความของคุณ</Text>
+                  <Text style={styles.cardTitle}>{t('feedback.messageTitle')}</Text>
                   
                   <TextInput
                     style={[styles.input, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
-                    placeholder="หัวข้อ"
+                    placeholder={t('feedback.titlePlaceholder')}
                     placeholderTextColor={colors.textMuted}
                     value={title}
                     onChangeText={setTitle}
@@ -279,7 +283,7 @@ export default function FeedbackScreen() {
                   
                   <TextInput
                     style={[styles.input, styles.messageInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
-                    placeholder="รายละเอียด... (บอกเราว่าคุณชอบอะไร หรืออยากให้ปรับปรุงอะไร)"
+                    placeholder={t('feedback.messagePlaceholder')}
                     placeholderTextColor={colors.textMuted}
                     value={message}
                     onChangeText={setMessage}
@@ -293,7 +297,7 @@ export default function FeedbackScreen() {
 
                 {/* Submit Button */}
                 <Button
-                  title="📤 ส่ง Feedback"
+                  title={t('feedback.submitButton')}
                   onPress={handleSubmit}
                   loading={isSubmitting}
                   disabled={!title.trim() || !message.trim()}
@@ -301,14 +305,15 @@ export default function FeedbackScreen() {
                 />
 
                 <Text style={styles.disclaimer}>
-                  Feedback ของคุณจะช่วยให้เราพัฒนาแอพให้ดียิ่งขึ้น
-                  ทีมงานจะอ่านทุกข้อความ 💙
+                  {t('feedback.thankYouLine1')}
+                  {t('feedback.thankYouLine2')}
                 </Text>
               </>
             )}
           </View>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

@@ -110,6 +110,17 @@ export const REPORT_STATUS_LABELS: Record<ReportStatus, string> = {
 // ============================================
 export async function createReport(report: Omit<Report, 'id' | 'createdAt' | 'status'>): Promise<string> {
   try {
+    // Prevent duplicate reports from same user on same target
+    const alreadyReported = await hasUserReported(report.reporterId, report.targetId);
+    if (alreadyReported) {
+      throw new Error('คุณเคยรายงานเป้าหมายนี้แล้ว');
+    }
+
+    // Prevent self-reporting
+    if (report.reporterId === report.targetId) {
+      throw new Error('ไม่สามารถรายงานตัวเองได้');
+    }
+
     const docRef = await addDoc(collection(db, REPORTS_COLLECTION), sanitizeReportPayload({
       ...report,
       status: 'pending',
@@ -117,8 +128,10 @@ export async function createReport(report: Omit<Report, 'id' | 'createdAt' | 'st
     }));
     
     return docRef.id;
-  } catch (error) {
-    console.error('Error creating report:', error);
+  } catch (error: any) {
+    if (error?.message?.includes('เคยรายงาน') || error?.message?.includes('ตัวเอง')) {
+      throw error; // Re-throw validation errors as-is
+    }
     throw new Error('ไม่สามารถส่งรายงานได้');
   }
 }

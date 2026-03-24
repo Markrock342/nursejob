@@ -19,6 +19,7 @@ import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
 import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
+import { useI18n } from '../../i18n';
 
 interface FAQItem {
   id: string;
@@ -33,146 +34,146 @@ interface FAQCategory {
   icon: keyof typeof Ionicons.glyphMap;
 }
 
-const FAQ_CATEGORIES: FAQCategory[] = [
-  { id: 'general', title: 'ทั่วไป', icon: 'information-circle-outline' },
-  { id: 'account', title: 'บัญชี', icon: 'person-outline' },
-  { id: 'jobs', title: 'งาน', icon: 'briefcase-outline' },
-  { id: 'applications', title: 'การสมัคร', icon: 'document-text-outline' },
-  { id: 'hospital', title: 'โรงพยาบาล', icon: 'business-outline' },
-  { id: 'payment', title: 'การชำระเงิน', icon: 'card-outline' },
+const getFaqCategories = (t: any): FAQCategory[] => [
+  { id: 'general', title: t('help.catGeneral'), icon: 'information-circle-outline' },
+  { id: 'account', title: t('help.catAccount'), icon: 'person-outline' },
+  { id: 'jobs', title: t('help.catJobs'), icon: 'briefcase-outline' },
+  { id: 'applications', title: t('help.catApplications'), icon: 'document-text-outline' },
+  { id: 'hospital', title: t('help.catHospital'), icon: 'business-outline' },
+  { id: 'payment', title: t('help.catPayment'), icon: 'card-outline' },
 ];
 
-const FAQ_DATA: FAQItem[] = [
+const getFaqData = (t: any): FAQItem[] => [
   // General
   {
     id: '1',
     category: 'general',
-    question: 'NurseGo คืออะไร?',
-    answer: 'NurseGo เป็นแพลตฟอร์มหางานสำหรับพยาบาลและบุคลากรทางการแพทย์ ที่ช่วยเชื่อมต่อระหว่างพยาบาลที่กำลังหางานกับโรงพยาบาลและสถานพยาบาลที่ต้องการบุคลากร',
+    question: t('help.faq1Q'),
+    answer: t('help.faqAnswer1'),
   },
   {
     id: '2',
     category: 'general',
-    question: 'แอปนี้ใช้งานฟรีหรือไม่?',
-    answer: 'ตอนนี้ NurseGo เปิดให้ใช้งานฟรีในช่วงทดลองใช้ฟรี โดยระบบจะดูแลสิทธิ์ของแต่ละบัญชีให้อัตโนมัติ และจะประกาศให้ทราบอีกครั้งเมื่อเปิดระบบชำระเงินอย่างเป็นทางการ',
+    question: t('help.faq2Q'),
+    answer: t('help.faqAnswer2'),
   },
   {
     id: '3',
     category: 'general',
-    question: 'รองรับการใช้งานบนอุปกรณ์อะไรบ้าง?',
-    answer: 'แอป NurseGo รองรับทั้ง iOS และ Android รวมถึงสามารถใช้งานผ่านเว็บบราวเซอร์ได้ด้วย',
+    question: t('help.faq3Q'),
+    answer: t('help.faqAnswer3'),
   },
 
   // Account
   {
     id: '4',
     category: 'account',
-    question: 'จะสมัครสมาชิกได้อย่างไร?',
-    answer: 'คุณสามารถสมัครสมาชิกได้โดยใช้อีเมล หรือเข้าสู่ระบบด้วย Google / Apple ID เพียงกดปุ่ม "สมัครสมาชิก" และทำตามขั้นตอน',
+    question: t('help.faq4Q'),
+    answer: t('help.faqAnswer4'),
   },
   {
     id: '5',
     category: 'account',
-    question: 'ลืมรหัสผ่านทำอย่างไร?',
-    answer: 'กดปุ่ม "ลืมรหัสผ่าน" ที่หน้าเข้าสู่ระบบ แล้วกรอกอีเมลที่ใช้สมัคร ระบบจะส่งลิงก์สำหรับตั้งรหัสผ่านใหม่ไปยังอีเมลของคุณ',
+    question: t('help.faq5Q'),
+    answer: t('help.faqAnswer5'),
   },
   {
     id: '6',
     category: 'account',
-    question: 'จะแก้ไขข้อมูลโปรไฟล์ได้อย่างไร?',
-    answer: 'ไปที่หน้า "โปรไฟล์" แล้วกด "แก้ไขโปรไฟล์" คุณสามารถแก้ไขชื่อ, รูปภาพ, ประวัติการศึกษา, ประสบการณ์ทำงาน และข้อมูลอื่นๆ ได้',
+    question: t('help.faq6Q'),
+    answer: t('help.faqAnswer6'),
   },
   {
     id: '7',
     category: 'account',
-    question: 'จะลบบัญชีได้อย่างไร?',
-    answer: 'ไปที่ ตั้งค่า > บัญชี > ลบบัญชี การลบบัญชีจะเป็นการลบข้อมูลทั้งหมดของคุณอย่างถาวร รวมถึงประวัติการสมัครงานและการแชท',
+    question: t('help.faq7Q'),
+    answer: t('help.faqAnswer7'),
   },
 
   // Jobs
   {
     id: '8',
     category: 'jobs',
-    question: 'จะค้นหางานที่ตรงใจได้อย่างไร?',
-    answer: 'ใช้ฟังก์ชันค้นหาและตัวกรองที่หน้าค้นหางาน คุณสามารถกรองตามประเภทงาน, เงินเดือน, ตำแหน่งที่ตั้ง, และอื่นๆ เพื่อหางานที่ตรงใจ',
+    question: t('help.faq8Q'),
+    answer: t('help.faqAnswer8'),
   },
   {
     id: '9',
     category: 'jobs',
-    question: 'บันทึกงานที่สนใจได้อย่างไร?',
-    answer: 'กดไอคอนหัวใจ (❤️) ที่การ์ดงานหรือหน้ารายละเอียดงาน งานที่บันทึกจะแสดงในหน้า "รายการโปรด" ของคุณ',
+    question: t('help.faq9Q'),
+    answer: t('help.faqAnswer9'),
   },
   {
     id: '10',
     category: 'jobs',
-    question: 'งานที่แสดงมาจากไหน?',
-    answer: 'งานทั้งหมดลงประกาศโดยโรงพยาบาลและสถานพยาบาลที่ผ่านการยืนยันตัวตนกับ NurseGo เรามีทีมงานตรวจสอบความถูกต้องของข้อมูลอยู่เสมอ',
+    question: t('help.faq10Q'),
+    answer: t('help.faqAnswer10'),
   },
 
   // Applications
   {
     id: '11',
     category: 'applications',
-    question: 'จะสมัครงานได้อย่างไร?',
-    answer: 'เข้าดูรายละเอียดงานที่สนใจ แล้วกดปุ่ม "สมัครงาน" คุณสามารถใส่ข้อความแนะนำตัวเพิ่มเติมได้ โรงพยาบาลจะได้รับการแจ้งเตือนและสามารถดูโปรไฟล์ของคุณได้',
+    question: t('help.faq11Q'),
+    answer: t('help.faqAnswer11'),
   },
   {
     id: '12',
     category: 'applications',
-    question: 'จะดูสถานะการสมัครได้ที่ไหน?',
-    answer: 'ไปที่หน้า "ใบสมัคร" คุณจะเห็นรายการงานที่สมัครทั้งหมด พร้อมสถานะการสมัคร เช่น รอดำเนินการ, กำลังพิจารณา, ผ่านการคัดเลือก เป็นต้น',
+    question: t('help.faq12Q'),
+    answer: t('help.faqAnswer12'),
   },
   {
     id: '13',
     category: 'applications',
-    question: 'สามารถยกเลิกการสมัครได้ไหม?',
-    answer: 'ได้ คุณสามารถยกเลิกการสมัครได้ที่หน้ารายละเอียดใบสมัคร กดปุ่ม "ยกเลิกการสมัคร" การยกเลิกจะไม่สามารถกู้คืนได้',
+    question: t('help.faq13Q'),
+    answer: t('help.faqAnswer13'),
   },
   {
     id: '14',
     category: 'applications',
-    question: 'ต้องอัปโหลดเอกสารอะไรบ้าง?',
-    answer: 'เอกสารที่แนะนำให้อัปโหลด ได้แก่ Resume, ใบอนุญาตประกอบวิชาชีพ, ประกาศนียบัตร, หลักฐานการศึกษา และบัตรประจำตัวประชาชน เอกสารเหล่านี้จะช่วยเพิ่มโอกาสในการได้รับการพิจารณา',
+    question: t('help.faq14Q'),
+    answer: t('help.faqAnswer14'),
   },
 
   // Hospital
   {
     id: '15',
     category: 'hospital',
-    question: 'โรงพยาบาลจะลงประกาศงานได้อย่างไร?',
-    answer: 'สมัครสมาชิกในฐานะโรงพยาบาล ยืนยันตัวตนกับเอกสารที่จำเป็น จากนั้นไปที่ "ลงประกาศงาน" กรอกรายละเอียดงานและกด "เผยแพร่"',
+    question: t('help.faq15Q'),
+    answer: t('help.faqAnswer15'),
   },
   {
     id: '16',
     category: 'hospital',
-    question: 'จะดูผู้สมัครได้ที่ไหน?',
-    answer: 'ไปที่ "จัดการผู้สมัคร" คุณจะเห็นรายการผู้สมัครทั้งหมดของงานที่ลงประกาศ สามารถดูโปรไฟล์, อัปเดตสถานะ, และแชทกับผู้สมัครได้',
+    question: t('help.faq16Q'),
+    answer: t('help.faqAnswer16'),
   },
   {
     id: '17',
     category: 'hospital',
-    question: 'รีวิวของโรงพยาบาลมีผลอย่างไร?',
-    answer: 'รีวิวช่วยให้ผู้หางานเข้าใจวัฒนธรรมและสภาพแวดล้อมการทำงานของโรงพยาบาล รีวิวดีจะช่วยดึงดูดผู้สมัครคุณภาพ โรงพยาบาลสามารถตอบกลับรีวิวได้',
+    question: t('help.faq17Q'),
+    answer: t('help.faqAnswer17'),
   },
 
   // Payment
   {
     id: '18',
     category: 'payment',
-    question: 'โรงพยาบาลต้องจ่ายค่าธรรมเนียมอะไรบ้าง?',
-    answer: 'ในช่วงทดลองใช้ฟรี ระบบยังไม่เรียกเก็บเงินจริง โรงพยาบาลและผู้ใช้งานจะได้รับสิทธิ์ตามสถานะบัญชีและการใช้งานที่ระบบเปิดให้ก่อน เมื่อเปิดระบบชำระเงินอย่างเป็นทางการ เราจะแจ้งแพ็กเกจและเงื่อนไขอีกครั้ง',
+    question: t('help.faq18Q'),
+    answer: t('help.faqAnswer18'),
   },
   {
     id: '19',
     category: 'payment',
-    question: 'ชำระเงินได้ทางช่องทางไหนบ้าง?',
-    answer: 'ขณะนี้ยังไม่มีการเปิดรับชำระเงินจริงในแอป เมื่อเปิดระบบชำระเงินแล้ว เราจะแจ้งช่องทางที่รองรับให้ทราบอีกครั้ง',
+    question: t('help.faq19Q'),
+    answer: t('help.faqAnswer19'),
   },
   {
     id: '20',
     category: 'payment',
-    question: 'ขอใบเสร็จได้อย่างไร?',
-    answer: 'ในช่วงที่ยังไม่เปิดเก็บเงินจริง ระบบจะยังไม่มีใบเสร็จหรือประวัติการชำระเงิน เมื่อเปิดใช้งานจริงแล้ว เราจะแจ้งขั้นตอนการรับเอกสารให้ทราบอีกครั้ง',
+    question: t('help.faq20Q'),
+    answer: t('help.faqAnswer20'),
   },
 ];
 
@@ -203,6 +204,9 @@ const FAQItemComponent = ({ item, isExpanded, onToggle }: {
 };
 
 export default function HelpScreen() {
+  const { t } = useI18n();
+  const FAQ_CATEGORIES = useMemo(() => getFaqCategories(t), [t]);
+  const FAQ_DATA = useMemo(() => getFaqData(t), [t]);
   const navigation = useNavigation();
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -224,7 +228,7 @@ export default function HelpScreen() {
   });
 
   const handleContactSupport = () => {
-    Linking.openURL('mailto:support@nursego.co?subject=ขอความช่วยเหลือ');
+    Linking.openURL(`mailto:support@nursego.co?subject=${t('help.emailSubject')}`);
   };
 
   const handleCall = () => {
@@ -243,7 +247,7 @@ export default function HelpScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ช่วยเหลือ</Text>
+        <Text style={styles.headerTitle}>{t('help.headerTitle')}</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -253,7 +257,7 @@ export default function HelpScreen() {
           <Ionicons name="search" size={20} color={colors.textMuted} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
-            placeholder="ค้นหาคำถาม..."
+            placeholder={t('help.searchPlaceholder')}
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor={colors.textMuted}
@@ -276,9 +280,7 @@ export default function HelpScreen() {
             style={[styles.categoryPill, !selectedCategory && styles.categoryPillActive]}
             onPress={() => setSelectedCategory(null)}
           >
-            <Text style={[styles.categoryText, !selectedCategory && styles.categoryTextActive]}>
-              ทั้งหมด
-            </Text>
+            <Text style={[styles.categoryText, !selectedCategory && styles.categoryTextActive]}>{t('help.allTab')}</Text>
           </TouchableOpacity>
           {FAQ_CATEGORIES.map((cat) => (
             <TouchableOpacity
@@ -300,12 +302,12 @@ export default function HelpScreen() {
 
         {/* FAQ List */}
         <View style={styles.faqSection}>
-          <Text style={styles.sectionTitle}>คำถามที่พบบ่อย</Text>
+          <Text style={styles.sectionTitle}>{t('help.faqSectionTitle')}</Text>
           
           {filteredFAQs.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="search-outline" size={48} color={colors.textMuted} />
-              <Text style={styles.emptyText}>ไม่พบคำถามที่ตรงกับการค้นหา</Text>
+              <Text style={styles.emptyText}>{t('help.emptySearch')}</Text>
             </View>
           ) : (
             filteredFAQs.map((item) => (
@@ -321,17 +323,15 @@ export default function HelpScreen() {
 
         {/* Contact Support */}
         <View style={styles.contactSection}>
-          <Text style={styles.sectionTitle}>ติดต่อเรา</Text>
-          <Text style={styles.contactSubtitle}>
-            ยังหาคำตอบไม่เจอ? ติดต่อทีมสนับสนุนของเรา
-          </Text>
+          <Text style={styles.sectionTitle}>{t('help.contactTitle')}</Text>
+          <Text style={styles.contactSubtitle}>{t('help.contactSubtitle')}</Text>
 
           <View style={styles.contactOptions}>
             <TouchableOpacity style={styles.contactCard} onPress={handleContactSupport}>
               <View style={[styles.contactIcon, { backgroundColor: colors.primaryLight }]}>
                 <Ionicons name="mail-outline" size={24} color={colors.primary} />
               </View>
-              <Text style={styles.contactLabel}>อีเมล</Text>
+              <Text style={styles.contactLabel}>{t('help.contactEmail')}</Text>
               <Text style={styles.contactValue}>support@nursego.co</Text>
             </TouchableOpacity>
 
@@ -339,7 +339,7 @@ export default function HelpScreen() {
               <View style={[styles.contactIcon, { backgroundColor: colors.successLight }]}>
                 <Ionicons name="call-outline" size={24} color={colors.success} />
               </View>
-              <Text style={styles.contactLabel}>โทรศัพท์</Text>
+              <Text style={styles.contactLabel}>{t('help.contactPhone')}</Text>
               <Text style={styles.contactValue}>02-123-4567</Text>
             </TouchableOpacity>
 
@@ -354,15 +354,13 @@ export default function HelpScreen() {
 
           <View style={styles.officeHours}>
             <Ionicons name="time-outline" size={16} color={colors.textMuted} />
-            <Text style={styles.officeHoursText}>
-              เวลาทำการ: จันทร์ - ศุกร์ 9:00 - 18:00 น.
-            </Text>
+            <Text style={styles.officeHoursText}>{t('help.officeHours')}</Text>
           </View>
         </View>
 
         {/* Quick Links */}
         <View style={styles.quickLinksSection}>
-          <Text style={styles.sectionTitle}>ลิงก์ที่เกี่ยวข้อง</Text>
+          <Text style={styles.sectionTitle}>{t('help.quickLinksTitle')}</Text>
 
           {onboardingSurveyEnabled ? (
             <TouchableOpacity
@@ -370,7 +368,7 @@ export default function HelpScreen() {
               onPress={() => (navigation as any).navigate('OnboardingSurvey')}
             >
               <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
-              <Text style={[styles.quickLinkText, { color: colors.text }]}>ดูคู่มือเริ่มต้นใช้งาน</Text>
+              <Text style={[styles.quickLinkText, { color: colors.text }]}>{t('help.onboardingGuideLink')}</Text>
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
           ) : null}
@@ -380,7 +378,7 @@ export default function HelpScreen() {
             onPress={() => (navigation as any).navigate('Terms')}
           >
             <Ionicons name="document-text-outline" size={20} color={colors.textSecondary} />
-            <Text style={styles.quickLinkText}>ข้อกำหนดการใช้งาน</Text>
+            <Text style={styles.quickLinkText}>{t('help.termsLink')}</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
 
@@ -389,7 +387,7 @@ export default function HelpScreen() {
             onPress={() => (navigation as any).navigate('Privacy')}
           >
             <Ionicons name="shield-checkmark-outline" size={20} color={colors.textSecondary} />
-            <Text style={styles.quickLinkText}>นโยบายความเป็นส่วนตัว</Text>
+            <Text style={styles.quickLinkText}>{t('help.privacyLink')}</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
 
@@ -398,7 +396,7 @@ export default function HelpScreen() {
             onPress={() => Linking.openURL('https://nursego.co/about')}
           >
             <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
-            <Text style={styles.quickLinkText}>เกี่ยวกับเรา</Text>
+            <Text style={styles.quickLinkText}>{t('help.aboutLink')}</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         </View>

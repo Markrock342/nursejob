@@ -13,6 +13,7 @@ import {
   RefreshControl,
   Platform,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -24,10 +25,11 @@ import { sendOTP, verifyOTP } from '../../services/otpService';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, POSITIONS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useI18n } from '../../i18n';
 import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
 import { useTabRefresh } from '../../hooks/useTabRefresh';
 import { getUserShiftContacts, deleteShiftContact, syncPosterSnapshotToMyPosts } from '../../services/jobService';
-import { getLaunchQuotaSummary, getUserSubscription, LaunchQuotaSummary } from '../../services/subscriptionService';
+import { getLaunchQuotaSummary, getUserSubscription, LaunchQuotaSummary, subscribeLaunchUsageLimitsConfig } from '../../services/subscriptionService';
 import { getFavoritesCount } from '../../services/favoritesService';
 import { getUnreadNotificationsCount } from '../../services/notificationsService';
 import { getApplicationStats } from '../../services/applicantsService';
@@ -56,11 +58,15 @@ import { formatDate, formatRelativeTime } from '../../utils/helpers';
 import { getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, hasPremiumTag } from '../../utils/verificationTag';
 import {
   ORG_TYPE_OPTIONS,
+  getHospitalUrgencyOptions,
+  getNurseWorkStyleOptions,
+  getOrgTypeOptions,
   getCareTypeThaiLabel,
   getHiringUrgencyThaiLabel,
   getOrgTypeThaiLabel,
   getStaffTypeThaiLabel,
   getThaiLabels,
+  getUserCareTypeOptions,
   getWorkStyleThaiLabel,
   HOSPITAL_URGENCY_OPTIONS,
   NURSE_WORK_STYLE_OPTIONS,
@@ -134,6 +140,7 @@ interface ProfileInfoTile {
 // Component
 // ============================================
 export default function ProfileScreen({ navigation }: Props) {
+  const { t } = useI18n();
   const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
   // Auth context
   const { user, isAuthenticated, logout, updateUser, refreshUser, isLoading: isAuthLoading, isAdmin, isInitialized } = useAuth();
@@ -174,6 +181,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [otpResendCountdown, setOtpResendCountdown] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<UserVerificationStatus | null>(null);
   const [userPlan, setUserPlan] = useState<import('../../types').SubscriptionPlan>('free');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [commerceStatus, setCommerceStatus] = useState<CommerceAccessStatus | null>(null);
   const [launchQuotaSummary, setLaunchQuotaSummary] = useState<LaunchQuotaSummary | null>(null);
   const [reviewSummary, setReviewSummary] = useState<{ averageRating: number; totalReviews: number } | null>(null);
@@ -294,6 +302,7 @@ export default function ProfileScreen({ navigation }: Props) {
       }
     } catch (error) {
       console.error('Error loading profile data:', error);
+      Alert.alert(t('common.alerts.loadErrorTitle'), t('common.alerts.loadErrorMessage'));
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -315,6 +324,18 @@ export default function ProfileScreen({ navigation }: Props) {
   );
 
   useEffect(() => {
+    if (!user?.uid || !isInitialized) return undefined;
+
+    const unsubscribe = subscribeLaunchUsageLimitsConfig(() => {
+      void getLaunchQuotaSummary(user.uid)
+        .then((summary) => setLaunchQuotaSummary(summary))
+        .catch((error) => console.error('Error refreshing profile launch quota summary', error));
+    });
+
+    return () => unsubscribe();
+  }, [isInitialized, user?.uid]);
+
+  useEffect(() => {
     if (!campaignPackageOptions.some((item) => item.key === selectedCampaignPackage)) {
       setSelectedCampaignPackage(campaignPackageOptions[0]?.key || getDefaultCampaignPackage(user?.role));
     }
@@ -334,8 +355,8 @@ export default function ProfileScreen({ navigation }: Props) {
 
     const normalizedCode = campaignCodeInput.trim().toUpperCase();
     if (!normalizedCode) {
-      setModalTitle('กรอกรหัสโค้ดก่อน');
-      setModalMessage('โปรดระบุโค้ดแคมเปญหรือโค้ดส่วนลดที่ต้องการใช้');
+      setModalTitle(t('profile.campaign.codeRequiredTitle'));
+      setModalMessage(t('profile.campaign.codeRequiredMessage'));
       setShowErrorModal(true);
       return;
     }
@@ -352,22 +373,26 @@ export default function ProfileScreen({ navigation }: Props) {
       });
 
       if (!result.valid || !result.pendingCode) {
-        setModalTitle('ใช้โค้ดไม่ได้');
-        setModalMessage(result.message || 'กรุณาตรวจสอบกติกาโค้ดอีกครั้ง');
+        setModalTitle(t('profile.campaign.invalidTitle'));
+        setModalMessage(result.message || t('profile.campaign.invalidMessage'));
         setShowErrorModal(true);
         return;
       }
 
       await refreshUser();
       setShowCampaignCodeModal(false);
-      setModalTitle('บันทึกโค้ดเรียบร้อย');
+      setModalTitle(t('profile.campaign.savedTitle'));
       setModalMessage(
-        `${result.pendingCode.code} ใช้กับ ${getCampaignPackageDisplayLabel(result.pendingCode.packageKey, user.role)}\n${getCampaignBenefitSummary(result.pendingCode.benefitType, result.pendingCode.benefitValue)}`,
+        t('profile.campaign.savedMessage', {
+          code: result.pendingCode.code,
+          package: getCampaignPackageDisplayLabel(result.pendingCode.packageKey, user.role),
+          benefit: getCampaignBenefitSummary(result.pendingCode.benefitType, result.pendingCode.benefitValue),
+        }),
       );
       setShowSuccessModal(true);
     } catch (error: any) {
-      setModalTitle('เกิดข้อผิดพลาด');
-      setModalMessage(error.message || 'ไม่สามารถบันทึกโค้ดได้');
+      setModalTitle(t('profile.campaign.saveErrorTitle'));
+      setModalMessage(error.message || t('profile.campaign.saveErrorMessage'));
       setShowErrorModal(true);
     } finally {
       setIsApplyingCampaignCode(false);
@@ -382,12 +407,12 @@ export default function ProfileScreen({ navigation }: Props) {
       await clearPendingCampaignCodeForUser(user.uid);
       await refreshUser();
       setCampaignCodeInput('');
-      setModalTitle('ลบโค้ดที่บันทึกแล้ว');
-      setModalMessage('ระบบจะไม่ใช้โค้ดแคมเปญกับการซื้อครั้งถัดไป');
+      setModalTitle(t('profile.campaign.removedTitle'));
+      setModalMessage(t('profile.campaign.removedMessage'));
       setShowSuccessModal(true);
     } catch (error: any) {
-      setModalTitle('ลบโค้ดไม่สำเร็จ');
-      setModalMessage(error.message || 'กรุณาลองใหม่อีกครั้ง');
+      setModalTitle(t('profile.campaign.saveErrorTitle'));
+      setModalMessage(error.message || t('common.alerts.genericTryAgain'));
       setShowErrorModal(true);
     } finally {
       setIsApplyingCampaignCode(false);
@@ -433,8 +458,8 @@ export default function ProfileScreen({ navigation }: Props) {
       await deleteShiftContact(pendingDeleteContact.id);
       setContacts(prev => prev.filter(c => c.id !== pendingDeleteContact.id));
     } catch (e) {
-      setModalTitle('เกิดข้อผิดพลาด');
-      setModalMessage('ไม่สามารถลบได้ กรุณาลองใหม่');
+      setModalTitle(t('profile.activity.deleteFailedTitle'));
+      setModalMessage(t('profile.activity.deleteFailedMessage'));
       setShowErrorModal(true);
     } finally {
       setDeletingContactId(null);
@@ -445,10 +470,10 @@ export default function ProfileScreen({ navigation }: Props) {
   // Get status config for contact history
   const getContactStatusConfig = (status: string) => {
     switch (status) {
-      case 'confirmed': return { label: 'ยืนยันแล้ว', color: colors.success, bg: colors.successLight, icon: 'checkmark-circle' as const };
-      case 'cancelled': return { label: 'ยกเลิก', color: colors.error, bg: colors.errorLight, icon: 'close-circle' as const };
-      case 'expired': return { label: 'โพสต์ถูกลบ', color: colors.textMuted, bg: colors.borderLight, icon: 'archive-outline' as const };
-      default: return { label: 'สนใจ', color: colors.warning, bg: colors.warningLight, icon: 'star-outline' as const };
+      case 'confirmed': return { label: t('profile.activity.confirmed'), color: colors.success, bg: colors.successLight, icon: 'checkmark-circle' as const };
+      case 'cancelled': return { label: t('profile.activity.cancelled'), color: colors.error, bg: colors.errorLight, icon: 'close-circle' as const };
+      case 'expired': return { label: t('profile.activity.expired'), color: colors.textMuted, bg: colors.borderLight, icon: 'archive-outline' as const };
+      default: return { label: t('profile.activity.interested'), color: colors.warning, bg: colors.warningLight, icon: 'star-outline' as const };
     }
   };
 
@@ -476,8 +501,8 @@ export default function ProfileScreen({ navigation }: Props) {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
     
     if (!permissionResult.granted) {
-      setModalTitle('ไม่มีสิทธิ์');
-      setModalMessage('กรุณาอนุญาตการเข้าถึงรูปภาพในการตั้งค่าของคุณ');
+      setModalTitle(t('profile.photo.permissionTitle'));
+      setModalMessage(t('profile.imagePermissionDenied'));
       setShowErrorModal(true);
       return;
     }
@@ -507,13 +532,13 @@ export default function ProfileScreen({ navigation }: Props) {
           },
         });
         
-        setModalTitle('สำเร็จ');
-        setModalMessage('อัพโหลดรูปโปรไฟล์เรียบร้อยแล้ว');
+        setModalTitle(t('profile.photo.uploadSuccessTitle'));
+        setModalMessage(t('profile.photo.uploadSuccessMessage'));
         setShowSuccessModal(true);
       } catch (error: any) {
         console.error('Upload photo error:', error);
-        setModalTitle('เกิดข้อผิดพลาด');
-        setModalMessage(error.message || 'ไม่สามารถอัพโหลดรูปได้');
+        setModalTitle(t('profile.photo.uploadErrorTitle'));
+        setModalMessage(error.message || t('profile.photo.uploadErrorMessage'));
         setShowErrorModal(true);
       } finally {
         setIsUploadingPhoto(false);
@@ -536,7 +561,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const handleSendPhoneOTP = async () => {
     const phone = editForm.phone.trim();
     if (!phone || phone.length < 9) {
-      setOtpError('กรุณากรอกเบอร์โทรศัพท์ให้ถูกต้อง');
+      setOtpError(t('auth.phoneLogin.phoneInvalid'));
       return;
     }
     setPhoneStep('sending');
@@ -545,7 +570,7 @@ export default function ProfileScreen({ navigation }: Props) {
       const result = await sendOTP(phone);
       if (!result.success) {
         setPhoneStep('idle');
-        setOtpError(result.error || 'ส่งรหัส OTP ไม่สำเร็จ');
+        setOtpError(result.error || t('auth.register.otpSendFailedMessage'));
         return;
       }
       setPendingVerificationId(result.verificationId || '');
@@ -554,14 +579,14 @@ export default function ProfileScreen({ navigation }: Props) {
       startOtpCountdown(60);
     } catch (error: any) {
       setPhoneStep('idle');
-      setOtpError(error.message || 'ส่งรหัส OTP ไม่สำเร็จ');
+      setOtpError(error.message || t('auth.register.otpSendFailedMessage'));
     }
   };
 
   // Verify OTP code
   const handleVerifyOTP = async () => {
     if (!otpValue || otpValue.length < 4) {
-      setOtpError('กรุณากรอกรหัส OTP ให้ครบถ้วน');
+      setOtpError(t('auth.phoneLogin.otpRequired'));
       return;
     }
     setOtpLoading(true);
@@ -569,13 +594,13 @@ export default function ProfileScreen({ navigation }: Props) {
     try {
       const otpResult = await verifyOTP(pendingVerificationId, otpValue, { skipSignIn: true });
       if (!otpResult.success) {
-        setOtpError(otpResult.error || 'รหัส OTP ไม่ถูกต้อง กรุณาลองใหม่');
+        setOtpError(otpResult.error || t('auth.phoneLogin.otpInvalidOrExpired'));
         return;
       }
       setPhoneStep('verified');
       setOtpError('');
     } catch (error: any) {
-      setOtpError(error.message || 'รหัส OTP ไม่ถูกต้อง กรุณาลองใหม่');
+      setOtpError(error.message || t('auth.phoneLogin.otpInvalidOrExpired'));
     } finally {
       setOtpLoading(false);
     }
@@ -592,6 +617,8 @@ export default function ProfileScreen({ navigation }: Props) {
 
   // Handle save profile
   const handleSaveProfile = async () => {
+    if (isSavingProfile) return;
+
     const phoneChanged = editForm.phone.trim() !== (user?.phone || '').trim();
     const licenseChanged = editForm.licenseNumber.trim() !== (user?.licenseNumber || '').trim() && editForm.licenseNumber.trim() !== '';
 
@@ -602,6 +629,7 @@ export default function ProfileScreen({ navigation }: Props) {
     }
 
     try {
+      setIsSavingProfile(true);
       const updates: any = {
         displayName: editForm.displayName,
         bio: editForm.bio,
@@ -669,18 +697,20 @@ export default function ProfileScreen({ navigation }: Props) {
       setPhoneStep('idle');
 
       if (licenseChanged) {
-        setModalTitle('บันทึกสำเร็จ');
-        setModalMessage('ข้อมูลถูกบันทึกแล้ว\n\nเลขใบประกอบวิชาชีพที่กรอกใหม่จะรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์');
+        setModalTitle(t('profile.edit.saveLicenseTitle'));
+        setModalMessage(t('profile.edit.saveLicenseMessage'));
         setShowSuccessModal(true);
       } else {
-        setModalTitle('สำเร็จ');
-        setModalMessage('บันทึกข้อมูลเรียบร้อยแล้ว');
+        setModalTitle(t('profile.edit.saveSuccessTitle'));
+        setModalMessage(t('profile.edit.saveSuccessMessage'));
         setShowSuccessModal(true);
       }
     } catch (error: any) {
-      setModalTitle('เกิดข้อผิดพลาด');
-      setModalMessage(error.message || 'ไม่สามารถบันทึกข้อมูลได้');
+      setModalTitle(t('profile.edit.saveErrorTitle'));
+      setModalMessage(error.message || t('profile.edit.saveErrorMessage'));
       setShowErrorModal(true);
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -690,60 +720,64 @@ export default function ProfileScreen({ navigation }: Props) {
   const workStyleLabels = getThaiLabels((user as any)?.workStyle || [], getWorkStyleThaiLabel);
   const interestedStaffTypeLabels = getThaiLabels((user as any)?.interestedStaffTypes || [], getStaffTypeThaiLabel);
   const careNeedLabels = getThaiLabels((user as any)?.careNeeds || (user as any)?.careTypes || [], getCareTypeThaiLabel);
-  const profileProvince = (user as any)?.location?.province || (user as any)?.preferredProvince || 'ยังไม่ระบุ';
+  const profileProvince = (user as any)?.location?.province || (user as any)?.preferredProvince || t('common.empty.notSpecified');
+  const localizedOrgTypeOptions = getOrgTypeOptions();
+  const localizedWorkStyleOptions = getNurseWorkStyleOptions();
+  const localizedUrgencyOptions = getHospitalUrgencyOptions();
+  const localizedCareTypeOptions = getUserCareTypeOptions();
   const roleLabel = getRoleLabel(user?.role, (user as any)?.orgType, (user as any)?.staffType);
-  const planLabel = hasPremiumTag(userPlan) ? getPremiumTagText(userPlan) : 'สมาชิกทั่วไป';
+  const planLabel = hasPremiumTag(userPlan) ? getPremiumTagText(userPlan) : t('profile.info.generalMember');
   const primaryShortcuts: ProfileShortcut[] = [
     {
       key: 'myposts',
-      label: 'งานของฉัน',
+      label: t('profile.shortcuts.myPosts'),
       icon: 'briefcase-outline' as const,
       badge: canManageApplicants && applicantsInterestedCount > 0 ? String(applicantsInterestedCount > 9 ? '9+' : applicantsInterestedCount) : undefined,
       onPress: () => nav.navigate('MyPosts'),
     },
     {
       key: 'notifications',
-      label: 'แจ้งเตือน',
+      label: t('profile.shortcuts.notifications'),
       icon: 'notifications-outline' as const,
       badge: unreadNotifications > 0 ? String(unreadNotifications > 9 ? '9+' : unreadNotifications) : undefined,
       onPress: () => nav.navigate('Notifications'),
     },
     {
       key: 'reviews',
-      label: 'รีวิว',
+      label: t('profile.shortcuts.reviews'),
       icon: 'star-outline' as const,
       badge: reviewSummary?.totalReviews ? String(reviewSummary.totalReviews) : undefined,
       onPress: () => nav.navigate('Reviews', { targetUserId: user?.uid, targetName: user?.displayName, targetRole: user?.role }),
     },
     {
       key: 'documents',
-      label: 'เอกสาร',
+      label: t('profile.shortcuts.documents'),
       icon: 'document-text-outline' as const,
       onPress: () => nav.navigate('Documents'),
     },
     {
       key: 'favorites',
-      label: 'รายการโปรด',
+      label: t('profile.shortcuts.favorites'),
       icon: 'heart-outline' as const,
       badge: favoritesCount > 0 ? String(favoritesCount) : undefined,
       onPress: () => nav.navigate('Favorites'),
     },
     {
       key: 'verification',
-      label: 'ยืนยันตัวตน',
+      label: t('profile.shortcuts.verification'),
       icon: 'shield-checkmark-outline' as const,
-      badge: verificationStatus?.pendingRequest ? 'รอ' : verificationStatus?.isVerified ? 'ผ่าน' : undefined,
+      badge: verificationStatus?.pendingRequest ? t('profile.shortcuts.pendingShort') : verificationStatus?.isVerified ? t('profile.shortcuts.passedShort') : undefined,
       onPress: () => nav.navigate('Verification'),
     },
-    {
+    ...(!commerceStatus?.billingProviderReady && commerceStatus?.freeAccessEnabled ? [] : [{
       key: 'shop',
-      label: 'สิทธิ์และบริการ',
+      label: t('profile.shortcuts.services'),
       icon: 'sparkles-outline' as const,
       onPress: () => nav.navigate('Shop'),
-    },
+    }]),
     {
       key: canManageApplicants ? 'applicants' : 'help',
-      label: canManageApplicants ? 'ผู้สมัคร' : 'ช่วยเหลือ',
+      label: canManageApplicants ? t('profile.shortcuts.applicants') : t('profile.shortcuts.help'),
       icon: canManageApplicants ? 'people-outline' : 'help-circle-outline',
       onPress: () => (canManageApplicants ? nav.navigate('Applicants') : nav.navigate('Help')),
     },
@@ -751,34 +785,34 @@ export default function ProfileScreen({ navigation }: Props) {
   const profileInfoTiles: ProfileInfoTile[] = [
     {
       key: 'phone',
-      label: 'เบอร์โทรศัพท์',
-      value: user?.phone || 'ยังไม่ระบุ',
+      label: t('profile.info.phone'),
+      value: user?.phone || t('common.empty.notSpecified'),
       icon: 'call-outline',
     },
     ...(user?.role === 'nurse'
       ? [
           {
             key: 'staffType',
-            label: 'วิชาชีพหลัก',
+            label: t('profile.info.mainProfession'),
             value: getStaffTypeThaiLabel((user as any)?.staffType),
             icon: 'medkit-outline' as const,
           },
           {
             key: 'licenseNumber',
-            label: 'เลขใบประกอบวิชาชีพ',
-            value: user?.licenseNumber || 'ยังไม่ระบุ',
+            label: t('profile.info.licenseNumber'),
+            value: user?.licenseNumber || t('common.empty.notSpecified'),
             icon: 'ribbon-outline' as const,
           },
           {
             key: 'experience',
-            label: 'ประสบการณ์',
-            value: user?.experience ? `${user.experience} ปี` : 'ยังไม่ระบุ',
+            label: t('profile.info.experience'),
+            value: user?.experience ? `${user.experience} ${t('common.units.year')}` : t('common.empty.notSpecified'),
             icon: 'briefcase-outline' as const,
           },
           {
             key: 'workStyle',
-            label: 'รูปแบบงานที่สนใจ',
-            value: workStyleLabels.length > 0 ? workStyleLabels.join(', ') : 'ยังไม่ระบุ',
+            label: t('profile.info.interestedWorkStyle'),
+            value: workStyleLabels.length > 0 ? workStyleLabels.join(', ') : t('common.empty.notSpecified'),
             icon: 'options-outline' as const,
             fullWidth: true,
           },
@@ -787,20 +821,20 @@ export default function ProfileScreen({ navigation }: Props) {
         ? [
             {
               key: 'orgType',
-              label: 'ประเภทองค์กร',
+              label: t('profile.info.organizationType'),
               value: getOrgTypeThaiLabel((user as any)?.orgType),
               icon: 'business-outline' as const,
             },
             {
               key: 'staffInterest',
-              label: 'บุคลากรที่กำลังมองหา',
-              value: interestedStaffTypeLabels.length > 0 ? interestedStaffTypeLabels.join(', ') : 'ยังไม่ระบุ',
+              label: t('profile.info.staffNeeded'),
+              value: interestedStaffTypeLabels.length > 0 ? interestedStaffTypeLabels.join(', ') : t('common.empty.notSpecified'),
               icon: 'people-outline' as const,
               fullWidth: true,
             },
             {
               key: 'urgency',
-              label: 'ความเร่งด่วน',
+              label: t('profile.info.urgency'),
               value: getHiringUrgencyThaiLabel((user as any)?.hiringUrgency),
               icon: 'flash-outline' as const,
             },
@@ -808,22 +842,22 @@ export default function ProfileScreen({ navigation }: Props) {
         : [
             {
               key: 'staffInterest',
-              label: 'บุคลากรที่ต้องการติดต่อ',
-              value: interestedStaffTypeLabels.length > 0 ? interestedStaffTypeLabels.join(', ') : 'ยังไม่ระบุ',
+              label: t('profile.info.contactTarget'),
+              value: interestedStaffTypeLabels.length > 0 ? interestedStaffTypeLabels.join(', ') : t('common.empty.notSpecified'),
               icon: 'people-outline' as const,
               fullWidth: true,
             },
             {
               key: 'careNeeds',
-              label: 'ลักษณะการดูแลที่ต้องการ',
-              value: careNeedLabels.length > 0 ? careNeedLabels.join(', ') : 'ยังไม่ระบุ',
+              label: t('profile.info.careNeeds'),
+              value: careNeedLabels.length > 0 ? careNeedLabels.join(', ') : t('common.empty.notSpecified'),
               icon: 'heart-outline' as const,
               fullWidth: true,
             },
           ]),
     {
       key: 'province',
-      label: 'จังหวัด',
+      label: t('profile.info.province'),
       value: profileProvince,
       icon: 'location-outline',
     },
@@ -831,36 +865,36 @@ export default function ProfileScreen({ navigation }: Props) {
   const menuSections: ProfileMenuSection[] = [
     {
       key: 'account',
-      title: 'บัญชีและการใช้งาน',
+      title: t('profile.menu.accountTitle'),
       items: [
         {
           key: 'edit-profile',
-          label: 'แก้ไขโปรไฟล์',
-          subtitle: 'อัปเดตรูป เบอร์โทร และข้อมูลวิชาชีพ',
+          label: t('profile.menu.editProfileTitle'),
+          subtitle: t('profile.menu.editProfileSubtitle'),
           icon: 'create-outline' as const,
           onPress: () => setShowEditModal(true),
         },
         {
           key: 'settings',
-          label: 'ตั้งค่า',
-          subtitle: 'การแจ้งเตือน ความเป็นส่วนตัว และธีม',
+          label: t('profile.menu.settingsTitle'),
+          subtitle: t('profile.menu.settingsSubtitle'),
           icon: 'settings-outline' as const,
           onPress: () => nav.navigate('Settings'),
         },
         {
           key: 'campaign',
-          label: 'โค้ดส่วนลด / แคมเปญ',
-          subtitle: pendingCampaignCode ? 'มีโค้ดรอใช้งานอยู่' : 'บันทึกโค้ดไว้ใช้ภายหลังได้',
+          label: t('profile.menu.campaignTitle'),
+          subtitle: pendingCampaignCode ? t('profile.menu.campaignSubtitlePending') : t('profile.menu.campaignSubtitleDefault'),
           icon: 'ticket-outline' as const,
-          badge: pendingCampaignCode ? 'รอใช้' : undefined,
+          badge: pendingCampaignCode ? t('profile.menu.campaignBadge') : undefined,
           onPress: () => setShowCampaignCodeModal(true),
         },
         ...(isAdmin
           ? [
               {
                 key: 'admin',
-                label: 'แผงควบคุม Admin',
-                subtitle: 'ดูภาพรวมระบบและจัดการการสื่อสาร',
+                label: t('profile.menu.adminTitle'),
+                subtitle: t('profile.menu.adminSubtitle'),
                 icon: 'shield-outline' as const,
                 onPress: () => nav.navigate('AdminDashboard'),
               },
@@ -870,19 +904,19 @@ export default function ProfileScreen({ navigation }: Props) {
     },
     {
       key: 'support',
-      title: 'ศูนย์ช่วยเหลือ',
+      title: t('profile.menu.supportTitle'),
       items: [
         {
           key: 'quick-guide',
-          label: 'คู่มือใช้งานแบบเร็ว',
-          subtitle: 'ดู flow สำคัญของแอปแบบย่อ',
+          label: t('profile.menu.quickGuideTitle'),
+          subtitle: t('profile.menu.quickGuideSubtitle'),
           icon: 'sparkles-outline' as const,
           onPress: onboardingSurveyEnabled ? () => nav.navigate('OnboardingSurvey') : () => nav.navigate('Help'),
         },
         {
           key: 'help',
-          label: 'ช่วยเหลือและคำถามที่พบบ่อย',
-          subtitle: 'รวมคำตอบและวิธีใช้งานพื้นฐาน',
+          label: t('profile.menu.helpTitle'),
+          subtitle: t('profile.menu.helpSubtitle'),
           icon: 'help-circle-outline' as const,
           onPress: () => nav.navigate('Help'),
         },
@@ -890,17 +924,17 @@ export default function ProfileScreen({ navigation }: Props) {
     },
     {
       key: 'legal',
-      title: 'เงื่อนไขและนโยบาย',
+      title: t('profile.menu.legalTitle'),
       items: [
         {
           key: 'terms',
-          label: 'เงื่อนไขการใช้งาน',
+          label: t('profile.menu.termsTitle'),
           icon: 'document-text-outline' as const,
           onPress: () => nav.navigate('Terms'),
         },
         {
           key: 'privacy',
-          label: 'นโยบายความเป็นส่วนตัว',
+          label: t('profile.menu.privacyTitle'),
           icon: 'shield-checkmark-outline' as const,
           onPress: () => nav.navigate('Privacy'),
         },
@@ -912,15 +946,15 @@ export default function ProfileScreen({ navigation }: Props) {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge text="รอพิจารณา" variant="warning" size="small" />;
+        return <Badge text={t('profile.status.pending')} variant="warning" size="small" />;
       case 'reviewed':
-        return <Badge text="กำลังพิจารณา" variant="info" size="small" />;
+        return <Badge text={t('profile.status.reviewed')} variant="info" size="small" />;
       case 'accepted':
-        return <Badge text="ผ่านการคัดเลือก" variant="success" size="small" />;
+        return <Badge text={t('profile.status.accepted')} variant="success" size="small" />;
       case 'rejected':
-        return <Badge text="ไม่ผ่าน" variant="danger" size="small" />;
+        return <Badge text={t('profile.status.rejected')} variant="danger" size="small" />;
       case 'withdrawn':
-        return <Badge text="ถอนใบสมัคร" variant="secondary" size="small" />;
+        return <Badge text={t('profile.status.withdrawn')} variant="secondary" size="small" />;
       default:
         return <Badge text={status} variant="secondary" size="small" />;
     }
@@ -932,16 +966,16 @@ export default function ProfileScreen({ navigation }: Props) {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.guestContainer}>
           <Ionicons name="person-circle-outline" size={80} color={colors.border} />
-          <Text style={[styles.guestTitle, { color: colors.text }]}>ยังไม่ได้เข้าสู่ระบบ</Text>
+          <Text style={[styles.guestTitle, { color: colors.text }]}>{t('profile.guest.title')}</Text>
           <Text style={[styles.guestDescription, { color: colors.textSecondary }]}>
-            เข้าสู่ระบบเพื่อจัดการโปรไฟล์และดูประวัติการสมัครงาน
+            {t('profile.guest.description')}
           </Text>
           <Button
             onPress={() => (navigation as any).navigate('Auth')}
             size="large"
             style={{ marginTop: SPACING.lg }}
           >
-            <Text>เข้าสู่ระบบ</Text>
+            <Text>{t('profile.guest.cta')}</Text>
           </Button>
         </View>
       </SafeAreaView>
@@ -971,9 +1005,9 @@ export default function ProfileScreen({ navigation }: Props) {
           <FirstVisitTip
             storageKey={`first_tip_profile_${user.uid}`}
             icon="person-circle-outline"
-            title="โปรไฟล์ที่ครบช่วยให้ตัดสินใจง่ายขึ้น"
-            description="หน้านี้ใช้จัดการข้อมูลส่วนตัว รีวิว การยืนยันตัวตน รายการโปรด และประกาศของคุณ ถ้าอยากใช้งานได้คุ้มสุด ให้เริ่มจากเติมโปรไฟล์และเช็กสถานะการยืนยันตัวตน"
-            actionLabel={onboardingSurveyEnabled ? 'ดูคู่มือ' : undefined}
+            title={t('profile.firstVisit.title')}
+            description={t('profile.firstVisit.description')}
+            actionLabel={onboardingSurveyEnabled ? t('profile.firstVisit.action') : undefined}
             onAction={onboardingSurveyEnabled ? () => nav.navigate('OnboardingSurvey') : undefined}
             containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: 2 }}
           />
@@ -1004,7 +1038,7 @@ export default function ProfileScreen({ navigation }: Props) {
             <View style={[styles.profileHeroBackdropCircle, styles.profileHeroBackdropCircleSecondary]} />
             <View style={styles.profileHeroEyebrowRow}>
               <View style={[styles.profileHeroEyebrowChip, { backgroundColor: 'rgba(255,255,255,0.15)' }]}> 
-                <Text style={styles.profileHeroEyebrowText}>ศูนย์บัญชีของคุณ</Text>
+                <Text style={styles.profileHeroEyebrowText}>{t('profile.hero.eyebrow')}</Text>
               </View>
               <View style={[styles.profileHeroEyebrowChip, { backgroundColor: 'rgba(255,255,255,0.12)' }]}> 
                 <Ionicons name="location-outline" size={12} color={colors.white} />
@@ -1033,35 +1067,37 @@ export default function ProfileScreen({ navigation }: Props) {
                     <Text style={styles.profileHeroBadgeText}>{planLabel}</Text>
                   </View>
                 </View>
-                <Text style={styles.profileHeroDescription}>จัดการข้อมูลส่วนตัว สิทธิ์การใช้งาน และประวัติการติดต่อไว้ในที่เดียว</Text>
+                <Text style={styles.profileHeroDescription}>{t('profile.hero.description')}</Text>
               </View>
             </View>
 
             <View style={[styles.profileHeroAccessCard, { backgroundColor: colors.white, borderColor: colors.primaryBackground }]}> 
               <View style={styles.profileHeroAccessHeader}>
                 <View>
-                  <Text style={[styles.profileHeroAccessLabel, { color: colors.textSecondary }]}>สถานะบัญชี</Text>
+                  <Text style={[styles.profileHeroAccessLabel, { color: colors.textSecondary }]}>{t('profile.hero.accountStatus')}</Text>
                   <Text style={[styles.profileHeroAccessValue, { color: colors.text }]}>{planLabel}</Text>
                 </View>
-                <TouchableOpacity onPress={() => nav.navigate('Shop')} style={styles.profileHeroAccessLink}>
-                  <Text style={[styles.profileHeroAccessLinkText, { color: colors.primary }]}>{getCommerceEntryTitle(commerceStatus)}</Text>
-                  <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-                </TouchableOpacity>
+                {commerceStatus?.billingProviderReady ? (
+                  <TouchableOpacity onPress={() => nav.navigate('Shop')} style={styles.profileHeroAccessLink}>
+                    <Text style={[styles.profileHeroAccessLinkText, { color: colors.primary }]}>{getCommerceEntryTitle(commerceStatus)}</Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
               <View style={styles.profileHeroStatsRow}>
                 <View style={styles.profileHeroStatItem}>
                   <Text style={[styles.profileHeroStatValue, { color: colors.text }]}>{favoritesCount}</Text>
-                  <Text style={[styles.profileHeroStatLabel, { color: colors.textSecondary }]}>รายการโปรด</Text>
+                  <Text style={[styles.profileHeroStatLabel, { color: colors.textSecondary }]}>{t('profile.hero.favorites')}</Text>
                 </View>
                 <View style={[styles.profileHeroStatDivider, { backgroundColor: colors.border }]} />
                 <View style={styles.profileHeroStatItem}>
                   <Text style={[styles.profileHeroStatValue, { color: colors.text }]}>{contacts.length}</Text>
-                  <Text style={[styles.profileHeroStatLabel, { color: colors.textSecondary }]}>ประวัติติดต่อ</Text>
+                  <Text style={[styles.profileHeroStatLabel, { color: colors.textSecondary }]}>{t('profile.hero.contacts')}</Text>
                 </View>
                 <View style={[styles.profileHeroStatDivider, { backgroundColor: colors.border }]} />
                 <View style={styles.profileHeroStatItem}>
                   <Text style={[styles.profileHeroStatValue, { color: colors.text }]}>{reviewSummary?.totalReviews || 0}</Text>
-                  <Text style={[styles.profileHeroStatLabel, { color: colors.textSecondary }]}>รีวิว</Text>
+                  <Text style={[styles.profileHeroStatLabel, { color: colors.textSecondary }]}>{t('profile.hero.reviews')}</Text>
                 </View>
               </View>
               <TouchableOpacity
@@ -1069,7 +1105,7 @@ export default function ProfileScreen({ navigation }: Props) {
                 onPress={() => setShowEditModal(true)}
               >
                 <Ionicons name="create-outline" size={16} color={colors.primary} />
-                <Text style={[styles.profileHeroPrimaryButtonText, { color: colors.primary }]}>แก้ไขโปรไฟล์</Text>
+                <Text style={[styles.profileHeroPrimaryButtonText, { color: colors.primary }]}>{t('profile.hero.editProfile')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1083,11 +1119,11 @@ export default function ProfileScreen({ navigation }: Props) {
                   <Ionicons name="rocket-outline" size={18} color={colors.white} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.earlyAccessCardTitle, { color: colors.text }]}>{launchQuotaSummary?.title || 'บัญชีนี้ทำอะไรได้บ้าง'}</Text>
-                  <Text style={[styles.earlyAccessCardSubtitle, { color: colors.textSecondary }]}>{launchQuotaSummary?.subtitle || 'บัญชีนี้ใช้ฟีเจอร์หลักและบริการเสริมได้ตามโควตารายเดือน'}</Text>
+                  <Text style={[styles.earlyAccessCardTitle, { color: colors.text }]}>{launchQuotaSummary?.title || t('profile.earlyAccess.defaultTitle')}</Text>
+                  <Text style={[styles.earlyAccessCardSubtitle, { color: colors.textSecondary }]}>{launchQuotaSummary?.subtitle || t('profile.earlyAccess.defaultSubtitle')}</Text>
                 </View>
                 <View style={[styles.earlyAccessCardBadge, { backgroundColor: colors.accent }]}> 
-                  <Text style={[styles.earlyAccessCardBadgeText, { color: colors.textInverse }]}>พร้อมใช้</Text>
+                  <Text style={[styles.earlyAccessCardBadgeText, { color: colors.textInverse }]}>{t('profile.earlyAccess.ready')}</Text>
                 </View>
               </View>
               {launchQuotaSummary?.items?.slice(0, 3).map((item) => (
@@ -1096,14 +1132,14 @@ export default function ProfileScreen({ navigation }: Props) {
                   <Text style={[styles.earlyAccessQuotaStatus, { color: colors.textSecondary }]}>{item.statusText}</Text>
                 </View>
               ))}
-              <Text style={[styles.earlyAccessCardFootnote, { color: colors.textSecondary }]}>{launchQuotaSummary?.footnote || 'ดูรายละเอียดทั้งหมดได้ที่หน้า สิทธิ์และบริการในบัญชี'}</Text>
+              <Text style={[styles.earlyAccessCardFootnote, { color: colors.textSecondary }]}>{launchQuotaSummary?.footnote || t('profile.earlyAccess.defaultFootnote')}</Text>
             </View>
           )}
 
           <View style={[styles.profileShortcutCard, { backgroundColor: elevatedSurface }]}> 
             <View style={styles.profileShortcutHeader}>
-              <Text style={[styles.profileShortcutTitle, { color: colors.text }]}>ทางลัดที่ใช้บ่อย</Text>
-              <Text style={[styles.profileShortcutSubtitle, { color: colors.textSecondary }]}>เข้าถึงงาน เอกสาร และการแจ้งเตือนจากบล็อกเดียว</Text>
+              <Text style={[styles.profileShortcutTitle, { color: colors.text }]}>{t('profile.shortcuts.title')}</Text>
+              <Text style={[styles.profileShortcutSubtitle, { color: colors.textSecondary }]}>{t('profile.shortcuts.subtitle')}</Text>
             </View>
             <View style={styles.profileShortcutGrid}>
               {primaryShortcuts.map((item) => (
@@ -1130,7 +1166,7 @@ export default function ProfileScreen({ navigation }: Props) {
                     numberOfLines={item.key === 'myposts' ? 1 : 2}
                     allowFontScaling={false}
                   >
-                    {item.key === 'myposts' ? 'งานของฉัน' : item.label}
+                    {item.key === 'myposts' ? t('profile.shortcuts.myPosts') : item.label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1141,9 +1177,9 @@ export default function ProfileScreen({ navigation }: Props) {
         {/* Profile Info Modern */}
         <Card style={styles.profileDetailCard}>
           <View style={styles.profileSectionHeaderBlock}>
-            <Text style={[styles.profileSectionEyebrow, { color: colors.primary }]}>Profile details</Text>
-            <Text style={[styles.sectionTitle, styles.profileSectionTitleCompact]}>ข้อมูลส่วนตัว</Text>
-            <Text style={[styles.profileSectionSubtitle, { color: colors.textSecondary }]}>สรุปข้อมูลสำคัญของบัญชีในมุมมองที่อ่านง่ายขึ้น</Text>
+            <Text style={[styles.profileSectionEyebrow, { color: colors.primary }]}>{t('profile.info.eyebrow')}</Text>
+            <Text style={[styles.sectionTitle, styles.profileSectionTitleCompact]}>{t('profile.info.title')}</Text>
+            <Text style={[styles.profileSectionSubtitle, { color: colors.textSecondary }]}>{t('profile.info.subtitle')}</Text>
           </View>
           <View style={styles.profileInfoGrid}>
             {profileInfoTiles.map((item) => (
@@ -1170,7 +1206,7 @@ export default function ProfileScreen({ navigation }: Props) {
                 <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.profileBioContent}>
-                <Text style={[styles.profileInfoTileLabel, { color: colors.textSecondary }]}>เกี่ยวกับฉัน</Text>
+                <Text style={[styles.profileInfoTileLabel, { color: colors.textSecondary }]}>{t('profile.edit.aboutSection')}</Text>
                 <Text style={[styles.profileBioText, { color: colors.text }]}>{user.bio}</Text>
               </View>
             </View>
@@ -1181,9 +1217,9 @@ export default function ProfileScreen({ navigation }: Props) {
         <View style={[styles.profileActivityCard, { backgroundColor: elevatedSurface, borderColor: colors.borderLight }]}> 
           <View style={styles.profileActivityHeader}>
             <View style={styles.profileActivityTitleWrap}>
-              <Text style={[styles.profileSectionEyebrow, { color: colors.primary }]}>Recent activity</Text>
+              <Text style={[styles.profileSectionEyebrow, { color: colors.primary }]}>{t('profile.activity.eyebrow')}</Text>
               <View style={styles.profileActivityTitleRow}>
-                <Text style={[styles.sectionTitle, styles.profileSectionTitleCompact, { marginBottom: 0 }]}>ประวัติการติดต่องาน</Text>
+                <Text style={[styles.sectionTitle, styles.profileSectionTitleCompact, { marginBottom: 0 }]}>{t('profile.activity.title')}</Text>
                 {contacts.length > 0 && (
                   <View style={{ backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 }}>
                     <Text style={{ color: colors.white, fontSize: 11, fontWeight: '700' }}>{contacts.length}</Text>
@@ -1192,16 +1228,16 @@ export default function ProfileScreen({ navigation }: Props) {
               </View>
             </View>
             <Text style={[styles.profileActivityMeta, { color: colors.primary }]}>
-              ล่าสุด {contacts.length > 0 ? formatRelativeTime(contacts[0]?.contactedAt) : '-'}
+              {t('profile.activity.latest', { time: contacts.length > 0 ? formatRelativeTime(contacts[0]?.contactedAt) : '-' })}
             </Text>
           </View>
 
           {isLoading ? (
-            <Loading text="กำลังโหลด..." />
+            <Loading text={t('profile.activity.loading')} />
           ) : contacts.length === 0 ? (
             <View style={[styles.profileEmptyState, { backgroundColor: colors.backgroundSecondary, borderColor: colors.borderLight }]}> 
               <Ionicons name="document-text-outline" size={36} color={colors.textMuted} style={{ marginBottom: 8 }} />
-              <Text style={{ color: colors.textMuted, fontSize: 15 }}>ยังไม่มีประวัติการติดต่อ</Text>
+              <Text style={{ color: colors.textMuted, fontSize: 15 }}>{t('profile.activity.empty')}</Text>
             </View>
           ) : (
             <>
@@ -1212,7 +1248,7 @@ export default function ProfileScreen({ navigation }: Props) {
                   <TouchableOpacity
                     key={contact.id}
                     activeOpacity={0.85}
-                    onLongPress={() => handleDeleteContact(contact.id, contact.job?.title || 'งานนี้')}
+                    onLongPress={() => handleDeleteContact(contact.id, contact.job?.title || t('home.results.genericCategory'))}
                     onPress={() => {
                       if (contact.status === 'expired' || !contact.job) return;
                       const job = contact.job;
@@ -1241,10 +1277,10 @@ export default function ProfileScreen({ navigation }: Props) {
                     {/* Info */}
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text numberOfLines={1} style={{ fontWeight: '700', color: colors.text, fontSize: 14, marginBottom: 2 }}>
-                        {contact.job?.title || 'เวร (ถูกลบแล้ว)'}
+                        {contact.job?.title || t('profile.activity.deletedJob')}
                       </Text>
                       <Text numberOfLines={1} style={{ color: colors.textMuted, fontSize: 12 }}>
-                        {contact.status === 'expired' ? 'โพสต์นี้ถูกลบไปแล้ว' : (contact.job?.posterName || 'ผู้โพสต์')}
+                        {contact.status === 'expired' ? t('profile.activity.deletedPost') : (contact.job?.posterName || t('profile.activity.posterFallback'))}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                         {formatRelativeTime(contact.contactedAt)}
@@ -1269,7 +1305,7 @@ export default function ProfileScreen({ navigation }: Props) {
                   style={styles.profileActivityToggle}
                 >
                   <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 14 }}>
-                    {showAllContacts ? 'แสดงน้อยลง' : `ดูทั้งหมด (${contacts.length})`}
+                    {showAllContacts ? t('profile.activity.showLess') : t('profile.activity.showAll', { count: contacts.length })}
                   </Text>
                   <Ionicons
                     name={showAllContacts ? 'chevron-up' : 'chevron-down'}
@@ -1281,7 +1317,7 @@ export default function ProfileScreen({ navigation }: Props) {
 
               {/* Hint */}
               <Text style={[styles.profileActivityHint, { color: colors.textMuted }]}>
-                กดค้างเพื่อลบออกจากประวัติ
+                {t('profile.activity.hint')}
               </Text>
             </>
           )}
@@ -1324,7 +1360,7 @@ export default function ProfileScreen({ navigation }: Props) {
           style={[styles.profileLogoutButtonWide, { backgroundColor: elevatedSurface, borderColor: colors.border }]}
         >
           <Ionicons name="log-out-outline" size={18} color={colors.error} />
-          <Text style={[styles.profileLogoutButtonText, { color: colors.error }]}>ออกจากระบบ</Text>
+          <Text style={[styles.profileLogoutButtonText, { color: colors.error }]}>{t('profile.logout.button')}</Text>
         </TouchableOpacity>
 
         <View style={{ height: SPACING.xl * 2 }} />
@@ -1334,7 +1370,7 @@ export default function ProfileScreen({ navigation }: Props) {
       <ModalContainer
         visible={showEditModal}
         onClose={() => { setShowEditModal(false); setPhoneStep('idle'); }}
-        title="แก้ไขโปรไฟล์"
+        title={t('profile.edit.title')}
         fullScreen={true}
       >
         <ScrollView style={styles.editModalContent} showsVerticalScrollIndicator={false}>
@@ -1343,7 +1379,7 @@ export default function ProfileScreen({ navigation }: Props) {
           <View style={profileEditStyles.section}>
             <View style={profileEditStyles.sectionHeader}>
               <View style={[profileEditStyles.sectionDot, { backgroundColor: colors.primary }]} />
-              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>ข้อมูลส่วนตัว</Text>
+              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>{t('profile.edit.personalSection')}</Text>
             </View>
 
             {/* ชื่อ-นามสกุล */}
@@ -1352,12 +1388,12 @@ export default function ProfileScreen({ navigation }: Props) {
                 <Ionicons name="person-outline" size={18} color={colors.primary} />
               </View>
               <View style={profileEditStyles.fieldContent}>
-                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>ชื่อ-นามสกุล</Text>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>{t('profile.edit.displayName')}</Text>
                 <TextInput
                   style={[profileEditStyles.fieldInput, { color: colors.text }]}
                   value={editForm.displayName}
                   onChangeText={(t) => setEditForm({ ...editForm, displayName: t })}
-                  placeholder="ชื่อจริง นามสกุล"
+                  placeholder={t('profile.edit.displayNamePlaceholder')}
                   placeholderTextColor={colors.textMuted}
                 />
               </View>
@@ -1373,7 +1409,7 @@ export default function ProfileScreen({ navigation }: Props) {
                 />
               </View>
               <View style={profileEditStyles.fieldContent}>
-                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>เบอร์โทรศัพท์</Text>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>{t('profile.edit.phone')}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TextInput
                     style={[profileEditStyles.fieldInput, { color: colors.text, flex: 1 }]}
@@ -1382,14 +1418,14 @@ export default function ProfileScreen({ navigation }: Props) {
                       setEditForm({ ...editForm, phone: t });
                       if (phoneStep !== 'idle') { setPhoneStep('idle'); setOtpValue(''); setOtpError(''); }
                     }}
-                    placeholder="0xx-xxx-xxxx"
+                    placeholder={t('profile.edit.phonePlaceholder')}
                     placeholderTextColor={colors.textMuted}
                     keyboardType="phone-pad"
                     editable={phoneStep !== 'verify'}
                   />
                   {phoneStep === 'verified' && (
                     <View style={[profileEditStyles.verifiedBadge, { backgroundColor: colors.success + '20' }]}>
-                      <Text style={{ color: colors.success, fontSize: 11, fontWeight: '700' }}>ยืนยันแล้ว ✓</Text>
+                      <Text style={{ color: colors.success, fontSize: 11, fontWeight: '700' }}>{t('profile.edit.phoneVerified')}</Text>
                     </View>
                   )}
                 </View>
@@ -1401,12 +1437,12 @@ export default function ProfileScreen({ navigation }: Props) {
                 <Ionicons name="location-outline" size={18} color={colors.primary} />
               </View>
               <View style={profileEditStyles.fieldContent}>
-                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>{t('profile.edit.province')}</Text>
                 <TextInput
                   style={[profileEditStyles.fieldInput, { color: colors.text }]}
                   value={editForm.province}
                   onChangeText={(t) => setEditForm({ ...editForm, province: t })}
-                  placeholder="เช่น กรุงเทพมหานคร"
+                  placeholder={t('profile.edit.provincePlaceholder')}
                   placeholderTextColor={colors.textMuted}
                 />
               </View>
@@ -1417,7 +1453,7 @@ export default function ProfileScreen({ navigation }: Props) {
               <View style={[profileEditStyles.infoBanner, { backgroundColor: warningTone.background, borderColor: warningTone.border }]}> 
                 <Ionicons name="warning-outline" size={16} color={warningTone.text} style={{ marginRight: 8 }} />
                 <Text style={{ color: warningTone.text, fontSize: 13, flex: 1 }}>
-                  การเปลี่ยนเบอร์โทรศัพท์ต้องยืนยัน OTP ก่อนที่จะบันทึก
+                  {t('profile.edit.phoneWarning')}
                 </Text>
               </View>
             )}
@@ -1427,10 +1463,10 @@ export default function ProfileScreen({ navigation }: Props) {
               <View style={[profileEditStyles.otpBox, { backgroundColor: colors.background, borderColor: colors.warning }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                   <Ionicons name="shield-checkmark-outline" size={20} color={colors.warning} />
-                  <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, marginLeft: 8 }}>ยืนยัน OTP</Text>
+                  <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, marginLeft: 8 }}>{t('profile.edit.otpTitle')}</Text>
                 </View>
                 <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 14 }}>
-                  กรอกรหัส 6 หลัก ที่ส่งไปยัง {'\n'}
+                  {t('profile.edit.otpSubtitle')} {'\n'}
                   <Text style={{ fontWeight: '700', color: colors.text }}>{editForm.phone}</Text>
                 </Text>
 
@@ -1440,7 +1476,7 @@ export default function ProfileScreen({ navigation }: Props) {
                     <Ionicons name="keypad-outline" size={18} color={colors.primary} />
                   </View>
                   <View style={profileEditStyles.fieldContent}>
-                    <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>รหัส OTP</Text>
+                    <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>{t('profile.edit.otpCode')}</Text>
                     <TextInput
                       style={[profileEditStyles.fieldInput, { color: colors.text, letterSpacing: 8, fontSize: 20, fontWeight: '700' }]}
                       value={otpValue}
@@ -1467,18 +1503,18 @@ export default function ProfileScreen({ navigation }: Props) {
                   style={[profileEditStyles.otpConfirmBtn, { backgroundColor: otpLoading || !otpValue ? colors.border : colors.primary }]}
                 >
                   {otpLoading
-                    ? <Text style={{ color: colors.white, fontWeight: '700' }}>กำลังยืนยัน…</Text>
-                    : <Text style={{ color: colors.white, fontWeight: '700' }}>ยืนยันรหัส OTP</Text>
+                    ? <Text style={{ color: colors.white, fontWeight: '700' }}>{t('profile.edit.otpVerifyLoading')}</Text>
+                    : <Text style={{ color: colors.white, fontWeight: '700' }}>{t('profile.edit.otpVerify')}</Text>
                   }
                 </TouchableOpacity>
 
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12 }}>
                   {otpResendCountdown > 0
-                    ? <Text style={{ color: colors.textMuted, fontSize: 13 }}>ขอรหัสใหม่ได้อีกใน {otpResendCountdown} วินาที</Text>
+                    ? <Text style={{ color: colors.textMuted, fontSize: 13 }}>{t('profile.edit.otpResendIn', { count: otpResendCountdown })}</Text>
                     : (
                       <TouchableOpacity onPress={handleSendPhoneOTP} disabled={phoneStep === 'sending'}>
                         <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '600' }}>
-                          {phoneStep === 'sending' ? 'กำลังส่ง…' : '📨 ส่งรหัสใหม่'}
+                          {phoneStep === 'sending' ? t('profile.edit.otpResendLoading') : t('profile.edit.otpResend')}
                         </Text>
                       </TouchableOpacity>
                     )
@@ -1493,14 +1529,14 @@ export default function ProfileScreen({ navigation }: Props) {
             <View style={profileEditStyles.sectionHeader}>
               <View style={[profileEditStyles.sectionDot, { backgroundColor: colors.accent }]} />
               <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>
-                {user?.role === 'nurse' ? 'ข้อมูลวิชาชีพ' : user?.role === 'hospital' ? 'ข้อมูลองค์กร' : 'ข้อมูลการใช้งาน'}
+                {user?.role === 'nurse' ? t('profile.edit.roleSectionNurse') : user?.role === 'hospital' ? t('profile.edit.roleSectionHospital') : t('profile.edit.roleSectionUser')}
               </Text>
             </View>
 
             {user?.role === 'nurse' ? (
               <>
                 <View style={{ marginBottom: 12 }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>วิชาชีพหลัก</Text>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>{t('profile.edit.staffType')}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {STAFF_TYPES.map((staff) => (
                       <Chip
@@ -1522,20 +1558,20 @@ export default function ProfileScreen({ navigation }: Props) {
                   </View>
                   <View style={profileEditStyles.fieldContent}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>เลขใบประกอบวิชาชีพ</Text>
+                      <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>{t('profile.edit.licenseNumber')}</Text>
                       {(user as any)?.licenseVerificationStatus === 'pending' && (
                         <View style={{ backgroundColor: warningTone.background, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                          <Text style={{ color: warningTone.text, fontSize: 10, fontWeight: '700' }}>⏳ รอตรวจสอบ</Text>
+                          <Text style={{ color: warningTone.text, fontSize: 10, fontWeight: '700' }}>{t('profile.edit.licensePending')}</Text>
                         </View>
                       )}
                       {(user as any)?.licenseVerificationStatus === 'approved' && (
                         <View style={{ backgroundColor: successTone.background, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                          <Text style={{ color: successTone.text, fontSize: 10, fontWeight: '700' }}>✓ ยืนยันแล้ว</Text>
+                          <Text style={{ color: successTone.text, fontSize: 10, fontWeight: '700' }}>{t('profile.edit.licenseApproved')}</Text>
                         </View>
                       )}
                       {(user as any)?.licenseVerificationStatus === 'rejected' && (
                         <View style={{ backgroundColor: colors.errorLight, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                          <Text style={{ color: colors.error, fontSize: 10, fontWeight: '700' }}>✗ ไม่ผ่าน</Text>
+                          <Text style={{ color: colors.error, fontSize: 10, fontWeight: '700' }}>{t('profile.edit.licenseRejected')}</Text>
                         </View>
                       )}
                     </View>
@@ -1543,7 +1579,7 @@ export default function ProfileScreen({ navigation }: Props) {
                       style={[profileEditStyles.fieldInput, { color: colors.text }]}
                       value={editForm.licenseNumber}
                       onChangeText={(t) => setEditForm({ ...editForm, licenseNumber: t })}
-                      placeholder="เลขที่ใบอนุญาต เช่น ผ.12345"
+                      placeholder={t('profile.edit.licensePlaceholder')}
                       placeholderTextColor={colors.textMuted}
                       autoCapitalize="characters"
                     />
@@ -1554,8 +1590,7 @@ export default function ProfileScreen({ navigation }: Props) {
                   <View style={[profileEditStyles.infoBanner, { backgroundColor: warningTone.background, borderColor: warningTone.border }]}> 
                     <Ionicons name="time-outline" size={16} color={warningTone.text} style={{ marginRight: 8 }} />
                     <Text style={{ color: warningTone.text, fontSize: 12, flex: 1 }}>
-                      เลขที่รอตรวจสอบ: <Text style={{ fontWeight: '700' }}>{(user as any).pendingLicenseNumber}</Text>
-                      {'\n'}จะแสดงบนโปรไฟล์หลังจากได้รับการอนุมัติ
+                      {t('profile.edit.pendingLicense', { value: (user as any).pendingLicenseNumber })}
                     </Text>
                   </View>
                 )}
@@ -1564,7 +1599,7 @@ export default function ProfileScreen({ navigation }: Props) {
                   <View style={[profileEditStyles.infoBanner, { backgroundColor: accentTone.background, borderColor: accentTone.border }]}> 
                     <Ionicons name="information-circle-outline" size={16} color={accentTone.text} style={{ marginRight: 8 }} />
                     <Text style={{ color: accentTone.text, fontSize: 12, flex: 1 }}>
-                      เลขใบประกอบวิชาชีพใหม่จะถูกส่งเพื่อรอการตรวจสอบจากผู้ดูแลระบบก่อนแสดงบนโปรไฟล์
+                      {t('profile.edit.licenseChangeHint')}
                     </Text>
                   </View>
                 )}
@@ -1574,12 +1609,12 @@ export default function ProfileScreen({ navigation }: Props) {
                     <Ionicons name="briefcase-outline" size={18} color={colors.success} />
                   </View>
                   <View style={profileEditStyles.fieldContent}>
-                    <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>ประสบการณ์ทำงาน (ปี)</Text>
+                    <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary }]}>{t('profile.edit.experience')}</Text>
                     <TextInput
                       style={[profileEditStyles.fieldInput, { color: colors.text }]}
                       value={editForm.experience}
                       onChangeText={(t) => setEditForm({ ...editForm, experience: t.replace(/[^0-9]/g, '') })}
-                      placeholder="0"
+                      placeholder={t('profile.edit.experiencePlaceholder')}
                       placeholderTextColor={colors.textMuted}
                       keyboardType="number-pad"
                     />
@@ -1587,9 +1622,9 @@ export default function ProfileScreen({ navigation }: Props) {
                 </View>
 
                 <View style={{ marginBottom: 4 }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>รูปแบบงานที่สนใจ</Text>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>{t('profile.edit.workStyle')}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {NURSE_WORK_STYLE_OPTIONS.map((option) => (
+                    {localizedWorkStyleOptions.map((option) => (
                       <Chip
                         key={option.key}
                         label={option.label}
@@ -1603,9 +1638,9 @@ export default function ProfileScreen({ navigation }: Props) {
             ) : user?.role === 'hospital' ? (
               <>
                 <View style={{ marginBottom: 12 }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>ประเภทองค์กร</Text>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>{t('profile.edit.orgType')}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {ORG_TYPE_OPTIONS.map((option) => (
+                    {localizedOrgTypeOptions.map((option) => (
                       <Chip
                         key={option.code}
                         label={option.label}
@@ -1617,7 +1652,7 @@ export default function ProfileScreen({ navigation }: Props) {
                 </View>
 
                 <View style={{ marginBottom: 12 }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>บุคลากรที่กำลังมองหา</Text>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>{t('profile.edit.interestedStaff')}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {STAFF_TYPES.map((staff) => (
                       <Chip
@@ -1631,9 +1666,9 @@ export default function ProfileScreen({ navigation }: Props) {
                 </View>
 
                 <View style={{ marginBottom: 4 }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>ความเร่งด่วนในการรับสมัคร</Text>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>{t('profile.edit.hiringUrgency')}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {HOSPITAL_URGENCY_OPTIONS.map((option) => (
+                    {localizedUrgencyOptions.map((option) => (
                       <Chip
                         key={option.key}
                         label={option.label}
@@ -1647,7 +1682,7 @@ export default function ProfileScreen({ navigation }: Props) {
             ) : (
               <>
                 <View style={{ marginBottom: 12 }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>บุคลากรที่ต้องการติดต่อ</Text>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>{t('profile.edit.contactTarget')}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {STAFF_TYPES.map((staff) => (
                       <Chip
@@ -1661,9 +1696,9 @@ export default function ProfileScreen({ navigation }: Props) {
                 </View>
 
                 <View style={{ marginBottom: 4 }}>
-                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>ลักษณะการดูแลที่ต้องการ</Text>
+                  <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>{t('profile.edit.careNeeds')}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {USER_CARE_TYPE_OPTIONS.map((option) => (
+                    {localizedCareTypeOptions.map((option) => (
                       <Chip
                         key={option.key}
                         label={option.label}
@@ -1681,19 +1716,19 @@ export default function ProfileScreen({ navigation }: Props) {
           <View style={profileEditStyles.section}>
             <View style={profileEditStyles.sectionHeader}>
               <View style={[profileEditStyles.sectionDot, { backgroundColor: colors.primary }]} />
-              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>เกี่ยวกับฉัน</Text>
+              <Text style={[profileEditStyles.sectionTitle, { color: colors.text }]}>{t('profile.edit.aboutSection')}</Text>
             </View>
             <View style={[profileEditStyles.fieldBox, { backgroundColor: colors.surface, borderColor: colors.border, alignItems: 'flex-start', minHeight: 100 }]}>
               <View style={[profileEditStyles.fieldIcon, { marginTop: 10 }]}>
                 <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
               </View>
               <View style={[profileEditStyles.fieldContent, { paddingTop: 10 }]}>
-                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 4 }]}>บรรยายตัวเอง</Text>
+                <Text style={[profileEditStyles.fieldLabel, { color: colors.textSecondary, marginBottom: 4 }]}>{t('profile.edit.aboutMe')}</Text>
                 <TextInput
                   style={[profileEditStyles.fieldInput, { color: colors.text, minHeight: 80, textAlignVertical: 'top' }]}
                   value={editForm.bio}
                   onChangeText={(t) => setEditForm({ ...editForm, bio: t })}
-                  placeholder="บอกเล่าเกี่ยวกับตัวคุณ ความเชี่ยวชาญ และสิ่งที่คุณมองหา..."
+                  placeholder={t('profile.edit.aboutPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   multiline
                   numberOfLines={4}
@@ -1708,26 +1743,27 @@ export default function ProfileScreen({ navigation }: Props) {
         {/* Action Buttons */}
         <View style={[styles.editModalActions, { paddingBottom: Math.max(insets.bottom, 16) + SPACING.md }]}>
           <TouchableOpacity
-            onPress={() => { setShowEditModal(false); setPhoneStep('idle'); }}
+            onPress={() => { if (!isSavingProfile) { setShowEditModal(false); setPhoneStep('idle'); } }}
+            disabled={isSavingProfile}
             style={[profileEditStyles.actionBtn, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginRight: 10 }]}
           >
-            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 16 }}>ยกเลิก</Text>
+            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 16 }}>{t('profile.edit.cancel')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleSaveProfile}
-            disabled={isAuthLoading || phoneStep === 'sending' || phoneStep === 'verify'}
+            disabled={isSavingProfile || isAuthLoading || phoneStep === 'sending' || phoneStep === 'verify'}
             style={[profileEditStyles.actionBtn, {
-              backgroundColor: (isAuthLoading || phoneStep === 'sending' || phoneStep === 'verify') ? colors.border : colors.primary,
+              backgroundColor: (isSavingProfile || isAuthLoading || phoneStep === 'sending' || phoneStep === 'verify') ? colors.border : colors.primary,
               flex: 1.5,
             }]}
           >
-            {isAuthLoading
-              ? <Text style={{ color: colors.white, fontWeight: '700', fontSize: 16 }}>กำลังบันทึก…</Text>
+            {(isSavingProfile || isAuthLoading)
+              ? <Text style={{ color: colors.white, fontWeight: '700', fontSize: 16 }}>{t('profile.edit.saveLoading')}</Text>
               : phoneStep === 'verify' || phoneStep === 'sending'
-                ? <Text style={{ color: colors.textMuted, fontWeight: '600', fontSize: 14 }}>ยืนยัน OTP ก่อนบันทึก</Text>
+                ? <Text style={{ color: colors.textMuted, fontWeight: '600', fontSize: 14 }}>{t('profile.edit.verifyBeforeSave')}</Text>
                 : editForm.phone.trim() !== (user?.phone || '').trim() && editForm.phone.trim() !== '' && phoneStep === 'idle'
-                  ? <><Ionicons name="shield-outline" size={16} color={colors.white} style={{ marginRight: 6 }} /><Text style={{ color: colors.white, fontWeight: '700', fontSize: 15 }}>ขอ OTP & บันทึก</Text></>
-                  : <><Ionicons name="checkmark-circle-outline" size={16} color={colors.white} style={{ marginRight: 6 }} /><Text style={{ color: colors.white, fontWeight: '700', fontSize: 15 }}>บันทึกข้อมูล</Text></>
+                  ? <><Ionicons name="shield-outline" size={16} color={colors.white} style={{ marginRight: 6 }} /><Text style={{ color: colors.white, fontWeight: '700', fontSize: 15 }}>{t('profile.edit.requestOtpAndSave')}</Text></>
+                  : <><Ionicons name="checkmark-circle-outline" size={16} color={colors.white} style={{ marginRight: 6 }} /><Text style={{ color: colors.white, fontWeight: '700', fontSize: 15 }}>{t('profile.edit.save')}</Text></>
             }
           </TouchableOpacity>
         </View>
@@ -1736,40 +1772,40 @@ export default function ProfileScreen({ navigation }: Props) {
       <ModalContainer
         visible={showCampaignCodeModal}
         onClose={() => setShowCampaignCodeModal(false)}
-        title="โค้ดส่วนลด / แคมเปญ"
+        title={t('profile.campaign.title')}
       >
         <View style={styles.campaignModalContent}>
-          <Text style={[styles.campaignModalDescription, { color: colors.textSecondary }]}>เลือกแพ็กเกจที่ต้องการใช้โค้ดก่อน ระบบจะเช็ก role, แพ็กเกจ, ยอดซื้อขั้นต่ำ และสิทธิ์ครั้งแรกให้ทันที</Text>
+          <Text style={[styles.campaignModalDescription, { color: colors.textSecondary }]}>{t('profile.campaign.description')}</Text>
 
           {pendingCampaignCode ? (
             <View style={[styles.pendingCodeBox, { backgroundColor: colors.warningLight, borderColor: colors.warning }]}> 
               <View style={styles.pendingCodeBoxHeader}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.pendingCodeBoxTitle, { color: colors.text }]}>โค้ดที่บันทึกไว้</Text>
+                  <Text style={[styles.pendingCodeBoxTitle, { color: colors.text }]}>{t('profile.campaign.pendingTitle')}</Text>
                   <Text style={[styles.pendingCodeBoxCode, { color: colors.warning }]}>{pendingCampaignCode.code}</Text>
                 </View>
                 <TouchableOpacity onPress={handleClearCampaignCode} disabled={isApplyingCampaignCode}>
-                  <Text style={[styles.pendingCodeBoxAction, { color: colors.warning }]}>ลบ</Text>
+                  <Text style={[styles.pendingCodeBoxAction, { color: colors.warning }]}>{t('profile.campaign.remove')}</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={[styles.pendingCodeBoxText, { color: colors.textSecondary }]}>ใช้กับ {getCampaignPackageDisplayLabel(pendingCampaignCode.packageKey, user?.role)}</Text>
+              <Text style={[styles.pendingCodeBoxText, { color: colors.textSecondary }]}>{t('profile.campaign.appliesTo', { package: getCampaignPackageDisplayLabel(pendingCampaignCode.packageKey, user?.role) })}</Text>
               <Text style={[styles.pendingCodeBoxText, { color: colors.textSecondary }]}> 
                 {getCampaignBenefitSummary(pendingCampaignCode.benefitType, pendingCampaignCode.benefitValue)}
               </Text>
             </View>
           ) : null}
 
-          <Text style={[styles.campaignSectionLabel, { color: colors.text }]}>รหัสโค้ด</Text>
+          <Text style={[styles.campaignSectionLabel, { color: colors.text }]}>{t('profile.campaign.codeLabel')}</Text>
           <TextInput
             style={[styles.campaignInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
             value={campaignCodeInput}
             onChangeText={setCampaignCodeInput}
-            placeholder="เช่น NURSEGO10"
+            placeholder={t('profile.campaign.codePlaceholder')}
             placeholderTextColor={colors.textMuted}
             autoCapitalize="characters"
           />
 
-          <Text style={[styles.campaignSectionLabel, { color: colors.text }]}>เลือกแพ็กเกจ / บริการ</Text>
+          <Text style={[styles.campaignSectionLabel, { color: colors.text }]}>{t('profile.campaign.packageLabel')}</Text>
           <View style={styles.campaignChipWrap}>
             {campaignPackageOptions.map((item) => (
               <Chip
@@ -1787,21 +1823,21 @@ export default function ProfileScreen({ navigation }: Props) {
             disabled={isApplyingCampaignCode}
           >
             <Ionicons name="checkmark-circle-outline" size={18} color={colors.white} />
-            <Text style={styles.campaignApplyButtonText}>{isApplyingCampaignCode ? 'กำลังตรวจสอบ...' : 'บันทึกโค้ดนี้ไว้ใช้'}</Text>
+            <Text style={styles.campaignApplyButtonText}>{isApplyingCampaignCode ? t('profile.campaign.applyLoading') : t('profile.campaign.apply')}</Text>
           </TouchableOpacity>
 
-          <Text style={[styles.campaignFootnote, { color: colors.textMuted }]}>หลังบันทึกแล้ว ระบบจะใช้โค้ดให้อัตโนมัติเมื่อคุณซื้อรายการที่ตรงกับแพ็กเกจที่เลือกในหน้า{getCommerceEntryTitle(commerceStatus)}</Text>
+          <Text style={[styles.campaignFootnote, { color: colors.textMuted }]}>{t('profile.campaign.footnote', { entry: getCommerceEntryTitle(commerceStatus) })}</Text>
         </View>
       </ModalContainer>
 
       {/* Logout Confirmation Modal */}
       <ConfirmModal
         visible={showLogoutModal}
-        title="ออกจากระบบ"
-        message="คุณต้องการออกจากระบบหรือไม่?"
+        title={t('profile.logout.title')}
+        message={t('profile.logout.message')}
         icon="🚪"
-        confirmText="ออกจากระบบ"
-        cancelText="ยกเลิก"
+        confirmText={t('profile.logout.confirm')}
+        cancelText={t('common.actions.cancel')}
         type="danger"
         onConfirm={confirmLogout}
         onCancel={() => setShowLogoutModal(false)}
@@ -1810,11 +1846,11 @@ export default function ProfileScreen({ navigation }: Props) {
       {/* Delete Contact Confirmation Modal */}
       <ConfirmModal
         visible={showDeleteContactModal}
-        title="ลบออกจากประวัติ"
-        message={pendingDeleteContact ? `ต้องการลบ "${pendingDeleteContact.title}" ออกจากประวัติการติดต่อ?` : ''}
+        title={t('profile.activity.deleteTitle')}
+        message={pendingDeleteContact ? t('profile.activity.deleteMessage', { title: pendingDeleteContact.title }) : ''}
         icon="🗑️"
-        confirmText="ลบ"
-        cancelText="ยกเลิก"
+        confirmText={t('common.actions.delete')}
+        cancelText={t('common.actions.cancel')}
         type="danger"
         onConfirm={confirmDeleteContact}
         onCancel={() => { setShowDeleteContactModal(false); setPendingDeleteContact(null); }}

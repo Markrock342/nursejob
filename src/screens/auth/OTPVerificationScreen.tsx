@@ -12,6 +12,9 @@ import {
   Alert,
   Keyboard,
   StatusBar,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +26,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { sendOTP, verifyOTP } from '../../services/otpService';
 import { AuthStackParamList } from '../../types';
 import { trackEvent } from '../../services/analyticsService';
+import { useI18n } from '../../i18n';
 
 type OTPVerificationScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'OTPVerification'>;
 type OTPVerificationScreenRouteProp = RouteProp<AuthStackParamList, 'OTPVerification'>;
@@ -33,6 +37,7 @@ interface Props {
 
 export default function OTPVerificationScreen({ navigation, route }: Props) {
   const { colors } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { phone, verificationId: initialVerificationId, registrationData } = route.params;
 
@@ -98,12 +103,12 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
         setCountdown(60);
         setOtp(['', '', '', '', '', '']);
         inputRefs.current[0]?.focus();
-        Alert.alert('ส่งอีก OTP สำเร็จ', 'SMS ส่งไปแล้ว');
+        Alert.alert(t('auth.otpVerification.resendSuccessTitle'), t('auth.otpVerification.resendSuccessMessage'));
       } else {
-        Alert.alert('ส่ง OTP ล้มเหลว', result.error || 'ไม่สามารถส่ง OTP ได้');
+        Alert.alert(t('auth.otpVerification.resendFailedTitle'), result.error || t('auth.otpVerification.resendFailedMessage'));
       }
     } catch {
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถส่ง OTP ได้');
+      Alert.alert(t('auth.otpVerification.errorTitle'), t('auth.otpVerification.resendFailedMessage'));
     } finally {
       setIsResending(false);
     }
@@ -112,7 +117,7 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
   const handleVerifyOTP = async (otpCode?: string) => {
     const code = otpCode || otp.join('');
     if (code.length !== 6) {
-      Alert.alert('กรุณากรอก OTP', 'กรุณากรอก OTP 6 หลัก');
+      Alert.alert(t('auth.otpVerification.codeRequiredTitle'), t('auth.otpVerification.codeRequiredMessage'));
       return;
     }
     setIsLoading(true);
@@ -130,20 +135,20 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
         });
 
         Alert.alert(
-          'ยืนยันสำเร็จ!',
-          'เบอร์โทรศัพท์ของคุณได้รับการยืนยันแล้ว',
+          t('auth.otpVerification.successTitle'),
+          t('auth.otpVerification.successMessage'),
           [{
-            text: 'ถัดไป',
+            text: t('auth.otpVerification.next'),
             onPress: () => navigation.replace('ChooseRole', { phone, phoneVerified: true, registrationData }),
           }]
         );
       } else {
-        Alert.alert('OTP ไม่ถูกต้อง', result.error || 'กรุณาลองใหม่อีกครั้ง');
+        Alert.alert(t('auth.otpVerification.invalidTitle'), result.error || t('auth.otpVerification.invalidMessage'));
         setOtp(['', '', '', '', '', '']);
         inputRefs.current[0]?.focus();
       }
     } catch {
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถยืนยัน OTP ได้');
+      Alert.alert(t('auth.otpVerification.errorTitle'), t('auth.otpVerification.invalidMessage'));
     } finally {
       setIsLoading(false);
     }
@@ -161,6 +166,8 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
         backgroundColor={COLORS.background}
         translucent={false}
       />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
       <View style={styles.content}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
@@ -172,8 +179,8 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        <Text style={styles.title}>ยืนยันตัวตน</Text>
-        <Text style={styles.subtitle}>กรุณากรอก OTP</Text>
+        <Text style={styles.title}>{t('auth.otpVerification.title')}</Text>
+        <Text style={styles.subtitle}>{t('auth.otpVerification.subtitle')}</Text>
         <Text style={styles.phone}>{formatPhoneDisplay(phone)}</Text>
 
         <View style={styles.otpContainer}>
@@ -194,7 +201,7 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
         </View>
 
         <Button
-          title={isLoading ? 'กำลังตรวจสอบ...' : 'ยืนยัน OTP'}
+          title={isLoading ? t('auth.otpVerification.verifyLoading') : t('auth.otpVerification.verifyButton')}
           onPress={() => handleVerifyOTP()}
           loading={isLoading}
           disabled={otp.join('').length !== 6}
@@ -202,21 +209,23 @@ export default function OTPVerificationScreen({ navigation, route }: Props) {
         />
 
         <View style={styles.resendContainer}>
-          <Text style={styles.resendText}>ไม่ได้รับ OTP? </Text>
+          <Text style={styles.resendText}>{`${t('auth.otpVerification.resendPrompt')} `}</Text>
           {countdown > 0 ? (
-            <Text style={styles.countdownText}>ลองใหม่ใน {countdown}s</Text>
+            <Text style={styles.countdownText}>{t('auth.otpVerification.resendIn', { count: countdown })}</Text>
           ) : (
             <TouchableOpacity onPress={handleResendOTP} disabled={isResending}>
-              <Text style={styles.resendLink}>{isResending ? 'กำลังส่ง...' : 'ส่งอีกครั้ง'}</Text>
+              <Text style={styles.resendLink}>{isResending ? t('auth.otpVerification.resendLoading') : t('auth.otpVerification.resend')}</Text>
             </TouchableOpacity>
           )}
         </View>
 
         <TouchableOpacity style={styles.changePhoneButton} onPress={() => navigation.goBack()}>
           <Ionicons name="create-outline" size={16} color={COLORS.textMuted} />
-          <Text style={styles.changePhoneText}>เปลี่ยนเบอร์โทร</Text>
+          <Text style={styles.changePhoneText}>{t('auth.otpVerification.changePhone')}</Text>
         </TouchableOpacity>
       </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

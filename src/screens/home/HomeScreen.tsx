@@ -57,6 +57,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useTheme } from '../../context/ThemeContext';
+import { formatCurrency, formatDateValue, getRateUnitLabel, useI18n } from '../../i18n';
 import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabled';
 import { useScreenPerformance } from '../../hooks/useScreenPerformance';
 import { useTabRefresh } from '../../hooks/useTabRefresh';
@@ -100,13 +101,16 @@ function getJobCoords(job: JobPost): { lat: number; lng: number } | null {
 }
 
 // ─── Category Tabs ──────────────────────────────────────────────────
-const CATEGORY_TABS = [
-  { key: 'all',      label: 'ทั้งหมด',      icon: 'apps-outline'             as const, color: '#0EA5E9' },
-  { key: 'shift',    label: 'แทนเวร',       icon: 'swap-horizontal-outline'  as const, color: '#8B5CF6' },
-  { key: 'job',      label: 'รับสมัคร',    icon: 'briefcase-outline'        as const, color: '#F59E0B' },
-  { key: 'homecare', label: 'ดูแลผู้ป่วย', icon: 'home-outline'             as const, color: '#10B981' },
-] as const;
-type CategoryKey = typeof CATEGORY_TABS[number]['key'];
+type CategoryKey = 'all' | 'shift' | 'job' | 'homecare';
+
+function getCategoryTabs(t: (key: any) => string) {
+  return [
+    { key: 'all',      label: t('home.categories.all'),      icon: 'apps-outline'            as const, color: '#0EA5E9' },
+    { key: 'shift',    label: t('home.categories.shift'),    icon: 'swap-horizontal-outline' as const, color: '#8B5CF6' },
+    { key: 'job',      label: t('home.categories.job'),      icon: 'briefcase-outline'       as const, color: '#F59E0B' },
+    { key: 'homecare', label: t('home.categories.homecare'), icon: 'home-outline'            as const, color: '#10B981' },
+  ] as const;
+}
 
 // ============================================
 // Types
@@ -131,27 +135,28 @@ const URGENT_CARD_WIDTH = Math.min(SCREEN_WIDTH * 0.46, 176);
 const URGENT_CARD_GAP = SPACING.sm;
 const URGENT_AUTO_SCROLL_INTERVAL = 3200;
 
-function getUrgentJobDateLabel(job: JobPost) {
+function getUrgentJobDateLabel(job: JobPost, t: (key: any) => string) {
   if (job.postType === 'job') {
-    return job.startDateNote || 'เริ่มงานตามตกลง';
+    return job.startDateNote || t('home.urgent.startByAgreement');
   }
-  if (!job.shiftDate) return 'ตามตกลง';
+  if (!job.shiftDate) return t('home.urgent.dateByAgreement');
   const d = typeof job.shiftDate === 'string' ? new Date(job.shiftDate) : job.shiftDate;
-  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  return formatDateValue(d, { day: 'numeric', month: 'short' });
 }
 
-function getUrgentJobTimeLabel(job: JobPost) {
+function getUrgentJobTimeLabel(job: JobPost, t: (key: any) => string) {
   if (job.postType === 'job') {
-    return job.workHours || job.shiftTime || 'เวลางานตามตกลง';
+    return job.workHours || job.shiftTime || t('home.urgent.workHoursByAgreement');
   }
-  return job.shiftTime || 'ตามตกลง';
+  return job.shiftTime || t('home.urgent.dateByAgreement');
 }
 
 function getRateUnit(rateType?: string) {
-  return rateType === 'hour' ? '/ชม.' : rateType === 'day' ? '/วัน' : rateType === 'month' ? '/เดือน' : '/เวร';
+  return getRateUnitLabel(rateType);
 }
 
 function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: UrgentBannerProps) {
+  const { t } = useI18n();
   if (urgentJobs.length === 0) return null;
 
   const remainingCount = Math.max(totalUrgentJobs - urgentJobs.length, 0);
@@ -204,13 +209,13 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
             <View style={urgentStyles.flashIconWrap}>
               <Ionicons name="flash" size={16} color="#FFFFFF" />
             </View>
-            <Text style={urgentStyles.headerTitle}>งานด่วน</Text>
+            <Text style={urgentStyles.headerTitle}>{t('home.urgent.title')}</Text>
             <View style={urgentStyles.badge}>
-              <Text style={urgentStyles.badgeText}>{totalUrgentJobs} รายการ</Text>
+              <Text style={urgentStyles.badgeText}>{`${totalUrgentJobs} ${t('common.units.item')}`}</Text>
             </View>
           </View>
           <Text style={urgentStyles.headerSubtitle} numberOfLines={1}>
-            รวมงานเร่งด่วนที่ควรดูตอนนี้ และเปิดทั้งหมดได้ทันที
+            {t('home.urgent.subtitle')}
           </Text>
         </View>
 
@@ -221,7 +226,7 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
           activeOpacity={0.85}
         >
           <Ionicons name="menu-outline" size={15} color="#FFFFFF" />
-          <Text style={urgentStyles.viewAllButtonText}>ดูทั้งหมด</Text>
+          <Text style={urgentStyles.viewAllButtonText}>{t('common.actions.viewAll')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -249,7 +254,7 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
               </View>
               <View style={urgentStyles.urgentBadge}>
                 <Ionicons name="flash" size={12} color="#FFF" />
-                <Text style={urgentStyles.urgentBadgeText}>ด่วน</Text>
+                <Text style={urgentStyles.urgentBadgeText}>{t('home.urgent.badge')}</Text>
               </View>
             </View>
 
@@ -261,7 +266,7 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
                 <Ionicons name="location-outline" size={12} color="#F43F5E" />
               </View>
               <Text style={urgentStyles.cardLocation} numberOfLines={1}>
-                {job.location?.hospital || job.location?.district || job.location?.province || 'ไม่ระบุสถานที่'}
+                {job.location?.hospital || job.location?.district || job.location?.province || t('home.urgentMeta.unspecifiedLocation')}
               </Text>
             </View>
 
@@ -270,18 +275,18 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
                 <View style={urgentStyles.cardMetaIconWrap}>
                   <Ionicons name="calendar-outline" size={12} color="#F43F5E" />
                 </View>
-                <Text style={urgentStyles.cardMetaLabel}>{job.postType === 'job' ? 'เริ่มงาน' : 'วันที่'}</Text>
+                <Text style={urgentStyles.cardMetaLabel}>{job.postType === 'job' ? t('home.urgentMeta.startDate') : t('home.urgentMeta.date')}</Text>
                 <Text style={urgentStyles.cardMetaText} numberOfLines={1}>
-                  {getUrgentJobDateLabel(job)}
+                  {getUrgentJobDateLabel(job, t)}
                 </Text>
               </View>
               <View style={urgentStyles.cardMetaPill}>
                 <View style={urgentStyles.cardMetaIconWrap}>
                   <Ionicons name="time-outline" size={12} color="#F43F5E" />
                 </View>
-                <Text style={urgentStyles.cardMetaLabel}>{job.postType === 'job' ? 'เวลางาน' : 'เวลา'}</Text>
+                <Text style={urgentStyles.cardMetaLabel}>{job.postType === 'job' ? t('home.urgentMeta.workHours') : t('home.urgentMeta.time')}</Text>
                 <Text style={urgentStyles.cardMetaText} numberOfLines={1}>
-                  {getUrgentJobTimeLabel(job)}
+                  {getUrgentJobTimeLabel(job, t)}
                 </Text>
               </View>
               {(job as any)._distanceKm !== undefined ? (
@@ -289,9 +294,11 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
                   <View style={[urgentStyles.cardMetaIconWrap, urgentStyles.cardMetaIconWrapAccent]}>
                     <Ionicons name="navigate-outline" size={12} color="#EA580C" />
                   </View>
-                  <Text style={urgentStyles.cardMetaLabel}>ระยะทาง</Text>
+                  <Text style={urgentStyles.cardMetaLabel}>{t('home.urgentMeta.distance')}</Text>
                   <Text style={urgentStyles.cardDistance}>
-                    {((job as any)._distanceKm as number) < 1 ? `${Math.round(((job as any)._distanceKm as number) * 1000)} ม.` : `${((job as any)._distanceKm as number).toFixed(1)} กม.`}
+                    {((job as any)._distanceKm as number) < 1
+                      ? `${Math.round(((job as any)._distanceKm as number) * 1000)} ${t('common.units.meterShort')}`
+                      : `${((job as any)._distanceKm as number).toFixed(1)} ${t('common.units.kilometersShort')}`}
                   </Text>
                 </View>
               ) : null}
@@ -299,11 +306,11 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
 
             <View style={urgentStyles.cardBottomRow}>
               <View style={urgentStyles.cardPriceBlock}>
-                <Text style={urgentStyles.cardPrice}>฿{job.shiftRate?.toLocaleString()}</Text>
+                <Text style={urgentStyles.cardPrice}>{formatCurrency(job.shiftRate || 0)}</Text>
                 <Text style={urgentStyles.cardPriceUnit}>{getRateUnit(job.rateType)}</Text>
               </View>
               <View style={urgentStyles.cardActionPill}>
-                <Text style={urgentStyles.cardActionText}>ดูงาน</Text>
+                <Text style={urgentStyles.cardActionText}>{t('common.actions.viewAll')}</Text>
                 <Ionicons name="arrow-forward" size={12} color="#FFFFFF" />
               </View>
             </View>
@@ -318,9 +325,9 @@ function UrgentJobsBanner({ urgentJobs, totalUrgentJobs, onPress, onViewAll }: U
               </View>
               <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
             </View>
-            <Text style={urgentStyles.moreCardTitle}>ดูทั้งหมด</Text>
-            <Text style={urgentStyles.moreCardCount}>+{remainingCount} งาน</Text>
-            <Text style={urgentStyles.moreCardSub}>เปิดรายการงานด่วนทั้งหมด</Text>
+            <Text style={urgentStyles.moreCardTitle}>{t('home.urgent.moreTitle')}</Text>
+            <Text style={urgentStyles.moreCardCount}>+{remainingCount} {t('home.results.genericCategory')}</Text>
+            <Text style={urgentStyles.moreCardSub}>{t('home.urgent.moreSubtitle')}</Text>
           </TouchableOpacity>
         ) : null}
       </ScrollView>
@@ -684,6 +691,7 @@ const urgentStyles = StyleSheet.create({
 // ============================================
 export default function HomeScreen({ navigation }: Props) {
   useScreenPerformance('Home');
+  const { t } = useI18n();
   const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
   // Nearby location
   const { location, loading: locationLoading, error: locationError, getLocation } = useLocation();
@@ -693,6 +701,7 @@ export default function HomeScreen({ navigation }: Props) {
   const toast = useToast();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
+  const categoryTabs = useMemo(() => getCategoryTabs(t), [t]);
   const headerBackground = isDark ? colors.surface : colors.primary;
   const headerTextColor = isDark ? colors.text : colors.white;
   const headerMutedTextColor = isDark ? colors.textSecondary : 'rgba(255,255,255,0.8)';
@@ -1448,22 +1457,22 @@ export default function HomeScreen({ navigation }: Props) {
         contentContainerStyle={styles.quickFilters}
       >
         <Chip
-          label="ทั้งหมด"
+          label={t('home.quickFilters.all')}
           selected={!filters.urgentOnly && !filters.staffType && !filters.locationType && filters.sortBy === 'latest'}
           onPress={() => setFilters({ ...filters, urgentOnly: false, staffType: undefined, locationType: undefined, sortBy: 'latest' })}
         />
         <Chip
-          label={totalUrgentJobs > 0 ? `ด่วน ${totalUrgentJobs}` : 'ด่วน'}
+          label={totalUrgentJobs > 0 ? `${t('home.quickFilters.urgent')} ${totalUrgentJobs}` : t('home.quickFilters.urgent')}
           selected={filters.urgentOnly}
           onPress={() => setFilters({ ...filters, urgentOnly: !filters.urgentOnly })}
         />
         <Chip
-          label="ยืนยันตัวตน"
+          label={t('home.quickFilters.verified')}
           selected={filters.verifiedOnly}
           onPress={() => setFilters({ ...filters, verifiedOnly: !filters.verifiedOnly })}
         />
         <Chip
-          label="ใกล้ฉัน"
+          label={t('home.quickFilters.nearby')}
           selected={nearbyMode}
           onPress={async () => {
             if (!nearbyMode) {
@@ -1474,27 +1483,27 @@ export default function HomeScreen({ navigation }: Props) {
           }}
         />
         <Chip
-          label="ดูแลที่บ้าน"
+          label={t('home.quickFilters.homeCare')}
           selected={filters.locationType === 'HOME'}
           onPress={() => setFilters({ ...filters, locationType: filters.locationType === 'HOME' ? undefined : 'HOME' })}
         />
         <Chip
-          label="รพ."
+          label={t('home.quickFilters.hospital')}
           selected={filters.locationType === 'HOSPITAL'}
           onPress={() => setFilters({ ...filters, locationType: filters.locationType === 'HOSPITAL' ? undefined : 'HOSPITAL' })}
         />
         <Chip
-          label="💰 NET"
+          label={`💰 ${t('home.quickFilters.net')}`}
           selected={filters.paymentType === 'NET'}
           onPress={() => setFilters({ ...filters, paymentType: filters.paymentType === 'NET' ? undefined : 'NET' })}
         />
         <Chip
-          label="🌙 เวรดึก"
+          label={`🌙 ${t('home.quickFilters.nightShift')}`}
           selected={filters.sortBy === 'night'}
           onPress={() => setFilters({ ...filters, sortBy: filters.sortBy === 'night' ? 'latest' : 'night' })}
         />
         <Chip
-          label="💵 ค่าสูง"
+          label={`💵 ${t('home.quickFilters.highPay')}`}
           selected={filters.sortBy === 'highestPay'}
           onPress={() => setFilters({ ...filters, sortBy: filters.sortBy === 'highestPay' ? 'latest' : 'highestPay' })}
         />
@@ -1514,11 +1523,11 @@ export default function HomeScreen({ navigation }: Props) {
             />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.nearbyHelperTitle}>เปิดงานใกล้คุณให้พร้อม</Text>
+            <Text style={styles.nearbyHelperTitle}>{t('home.nearby.helperTitle')}</Text>
             <Text style={styles.nearbyHelperText}>{nearbyInfoMessage}</Text>
           </View>
           <View style={styles.nearbyHelperCTA}>
-            <Text style={styles.nearbyHelperCTAText}>ตั้งค่า</Text>
+            <Text style={styles.nearbyHelperCTAText}>{t('home.nearby.settings')}</Text>
             <Ionicons name="chevron-forward" size={14} color={colors.primary} />
           </View>
         </TouchableOpacity>
@@ -1528,22 +1537,24 @@ export default function HomeScreen({ navigation }: Props) {
       <View style={styles.resultsRow}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Ionicons
-            name={(CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.icon || 'apps-outline') as any}
+            name={(categoryTabs.find(tab => tab.key === (filters.postType ?? 'all'))?.icon || 'apps-outline') as any}
             size={14}
             color={colors.textSecondary}
             style={{ marginRight: 4 }}
           />
           <Text style={[styles.resultsText, { color: colors.textSecondary }]}>
-            พบ <Text style={[styles.resultsCount, { color: colors.primary }]}>{visibleJobs.length}</Text>{' '}
-            {CATEGORY_TABS.find(t => t.key === (filters.postType ?? 'all'))?.label ?? 'งาน'}
+            {t('home.results.found', {
+              count: visibleJobs.length,
+              category: categoryTabs.find(tab => tab.key === (filters.postType ?? 'all'))?.label ?? t('home.results.genericCategory'),
+            })}
           </Text>
         </View>
         {nearbyMode && (
-          <Text style={[styles.nearbySortLabel, { color: colors.primary }]}>ใกล้สุดก่อน • {nearbyRadiusKm} กม.</Text>
+          <Text style={[styles.nearbySortLabel, { color: colors.primary }]}>{t('home.nearby.nearestFirst', { distance: `${nearbyRadiusKm} ${t('common.units.kilometersShort')}` })}</Text>
         )}
         {activeFilterCount > 0 && (
           <TouchableOpacity onPress={clearFilters}>
-            <Text style={[styles.clearFilters, { color: colors.primary }]}>ล้างตัวกรอง</Text>
+            <Text style={[styles.clearFilters, { color: colors.primary }]}>{t('common.actions.clearFilters')}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -1559,10 +1570,10 @@ export default function HomeScreen({ navigation }: Props) {
         <View style={styles.headerTop}>
           <View>
             <Text style={[styles.greeting, { color: headerTextColor }]}>
-              {user ? `สวัสดี, ${user.displayName?.split(' ')[0] || 'คุณ'}` : 'บอร์ดหาคนแทน'}
+              {user ? t('home.header.hello', { name: user.displayName?.split(' ')[0] || 'คุณ' }) : t('home.header.loggedOutTitle')}
             </Text>
             <Text style={[styles.headerSubtitle, { color: headerMutedTextColor }]}>
-              {user ? 'หางานหรือหาคนแทน' : 'เข้าสู่ระบบเพื่อประกาศ'}
+              {user ? t('home.header.loggedInSubtitle') : t('home.header.loggedOutSubtitle')}
             </Text>
           </View>
           <View style={styles.headerActions}>
@@ -1600,7 +1611,7 @@ export default function HomeScreen({ navigation }: Props) {
             <Ionicons name="search-outline" size={20} color={colors.textMuted} style={styles.searchIcon} />
             <TextInput
               style={[styles.searchInput, { color: colors.text }]}
-              placeholder="ค้นหาเวร, แผนก, สถานที่..."
+              placeholder={t('home.header.searchPlaceholder')}
               placeholderTextColor={colors.textMuted}
               value={searchQuery}
               onChangeText={handleSearch}
@@ -1629,9 +1640,9 @@ export default function HomeScreen({ navigation }: Props) {
             <View style={styles.savedPresetHeader}>
               <View style={styles.savedPresetHeaderLeft}>
                 <Ionicons name="sparkles-outline" size={14} color={headerTextColor} />
-                <Text style={[styles.savedPresetHeaderTitle, { color: headerTextColor }]}>ชุดที่ใช้บ่อย</Text>
+                <Text style={[styles.savedPresetHeaderTitle, { color: headerTextColor }]}>{t('home.header.presetsTitle')}</Text>
               </View>
-              <Text style={[styles.savedPresetHeaderHint, { color: 'rgba(255,255,255,0.82)' }]}>แตะเพื่อใช้ซ้ำ • กดค้างเพื่อลบ</Text>
+              <Text style={[styles.savedPresetHeaderHint, { color: 'rgba(255,255,255,0.82)' }]}>{t('home.header.presetsHint')}</Text>
             </View>
 
             <ScrollView
@@ -1688,7 +1699,7 @@ export default function HomeScreen({ navigation }: Props) {
           style={{ backgroundColor: headerBackground }}
           contentContainerStyle={styles.categoryTabs}
         >
-          {CATEGORY_TABS.map((tab) => {
+          {categoryTabs.map((tab) => {
             const isActive = (filters.postType ?? 'all') === tab.key;
             return (
               <TouchableOpacity
@@ -1729,7 +1740,7 @@ export default function HomeScreen({ navigation }: Props) {
       {/* Job List */}
   <View style={{ flex: 1, backgroundColor: colors.background }}>
       {isLoading ? (
-        <Loading text="กำลังโหลดงาน..." />
+        <Loading text={t('home.loading.jobs')} />
       ) : (
         <FlatList
           ref={jobsListRef}
@@ -1740,9 +1751,9 @@ export default function HomeScreen({ navigation }: Props) {
           ListEmptyComponent={
             <EmptyState
               icon="😢"
-              title={nearbyMode ? `ยังไม่พบงานในรัศมี ${nearbyRadiusKm} กม.` : 'ไม่พบเวรที่ตรงกับเงื่อนไข'}
-              description={nearbyMode ? 'ลองขยายรัศมีหรืออัปเดตตำแหน่งที่หน้า งานใกล้คุณ เพื่อเห็นตัวเลือกมากขึ้น' : 'ลองเปลี่ยนตัวกรองหรือคำค้นหา เพื่อให้เจองานที่ตรงได้เร็วขึ้น'}
-              actionText={nearbyMode ? 'ตั้งค่างานใกล้คุณ' : 'ล้างตัวกรอง'}
+              title={nearbyMode ? t('home.empty.nearbyTitle', { distance: `${nearbyRadiusKm} ${t('common.units.kilometersShort')}` }) : t('home.empty.genericTitle')}
+              description={nearbyMode ? t('home.empty.nearbyDescription') : t('home.empty.genericDescription')}
+              actionText={nearbyMode ? t('home.empty.nearbyAction') : t('home.empty.genericAction')}
               onAction={nearbyMode ? openNearbySettings : clearFilters}
             />
           }
@@ -1762,11 +1773,11 @@ export default function HomeScreen({ navigation }: Props) {
             isLoadingMore ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                 <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 6 }}>โหลดเพิ่มเติม...</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 6 }}>{t('home.results.loadingMore')}</Text>
               </View>
             ) : visibleJobs.length > 0 && !hasMoreRef.current ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                <Text style={{ color: colors.textMuted, fontSize: 12 }}>— แสดงทั้งหมด {visibleJobs.length} รายการ —</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>{t('home.results.allShown', { count: visibleJobs.length })}</Text>
               </View>
             ) : null
           }
@@ -1800,17 +1811,14 @@ export default function HomeScreen({ navigation }: Props) {
             <Ionicons name="location" size={44} color={colors.primary} />
           </View>
 
-          <Text style={[styles.promoTitle, { color: colors.text }]}>รู้ไวขึ้นกับงานใกล้คุณ</Text>
-          <Text style={[styles.promoDesc, { color: colors.textSecondary }]}>
-            เมื่อมีงานใหม่ในรัศมีที่คุณกำหนด{`\n`}
-            แอปจะส่งแจ้งเตือนให้คุณอย่างรวดเร็ว เพื่อไม่พลาดโอกาสสำคัญ
-          </Text>
+          <Text style={[styles.promoTitle, { color: colors.text }]}>{t('home.promo.title')}</Text>
+          <Text style={[styles.promoDesc, { color: colors.textSecondary }]}>{t('home.promo.description')}</Text>
 
           {/* Feature list */}
           {[
-            { icon: 'notifications', text: 'รับแจ้งเตือนทันทีเมื่อมีงานใหม่ในพื้นที่ที่สนใจ' },
-            { icon: 'resize', text: 'กำหนดรัศมีเองได้ตามสไตล์การรับงานของคุณ' },
-            { icon: 'location-outline', text: 'ใช้ตำแหน่งจากมือถือเพื่อเรียงงานใกล้ตัวได้แม่นขึ้น' },
+            { icon: 'notifications', text: t('home.promo.featureInstant') },
+            { icon: 'resize', text: t('home.promo.featureRadius') },
+            { icon: 'location-outline', text: t('home.promo.featureLocation') },
           ].map((f) => (
             <View key={f.icon} style={styles.promoFeatureRow}>
               <View style={[styles.promoFeatureDot, { backgroundColor: colors.primaryBackground }]}> 
@@ -1827,14 +1835,14 @@ export default function HomeScreen({ navigation }: Props) {
             activeOpacity={0.85}
           >
             <Ionicons name="location" size={18} color={colors.white} />
-            <Text style={styles.promoCTAText}>เปิดแจ้งเตือนงานใกล้คุณ</Text>
+            <Text style={styles.promoCTAText}>{t('home.promo.cta')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.promoDismiss}
             onPress={() => dismissNearbyPromo(false)}
           >
-            <Text style={[styles.promoDismissText, { color: colors.textSecondary }]}>ไว้ทีหลัง</Text>
+            <Text style={[styles.promoDismissText, { color: colors.textSecondary }]}>{t('home.promo.later')}</Text>
           </TouchableOpacity>
         </View>
       </ModalContainer>
@@ -1843,11 +1851,11 @@ export default function HomeScreen({ navigation }: Props) {
       <ModalContainer
         visible={showExpiryPopup}
         onClose={() => setShowExpiryPopup(false)}
-        title="ประกาศใกล้หมดอายุ"
+        title={t('home.expiry.title')}
       >
         <View style={{ padding: SPACING.md }}>
           <Text style={{ fontSize: FONT_SIZES.md, color: colors.textSecondary, marginBottom: SPACING.md, textAlign: 'center' }}>
-            คุณมี {expiringPosts.length} ประกาศที่ใกล้หมดอายุ
+            {t('home.expiry.description', { count: expiringPosts.length })}
           </Text>
           
           {expiringPosts.slice(0, 3).map((post) => {
@@ -1868,7 +1876,7 @@ export default function HomeScreen({ navigation }: Props) {
                   {post.title}
                 </Text>
                 <Text style={{ fontSize: FONT_SIZES.sm, color: colors.error, marginTop: 4 }}>
-                  ⚠️ จะหมดอายุภายใน 24 ชั่วโมง!
+                  {t('home.expiry.urgent')}
                 </Text>
               </View>
             );
@@ -1881,7 +1889,7 @@ export default function HomeScreen({ navigation }: Props) {
             marginTop: SPACING.sm,
           }}>
             <Text style={{ fontSize: FONT_SIZES.sm, color: colors.primary, textAlign: 'center' }}>
-              💡 ต่ออายุประกาศได้ในราคา 19 บาท/วัน
+              {t('home.expiry.renewalHint')}
             </Text>
           </View>
           
@@ -1890,14 +1898,14 @@ export default function HomeScreen({ navigation }: Props) {
                 variant="outline"
                 onPress={() => setShowExpiryPopup(false)}
                 style={{ flex: 1 }}
-              >ปิด</Button>
+              >{t('home.expiry.close')}</Button>
               <Button
                 onPress={() => {
                   setShowExpiryPopup(false);
                   (navigation as any).navigate('MyPosts');
                 }}
                 style={{ flex: 1 }}
-              >จัดการประกาศ</Button>
+              >{t('home.expiry.managePosts')}</Button>
           </View>
         </View>
       </ModalContainer>
@@ -1909,25 +1917,25 @@ export default function HomeScreen({ navigation }: Props) {
         actions={[
           {
             icon: 'create-outline',
-            label: 'โพสต์งาน',
+            label: t('home.fab.postJob'),
             onPress: () => navigation.navigate('PostJob' as any),
             color: '#0EA5E9',
           },
           {
             icon: 'navigate-outline',
-            label: 'งานใกล้คุณ',
+            label: t('home.fab.nearbyJobs'),
             onPress: openNearbySettings,
             color: '#14B8A6',
           },
           {
             icon: 'map-outline',
-            label: 'ดูแผนที่',
+            label: t('home.fab.map'),
             onPress: () => (navigation as any).getParent()?.navigate('MapJobs'),
             color: '#6366F1',
           },
           {
             icon: 'heart-outline',
-            label: 'รายการโปรด',
+            label: t('home.fab.favorites'),
             onPress: () => (navigation as any).getParent()?.navigate('Favorites'),
             color: '#EC4899',
           },
@@ -1953,6 +1961,7 @@ interface FilterModalProps {
 }
 
 function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, onSaveCurrent, nearbyMode, setNearbyMode }: FilterModalProps) {
+  const { t } = useI18n();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [provinceSearch, setProvinceSearch] = useState('');
@@ -1983,7 +1992,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
     <ModalContainer
       visible={visible}
       onClose={onClose}
-      title="ตัวกรองการค้นหา"
+      title={t('home.filters.title')}
       fullScreen={true}
     >
       <ScrollView
@@ -2014,8 +2023,8 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
               <Ionicons name="location" size={22} color={nearbyPreset ? colors.white : colors.textSecondary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: nearbyPreset ? colors.primary : colors.text }}>ใกล้ฉัน</Text>
-              <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>งานใกล้ตำแหน่งของคุณมากที่สุด</Text>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: nearbyPreset ? colors.primary : colors.text }}>{t('home.filters.nearMeTitle')}</Text>
+              <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{t('home.filters.nearMeSubtitle')}</Text>
             </View>
             <View style={{
               width: 28, height: 16, borderRadius: 8,
@@ -2033,9 +2042,9 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
 
         {/* Staff Type */}
         <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <SectionHeader icon="person-outline" label="ประเภทบุคลากร" iconColor={colors.primary} />
+          <SectionHeader icon="person-outline" label={t('home.filters.staffType')} iconColor={colors.primary} />
           <View style={styles.filterOptions}>
-            <Chip label="ทั้งหมด" selected={!filters.staffType}
+            <Chip label={t('home.quickFilters.all')} selected={!filters.staffType}
               onPress={() => setFilters({ ...filters, staffType: undefined })} style={styles.optionChip} />
             {STAFF_TYPES.map((type) => (
               <Chip key={type.code} label={type.shortName}
@@ -2048,14 +2057,14 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
 
         {/* Location Type */}
         <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <SectionHeader icon="business-outline" label="ประเภทสถานที่" iconColor="#8B5CF6" />
+          <SectionHeader icon="business-outline" label={t('home.filters.locationType')} iconColor="#8B5CF6" />
           <View style={styles.filterOptions}>
-            <Chip label="ทั้งหมด" selected={!filters.locationType}
+            <Chip label={t('home.quickFilters.all')} selected={!filters.locationType}
               onPress={() => setFilters({ ...filters, locationType: undefined, homeCareOnly: false })}
               style={styles.optionChip} />
             {LOCATION_TYPES.map((loc) => (
               <Chip key={loc.code}
-                label={loc.nameTH}
+                label={getLocationTypeLabel(loc.code)}
                 selected={filters.locationType === loc.code}
                 onPress={() => setFilters({ ...filters, locationType: loc.code, homeCareOnly: loc.code === 'HOME' })}
                 style={styles.optionChip} />
@@ -2065,16 +2074,16 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
 
         {/* Province */}
         <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <SectionHeader icon="map-outline" label="จังหวัด" iconColor="#10B981" />
+          <SectionHeader icon="map-outline" label={t('home.filters.province')} iconColor="#10B981" />
           <TextInput
             style={[styles.provinceSearchInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-            placeholder="ค้นหาจังหวัด..."
+            placeholder={t('home.filters.provincePlaceholder')}
             placeholderTextColor={colors.textMuted}
             value={provinceSearch}
             onChangeText={setProvinceSearch}
           />
           <View style={styles.filterOptions}>
-            <Chip label="ทั้งหมด" selected={!filters.province}
+            <Chip label={t('home.quickFilters.all')} selected={!filters.province}
               onPress={() => setFilters({ ...filters, province: '', district: '' })} style={styles.optionChip} />
             {filteredProvinces.map((province) => (
               <Chip key={province} label={province}
@@ -2085,7 +2094,7 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
           </View>
           {!provinceSearch && (
             <TouchableOpacity style={styles.showMoreButton} onPress={() => setShowAllProvinces(!showAllProvinces)}>
-              <Text style={[styles.showMoreText, { color: colors.primary }]}>{showAllProvinces ? 'แสดงน้อยลง' : 'ดูทั้งหมด 77 จังหวัด'}</Text>
+              <Text style={[styles.showMoreText, { color: colors.primary }]}>{showAllProvinces ? t('home.filters.showLess') : t('home.filters.showAllProvinces')}</Text>
               <Ionicons name={showAllProvinces ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
             </TouchableOpacity>
           )}
@@ -2094,10 +2103,10 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
         {/* District (conditional) */}
         {filters.province && getDistrictsForProvince(filters.province).length > 0 && (
           <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <SectionHeader icon="location-outline" label={filters.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'} iconColor="#10B981" />
+            <SectionHeader icon="location-outline" label={filters.province === 'กรุงเทพมหานคร' ? t('home.filters.districtBangkok') : t('home.filters.districtOther')} iconColor="#10B981" />
             <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
               <View style={{ flexDirection: 'row', gap: 6 }}>
-                <Chip label={filters.province === 'กรุงเทพมหานคร' ? 'ทุกเขต' : 'ทุกอำเภอ'}
+                <Chip label={filters.province === 'กรุงเทพมหานคร' ? t('home.filters.allDistrictBangkok') : t('home.filters.allDistrictOther')}
                   selected={!filters.district}
                   onPress={() => setFilters({ ...filters, district: '' })} style={styles.optionChip} />
                 {getDistrictsForProvince(filters.province).map((district) => (
@@ -2113,13 +2122,13 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
 
         {/* Salary Range */}
         <View style={[styles.filterCard, { marginBottom: 14, backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <SectionHeader icon="cash-outline" label="ค่าตอบแทน (บาท)" iconColor="#F59E0B" />
+          <SectionHeader icon="cash-outline" label={t('home.filters.salaryTitle')} iconColor="#F59E0B" />
           <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>ขั้นต่ำ</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>{t('home.filters.salaryMin')}</Text>
               <TextInput
                 style={[styles.provinceSearchInput, { marginBottom: 0, borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-                placeholder="เช่น 500"
+                placeholder={t('home.filters.salaryPlaceholder', { amount: 500 })}
                 placeholderTextColor={colors.textMuted}
                 keyboardType="numeric"
                 value={minRateText}
@@ -2131,10 +2140,10 @@ function FilterModal({ visible, onClose, filters, setFilters, onApply, onClear, 
             </View>
             <Text style={{ color: colors.textMuted, marginTop: 16 }}>—</Text>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>สูงสุด</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>{t('home.filters.salaryMax')}</Text>
               <TextInput
                 style={[styles.provinceSearchInput, { marginBottom: 0, borderColor: colors.border, color: colors.text, backgroundColor: colors.surface }]}
-                placeholder="เช่น 3000"
+                placeholder={t('home.filters.salaryPlaceholder', { amount: 3000 })}
                 placeholderTextColor={colors.textMuted}
                 keyboardType="numeric"
                 value={maxRateText}

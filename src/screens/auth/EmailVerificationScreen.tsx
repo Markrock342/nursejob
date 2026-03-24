@@ -23,6 +23,7 @@ import {
   logoutUser 
 } from '../../services/authService';
 import { AuthStackParamList } from '../../types';
+import { useI18n } from '../../i18n';
 
 // ============================================
 // Types
@@ -40,6 +41,7 @@ interface Props {
 // ============================================
 export default function EmailVerificationScreen({ navigation, route }: Props) {
   const { colors } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const email = route.params?.email || '';
   const [isLoading, setIsLoading] = useState(false);
@@ -62,11 +64,11 @@ export default function EmailVerificationScreen({ navigation, route }: Props) {
       if (verified) {
         clearInterval(interval);
         Alert.alert(
-          'ยืนยันสำเร็จ! ✅',
-          'Email ของคุณได้รับการยืนยันแล้ว',
+          t('auth.emailVerification.verifiedTitle'),
+          t('auth.emailVerification.verifiedMessage'),
           [
             {
-              text: 'เข้าสู่ระบบ',
+              text: t('auth.emailVerification.login'),
               onPress: () => navigation.replace('Login'),
             },
           ]
@@ -85,9 +87,9 @@ export default function EmailVerificationScreen({ navigation, route }: Props) {
     try {
       await sendVerificationEmail();
       setCountdown(60); // 60 seconds cooldown
-      Alert.alert('สำเร็จ', 'ส่ง email ยืนยันใหม่แล้ว กรุณาตรวจสอบกล่องจดหมาย');
+      Alert.alert(t('auth.emailVerification.resendSuccessTitle'), t('auth.emailVerification.resendSuccessMessage'));
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถส่ง email ได้');
+      Alert.alert(t('auth.emailVerification.resendFailedTitle'), error.message || t('auth.emailVerification.resendFailedMessage'));
     } finally {
       setIsResending(false);
     }
@@ -100,20 +102,20 @@ export default function EmailVerificationScreen({ navigation, route }: Props) {
       const verified = await refreshEmailVerificationStatus();
       if (verified) {
         Alert.alert(
-          'ยืนยันสำเร็จ! ✅',
-          'Email ของคุณได้รับการยืนยันแล้ว',
+          t('auth.emailVerification.verifiedTitle'),
+          t('auth.emailVerification.verifiedMessage'),
           [
             {
-              text: 'เข้าสู่ระบบ',
+              text: t('auth.emailVerification.login'),
               onPress: () => navigation.replace('Login'),
             },
           ]
         );
       } else {
-        Alert.alert('ยังไม่ยืนยัน', 'กรุณาคลิกลิงก์ใน email ที่เราส่งไปให้');
+        Alert.alert(t('auth.emailVerification.notVerifiedTitle'), t('auth.emailVerification.notVerifiedMessage'));
       }
     } catch (error) {
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถตรวจสอบสถานะได้');
+      Alert.alert(t('auth.emailVerification.checkFailedTitle'), t('auth.emailVerification.checkFailedMessage'));
     } finally {
       setIsChecking(false);
     }
@@ -143,10 +145,8 @@ export default function EmailVerificationScreen({ navigation, route }: Props) {
         </View>
 
         {/* Title */}
-        <Text style={styles.title}>ยืนยัน Email ของคุณ</Text>
-        <Text style={styles.subtitle}>
-          เราได้ส่งลิงก์ยืนยันไปที่
-        </Text>
+        <Text style={styles.title}>{t('auth.emailVerification.title')}</Text>
+        <Text style={styles.subtitle}>{t('auth.emailVerification.subtitle')}</Text>
         <Text style={styles.email}>{email}</Text>
 
         {/* Instructions */}
@@ -155,36 +155,34 @@ export default function EmailVerificationScreen({ navigation, route }: Props) {
             <View style={styles.instructionNumber}>
               <Text style={styles.instructionNumberText}>1</Text>
             </View>
-            <Text style={styles.instructionText}>เปิดกล่องจดหมายของคุณ</Text>
+            <Text style={styles.instructionText}>{t('auth.emailVerification.steps.openInbox')}</Text>
           </View>
           
           <View style={styles.instructionItem}>
             <View style={styles.instructionNumber}>
               <Text style={styles.instructionNumberText}>2</Text>
             </View>
-            <Text style={styles.instructionText}>คลิกลิงก์ยืนยันใน email</Text>
+            <Text style={styles.instructionText}>{t('auth.emailVerification.steps.clickLink')}</Text>
           </View>
           
           <View style={styles.instructionItem}>
             <View style={styles.instructionNumber}>
               <Text style={styles.instructionNumberText}>3</Text>
             </View>
-            <Text style={styles.instructionText}>กลับมากด "ตรวจสอบสถานะ"</Text>
+            <Text style={styles.instructionText}>{t('auth.emailVerification.steps.checkStatus')}</Text>
           </View>
         </View>
 
         {/* Note */}
         <View style={styles.noteContainer}>
           <Ionicons name="information-circle-outline" size={18} color={COLORS.textSecondary} />
-          <Text style={styles.noteText}>
-            หากไม่เจอ email ลองตรวจสอบโฟลเดอร์ Spam หรือ Junk
-          </Text>
+          <Text style={styles.noteText}>{t('auth.emailVerification.note')}</Text>
         </View>
 
         {/* Actions */}
         <View style={styles.actions}>
           <Button
-            title={isChecking ? 'กำลังตรวจสอบ...' : 'ตรวจสอบสถานะ'}
+            title={isChecking ? t('auth.emailVerification.checkLoading') : t('auth.emailVerification.checkButton')}
             onPress={handleCheckVerification}
             loading={isChecking}
             style={styles.primaryButton}
@@ -197,10 +195,10 @@ export default function EmailVerificationScreen({ navigation, route }: Props) {
           >
             <Text style={[styles.resendButtonText, countdown > 0 && styles.resendButtonTextDisabled]}>
               {isResending 
-                ? 'กำลังส่ง...' 
+                ? t('auth.emailVerification.resendLoading') 
                 : countdown > 0 
-                  ? `ส่งใหม่ได้ใน ${countdown} วินาที` 
-                  : 'ส่ง Email อีกครั้ง'
+                  ? t('auth.emailVerification.resendIn', { count: countdown }) 
+                  : t('auth.emailVerification.resend')
               }
             </Text>
           </TouchableOpacity>
@@ -209,7 +207,7 @@ export default function EmailVerificationScreen({ navigation, route }: Props) {
         {/* Change Email */}
         <TouchableOpacity style={styles.changeEmailButton} onPress={handleChangeEmail}>
           <Ionicons name="arrow-back" size={16} color={COLORS.textMuted} />
-          <Text style={styles.changeEmailText}>เปลี่ยน Email / กลับไปสมัคร</Text>
+          <Text style={styles.changeEmailText}>{t('auth.emailVerification.changeEmail')}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

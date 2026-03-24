@@ -15,6 +15,20 @@ if (!globalObject.process.stdout) {
   globalObject.process.stdout = { isTTY: false };
 }
 
+// Production console guard: suppress verbose logs to prevent data leakage
+if (typeof __DEV__ !== 'undefined' && !__DEV__) {
+  const noop = () => {};
+  console.log = noop;
+  console.debug = noop;
+  console.info = noop;
+  // Keep console.warn and console.error for crash reporting,
+  // but strip extra arguments that may contain user data
+  const origWarn = console.warn;
+  const origError = console.error;
+  console.warn = (msg: any) => origWarn(typeof msg === 'string' ? msg : '[warn]');
+  console.error = (msg: any) => origError(typeof msg === 'string' ? msg : '[error]');
+}
+
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, TextInput } from 'react-native';
@@ -32,6 +46,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ToastProvider } from './src/context/ToastContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+import { I18nProvider } from './src/i18n/I18nProvider';
+import { ErrorBoundary } from './src/components/common';
 
 // UI Kitten
 import { ApplicationProvider, IconRegistry } from '@ui-kitten/components';
@@ -102,14 +118,18 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ThemeProvider>
-          <AuthProvider>
-            <IconRegistry icons={EvaIconsPack} />
-            <ThemedApplication>
-              <AppContent />
-            </ThemedApplication>
-          </AuthProvider>
-        </ThemeProvider>
+        <I18nProvider>
+          <ThemeProvider>
+            <ErrorBoundary>
+              <AuthProvider>
+                <IconRegistry icons={EvaIconsPack} />
+                <ThemedApplication>
+                  <AppContent />
+                </ThemedApplication>
+              </AuthProvider>
+            </ErrorBoundary>
+          </ThemeProvider>
+        </I18nProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

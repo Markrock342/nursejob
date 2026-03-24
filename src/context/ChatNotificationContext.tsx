@@ -27,6 +27,16 @@ interface ChatNotificationContextType {
   setActiveConversationId: (id: string | null) => void;
 }
 
+interface ToastData {
+  senderName: string;
+  message: string;
+  conversationId: string;
+  recipientId: string;
+  recipientPhoto: string;
+  jobTitle: string;
+  jobId: string;
+}
+
 const ChatNotificationContext = createContext<ChatNotificationContextType>({
   unreadCount: 0,
   activeConversationId: null,
@@ -126,13 +136,14 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [showToast, setShowToast] = useState(false);
-  const [toastData, setToastData] = useState({ 
+  const [toastData, setToastData] = useState<ToastData>({ 
     senderName: '', 
     message: '',
     conversationId: '',
     recipientId: '',
     recipientPhoto: '',
     jobTitle: '',
+    jobId: '',
   });
   
   // Store previous conversations to detect new messages
@@ -222,6 +233,7 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
               recipientId: otherParticipant?.id || '',
               recipientPhoto: otherParticipant?.photoURL || '',
               jobTitle: conv.jobTitle || '',
+              jobId: conv.jobId || '',
             });
             setShowToast(true);
             playSound();
@@ -258,6 +270,7 @@ export function ChatNotificationProvider({ children, navigation }: Props) {
         recipientName: toastData.senderName || conversationMeta?.recipientName,
         recipientPhoto: toastData.recipientPhoto || conversationMeta?.recipientPhoto,
         jobTitle: toastData.jobTitle || conversationMeta?.jobTitle,
+        jobId: toastData.jobId || conversationMeta?.jobId,
       });
     }
     setShowToast(false);

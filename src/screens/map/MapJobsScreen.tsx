@@ -27,30 +27,31 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, COLORS } from '../../theme';
 import { JobPost, JobFilters } from '../../types';
+import { useI18n } from '../../i18n';
 
 const { width: W, height: H } = Dimensions.get('window');
 
-const STAFF_LABELS: Record<string, string> = {
-  rn: 'พยาบาลวิชาชีพ',
-  RN: 'พยาบาลวิชาชีพ',
-  lpn: 'ผู้ช่วยพยาบาล',
-  LPN: 'ผู้ช่วยพยาบาล',
-  PN: 'ผู้ช่วยพยาบาล',
-  NA: 'ผู้ช่วยพยาบาล',
-  nurse_aide: 'ผู้ช่วยพยาบาล',
-  CG: 'ผู้ดูแลผู้ป่วย',
-  caregiver: 'ผู้ดูแลผู้ป่วย',
-  SITTER: 'เฝ้าไข้',
-  ANES: 'ผู้ช่วยวิสัญญี / วิสัญญีพยาบาล',
-  OTHER: 'อื่นๆ',
-  other: 'อื่นๆ',
-};
+const getStaffLabels = (t: any): Record<string, string> => ({
+  rn: t('map.staffTypeRN'),
+  RN: t('map.staffTypeRN'),
+  lpn: t('map.staffTypeLPN'),
+  LPN: t('map.staffTypeLPN'),
+  PN: t('map.staffTypeLPN'),
+  NA: t('map.staffTypeLPN'),
+  nurse_aide: t('map.staffTypeLPN'),
+  CG: t('map.staffTypeCG'),
+  caregiver: t('map.staffTypeCG'),
+  SITTER: t('map.staffTypeSitter'),
+  ANES: t('map.staffTypeAnes'),
+  OTHER: t('map.staffTypeOther'),
+  other: t('map.staffTypeOther'),
+});
 
-const POST_TYPE_LABELS: Record<string, string> = {
-  shift: 'หาคนแทนเวร',
-  job: 'รับสมัครงาน',
-  homecare: 'ดูแลผู้ป่วย',
-};
+const getPostTypeLabels = (t: any): Record<string, string> => ({
+  shift: t('map.postTypeShift'),
+  job: t('map.postTypeJob'),
+  homecare: t('map.postTypeHomecare'),
+});
 const PROVINCE_COORDS: Record<string, { lat: number; lng: number }> = {
   'กรุงเทพมหานคร': { lat: 13.7563, lng: 100.5018 },
   'นนทบุรี':        { lat: 13.8621, lng: 100.5134 },
@@ -136,7 +137,11 @@ function serializeJob(job: JobPost) {
   } as any;
 }
 
-export default function MapJobsScreen({ navigation }: MapJobsProps) {
+export default function MapJobsScreen({
+  navigation }: MapJobsProps) {
+  const { t } = useI18n();
+  const STAFF_LABELS = useMemo(() => getStaffLabels(t), [t]);
+  const POST_TYPE_LABELS = useMemo(() => getPostTypeLabels(t), [t]);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -257,7 +262,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
       const arr: JobPost[] = Array.isArray(result) ? result : (result as any)?.jobs || [];
       setAllJobs(arr.filter(j => getCoords(j) !== null));
     } catch {
-      // silent fail
+      Alert.alert(t('common.alerts.loadErrorTitle'), t('common.alerts.loadErrorMessage'));
     } finally {
       setIsLoading(false);
     }
@@ -270,7 +275,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
         600,
       );
     } else {
-      Alert.alert('ไม่พบตำแหน่ง', 'กรุณาเปิดใช้ GPS แล้วลองใหม่');
+      Alert.alert(t('map.locationNotFoundTitle'), t('map.locationNotFoundMessage'));
     }
   }, [userLocation]);
 
@@ -285,11 +290,11 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
   const formatRate = (job: JobPost) => {
     const rate = (job as any).shiftRate;
     const rateType = (job as any).rateType;
-    if (!rate) return 'ดูอัตรา';
-    const unit: Record<string, string> = { shift: '/เวร', hour: '/ชม', day: '/วัน', month: '/เดือน' };
+    if (!rate) return t('map.seeRate');
+    const unit: Record<string, string> = { shift: t('map.rateUnitShift'), hour: t('map.rateUnitHour'), day: t('map.rateUnitDay'), month: t('map.rateUnitMonth') };
     const num = Number(rate);
     const display = num >= 10000 ? `${(num / 1000).toFixed(0)}K` : num.toLocaleString();
-    return `฿${display}${unit[rateType] || '/เวร'}`;
+    return `฿${display}${unit[rateType] || t('map.rateUnitShift')}`;
   };
 
   const openJobDetail = (job: JobPost) => {
@@ -372,7 +377,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
           <View style={[styles.topTitle, { backgroundColor: colors.surface }]}>
             <Ionicons name="map" size={16} color={colors.primary} />
             <Text style={[styles.topTitleText, { color: colors.text }]}>
-              {isLoading ? 'กำลังโหลด...' : `${jobs.length} งานบนแผนที่`}
+              {isLoading ? t('map.loading') : t('map.jobsOnMap').replace('{count}', String(jobs.length))}
             </Text>
           </View>
 
@@ -404,7 +409,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
             style={[styles.searchInput, { color: colors.text }]}
             value={searchInput}
             onChangeText={setSearchInput}
-            placeholder="ค้นหาชื่องาน หรือชื่อสถานที่"
+            placeholder={t('map.searchPlaceholder')}
             placeholderTextColor={colors.textMuted}
             returnKeyType="search"
             onSubmitEditing={applySearch}
@@ -428,7 +433,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
               <FilterChip label={POST_TYPE_LABELS[filter.postType] || filter.postType} onRemove={() => setFilter(f => ({ ...f, postType: '' }))} />
             )}
             {filter.searchTerm && (
-              <FilterChip label={`ค้นหา: ${filter.searchTerm}`} onRemove={() => setFilter(f => ({ ...f, searchTerm: '' }))} />
+              <FilterChip label={t('map.searchPrefix').replace('{term}', filter.searchTerm)} onRemove={() => setFilter(f => ({ ...f, searchTerm: '' }))} />
             )}
             {filter.staffType && (
               <FilterChip label={STAFF_LABELS[filter.staffType] || filter.staffType} onRemove={() => setFilter(f => ({ ...f, staffType: '' }))} />
@@ -437,13 +442,13 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
               <FilterChip label={filter.province} onRemove={() => setFilter(f => ({ ...f, province: '' }))} />
             )}
             {filter.sortBy !== 'latest' && (
-              <FilterChip label={filter.sortBy === 'rate_desc' ? 'เรียง: ค่าจ้างสูงสุด' : 'เรียง: ใกล้ฉัน'} onRemove={() => setFilter(f => ({ ...f, sortBy: 'latest' }))} />
+              <FilterChip label={filter.sortBy === 'rate_desc' ? t('map.sortRateDesc') : t('map.sortNearby')} onRemove={() => setFilter(f => ({ ...f, sortBy: 'latest' }))} />
             )}
             {filter.rateMin > 0 && (
               <FilterChip label={`฿${filter.rateMin.toLocaleString()}+`} onRemove={() => setFilter(f => ({ ...f, rateMin: 0 }))} />
             )}
             {filter.urgentOnly && (
-              <FilterChip label="ด่วนเท่านั้น" onRemove={() => setFilter(f => ({ ...f, urgentOnly: false }))} />
+              <FilterChip label={t('map.urgentOnly')} onRemove={() => setFilter(f => ({ ...f, urgentOnly: false }))} />
             )}
           </ScrollView>
         </View>
@@ -451,17 +456,17 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
 
       {/* ── Legend ────────────────────────────────── */}
       <View style={[styles.legend, { backgroundColor: colors.surface, top: insets.top + (activeFilterCount > 0 ? 152 : 108) }]}>
-        <LegendDot color="#EF4444" label="ด่วน" />
-        <LegendDot color="#0EA5E9" label="≥฿1,500" />
-        <LegendDot color="#10B981" label="≥฿700" />
-        <LegendDot color="#F59E0B" label="< ฿700" />
+        <LegendDot color="#EF4444" label={t('map.legendUrgent')} />
+        <LegendDot color="#0EA5E9" label={t('map.legendHigh')} />
+        <LegendDot color="#10B981" label={t('map.legendMid')} />
+        <LegendDot color="#F59E0B" label={t('map.legendLow')} />
       </View>
 
       {/* ── Loading ────────────────────────────────── */}
       {isLoading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={{ color: colors.textSecondary, marginTop: 10, fontSize: 13 }}>กำลังโหลดงาน...</Text>
+          <Text style={{ color: colors.textSecondary, marginTop: 10, fontSize: 13 }}>{t('map.loadingJobs')}</Text>
         </View>
       )}
 
@@ -485,7 +490,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>
                   {(selectedJob as any).title ||
-                    `${POST_TYPE_LABELS[(selectedJob as any).postType] || 'งาน'} ${STAFF_LABELS[(selectedJob as any).staffType] || ''}`}
+                    `${POST_TYPE_LABELS[(selectedJob as any).postType] || t('map.jobFallbackTitle')} ${STAFF_LABELS[(selectedJob as any).staffType] || ''}`}
                 </Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
                   <Ionicons name="business-outline" size={13} color={colors.textSecondary} />
@@ -510,7 +515,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
                   )}
                   {(selectedJob.status === 'urgent' || (selectedJob as any).isUrgent) && (
                     <View style={[styles.tag, { backgroundColor: '#FEF2F2' }]}>
-                      <Text style={[styles.tagText, { color: '#DC2626' }]}>⚡ ด่วน</Text>
+                      <Text style={[styles.tagText, { color: '#DC2626' }]}>{t('map.urgentTag')}</Text>
                     </View>
                   )}
                 </View>
@@ -523,7 +528,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
                   onPress={() => openJobDetail(selectedJob)}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.viewBtnText}>ดูงาน</Text>
+                  <Text style={styles.viewBtnText}>{t('map.viewJob')}</Text>
                   <Ionicons name="chevron-forward" size={14} color="#FFF" />
                 </TouchableOpacity>
               </View>
@@ -537,13 +542,13 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowFilterModal(false)} />
         <View style={[styles.filterSheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + 16 }]}>
           <View style={styles.filterHeader}>
-            <Text style={[styles.filterTitle, { color: colors.text }]}>กรองงาน</Text>
+            <Text style={[styles.filterTitle, { color: colors.text }]}>{t('map.filterTitle')}</Text>
             <TouchableOpacity onPress={resetFilter}>
-              <Text style={[styles.filterReset, { color: colors.primary }]}>รีเซ็ต</Text>
+              <Text style={[styles.filterReset, { color: colors.primary }]}>{t('map.filterReset')}</Text>
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>ประเภทประกาศ</Text>
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>{t('map.filterPostType')}</Text>
             <View style={styles.filterChipRow}>
               {(['', 'shift', 'job', 'homecare'] as const).map(v => (
                 <TouchableOpacity
@@ -552,19 +557,19 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
                   onPress={() => setDraftFilter(f => ({ ...f, postType: v }))}
                 >
                   <Text style={[styles.filterChipText, { color: draftFilter.postType === v ? '#fff' : colors.text }]}>
-                    {v === '' ? 'ทั้งหมด' : POST_TYPE_LABELS[v]}
+                    {v === '' ? t('map.filterAll') : POST_TYPE_LABELS[v]}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>{t('map.filterProvince')}</Text>
             <View style={styles.filterChipRow}>
               <TouchableOpacity
                 style={[styles.filterChip, { borderColor: draftFilter.province === '' ? colors.primary : colors.border }, draftFilter.province === '' && { backgroundColor: colors.primary }]}
                 onPress={() => setDraftFilter(f => ({ ...f, province: '' }))}
               >
-                <Text style={[styles.filterChipText, { color: draftFilter.province === '' ? '#fff' : colors.text }]}>ทั้งหมด</Text>
+                <Text style={[styles.filterChipText, { color: draftFilter.province === '' ? '#fff' : colors.text }]}>{t('map.filterAll')}</Text>
               </TouchableOpacity>
               {provinceOptions.slice(0, 16).map((p) => (
                 <TouchableOpacity
@@ -577,7 +582,7 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
               ))}
             </View>
 
-            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>ประเภทบุคลากร</Text>
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>{t('map.filterStaffType')}</Text>
             <View style={styles.filterChipRow}>
               {(['', 'RN', 'PN', 'CG', 'SITTER', 'ANES', 'OTHER'] as const).map(v => (
                 <TouchableOpacity
@@ -586,13 +591,13 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
                   onPress={() => setDraftFilter(f => ({ ...f, staffType: v }))}
                 >
                   <Text style={[styles.filterChipText, { color: draftFilter.staffType === v ? '#fff' : colors.text }]}>
-                    {v === '' ? 'ทั้งหมด' : (STAFF_LABELS[v] || v)}
+                    {v === '' ? t('map.filterAll') : (STAFF_LABELS[v] || v)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>ค่าตอบแทนขั้นต่ำ</Text>
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>{t('map.filterMinRate')}</Text>
             <View style={styles.filterChipRow}>
               {([0, 500, 700, 1000, 1500, 3000] as const).map(v => (
                 <TouchableOpacity
@@ -601,18 +606,18 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
                   onPress={() => setDraftFilter(f => ({ ...f, rateMin: v }))}
                 >
                   <Text style={[styles.filterChipText, { color: draftFilter.rateMin === v ? '#fff' : colors.text }]}>
-                    {v === 0 ? 'ทั้งหมด' : `฿${v.toLocaleString()}+`}
+                    {v === 0 ? t('map.filterAll') : `฿${v.toLocaleString()}+`}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>เรียงลำดับ</Text>
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>{t('map.filterSortBy')}</Text>
             <View style={styles.filterChipRow}>
               {([
-                { value: 'latest', label: 'ล่าสุด' },
-                { value: 'rate_desc', label: 'ค่าจ้างสูงสุด' },
-                { value: 'nearby', label: 'ใกล้ฉัน' },
+                { value: 'latest', label: t('map.sortLatest') },
+                { value: 'rate_desc', label: t('map.sortHighestPay') },
+                { value: 'nearby', label: t('map.sortNearMe') },
               ] as const).map((opt) => (
                 <TouchableOpacity
                   key={opt.value}
@@ -624,25 +629,25 @@ export default function MapJobsScreen({ navigation }: MapJobsProps) {
               ))}
             </View>
 
-            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>สถานะ</Text>
+            <Text style={[styles.filterSectionLabel, { color: colors.textSecondary }]}>{t('map.filterStatus')}</Text>
             <View style={styles.filterChipRow}>
               <TouchableOpacity
                 style={[styles.filterChip, { borderColor: !draftFilter.urgentOnly ? colors.primary : colors.border }, !draftFilter.urgentOnly && { backgroundColor: colors.primary }]}
                 onPress={() => setDraftFilter(f => ({ ...f, urgentOnly: false }))}
               >
-                <Text style={[styles.filterChipText, { color: !draftFilter.urgentOnly ? '#fff' : colors.text }]}>ทั้งหมด</Text>
+                <Text style={[styles.filterChipText, { color: !draftFilter.urgentOnly ? '#fff' : colors.text }]}>{t('map.filterAll')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.filterChip, { borderColor: draftFilter.urgentOnly ? '#EF4444' : colors.border }, draftFilter.urgentOnly && { backgroundColor: '#EF4444' }]}
                 onPress={() => setDraftFilter(f => ({ ...f, urgentOnly: true }))}
               >
-                <Text style={[styles.filterChipText, { color: draftFilter.urgentOnly ? '#fff' : colors.text }]}>⚡ ด่วนเท่านั้น</Text>
+                <Text style={[styles.filterChipText, { color: draftFilter.urgentOnly ? '#fff' : colors.text }]}>{t('map.filterUrgentOnly')}</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
 
           <TouchableOpacity style={[styles.applyBtn, { backgroundColor: colors.primary }]} onPress={applyFilter} activeOpacity={0.85}>
-            <Text style={styles.applyBtnText}>แสดง{draftCount} รายการ</Text>
+            <Text style={styles.applyBtnText}>{t('map.showResults').replace('{count}', String(draftCount))}</Text>
           </TouchableOpacity>
         </View>
       </Modal>

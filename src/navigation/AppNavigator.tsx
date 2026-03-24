@@ -42,6 +42,8 @@ import PostJobScreen from '../screens/job/PostJobScreenNew';
 import ProfileScreen from '../screens/profile/ProfileScreen';
 import UserProfileScreen from '../screens/profile/UserProfileScreen';
 import { ChatListScreen, ChatRoomScreen } from '../screens/chat/ChatScreens';
+import NurseScheduleScreen from '../screens/schedule/NurseScheduleScreen';
+import HolidayListScreen from '../screens/schedule/HolidayListScreen';
 
 // New Feature Screens
 import FavoritesScreen from '../screens/favorites/FavoritesScreen';
@@ -99,6 +101,7 @@ const linking: LinkingOptions<RootStackParamList> = {
         screens: {
           Home: 'home',
           Chat: 'chat',
+          Schedule: 'schedule',
           PostJob: 'post-job',
           Profile: 'profile',
         },
@@ -191,6 +194,7 @@ function createGuardedScreen(
 }
 
 const GuardedChatListScreen = createGuardedScreen(ChatListScreen, { requiresAuth: true });
+const GuardedNurseScheduleScreen = createGuardedScreen(NurseScheduleScreen, { requiresAuth: true, allowedRoles: ['nurse'] });
 const GuardedPostJobScreen = createGuardedScreen(PostJobScreen, { requiresAuth: true });
 const GuardedProfileScreen = createGuardedScreen(ProfileScreen, { requiresAuth: true });
 const GuardedChatRoomScreen = createGuardedScreen(ChatRoomScreen, { requiresAuth: true });
@@ -201,7 +205,7 @@ const GuardedNotificationsScreen = createGuardedScreen(NotificationsScreen, { re
 const GuardedDocumentsScreen = createGuardedScreen(DocumentsScreen, { requiresAuth: true });
 const GuardedMyPostsScreen = createGuardedScreen(MyPostsScreen, { requiresAuth: true });
 const GuardedShopScreen = createGuardedScreen(ShopScreen, { requiresAuth: true });
-const GuardedApplicantsScreen = createGuardedScreen(ApplicantsScreen, { requiresAuth: true, allowedRoles: ['hospital'] });
+const GuardedApplicantsScreen = createGuardedScreen(ApplicantsScreen, { requiresAuth: true });
 const GuardedFeedbackScreen = createGuardedScreen(FeedbackScreen, { requiresAuth: true });
 const GuardedPaymentScreen = createGuardedScreen(PaymentScreen, { requiresAuth: true });
 const GuardedNearbyJobAlertScreen = createGuardedScreen(NearbyJobAlertScreen, { requiresAuth: true });
@@ -270,8 +274,10 @@ function TabIcon({ focused, iconName, label, badgeCount }: TabIconProps) {
 // ============================================
 function MainTabNavigator() {
   const { unreadCount } = useChatNotification();
+  const { user } = useAuth();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const isNurse = user?.role === 'nurse';
   
   return (
     <Tab.Navigator
@@ -308,6 +314,17 @@ function MainTabNavigator() {
           ),
         }}
       />
+      {isNurse && (
+        <Tab.Screen
+          name="Schedule"
+          component={GuardedNurseScheduleScreen}
+          options={{
+            tabBarIcon: ({ focused }) => (
+              <TabIcon focused={focused} iconName={focused ? 'calendar' : 'calendar-outline'} label="ตารางงาน" />
+            ),
+          }}
+        />
+      )}
       <Tab.Screen
         name="PostJob"
         component={GuardedPostJobScreen}
@@ -458,6 +475,15 @@ function RootNavigator() {
       <RootStack.Screen 
         name="Help" 
         component={HelpScreen}
+        options={{
+          animation: 'slide_from_right',
+        }}
+      />
+
+      {/* Holiday List */}
+      <RootStack.Screen 
+        name="HolidayList" 
+        component={HolidayListScreen}
         options={{
           animation: 'slide_from_right',
         }}

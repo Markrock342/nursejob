@@ -34,11 +34,21 @@ import { Document as UserDocument, getUserDocuments } from '../../services/docum
 import { useToast } from '../../context/ToastContext';
 import { JobPost, PRICING, RootStackParamList, SubscriptionPlan, StaffType } from '../../types';
 import { formatDate, formatRelativeTime, callPhone, openLine, openMapsDirections } from '../../utils/helpers';
-import { getStaffTypeLabel } from '../../constants/jobOptions';
+import {
+  formatPayment,
+  getBenefitDisplayName,
+  getDepartmentDisplayName,
+  getEmploymentTypeLabel,
+  getPaymentTypeDisplayName,
+  getRateTypeShortLabel,
+  getShiftTimeDisplayName,
+  getStaffTypeLabel,
+} from '../../constants/jobOptions';
 import { getAdminDisplayTagColors, getIdentityDisplayTags, getPremiumTagColors, getPremiumTagText, getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
 import { trackEvent } from '../../services/analyticsService';
 import { getSafeContactMode } from '../../utils/jobPostIntelligence';
 import { getCommerceAccessStatus } from '../../services/commerceService';
+import { getCurrentResolvedLanguage, useI18n, translate } from '../../i18n';
 
 // ============================================
 // Types
@@ -55,47 +65,41 @@ interface Props {
 // Helpers
 // ============================================
 const formatShiftRate = (rate: number, type: string): string => {
-  const formattedRate = rate.toLocaleString('th-TH');
-  const unit = type === 'hour' ? '/ชม.' : type === 'day' ? '/วัน' : type === 'month' ? '/เดือน' : '/เวร';
+  const locale = getCurrentResolvedLanguage() === 'th' ? 'th-TH' : 'en-US';
+  const formattedRate = rate.toLocaleString(locale);
+  const unit = getRateTypeShortLabel(type) || '';
   return `฿${formattedRate}${unit}`;
 };
 
 const formatShiftDate = (date: Date): string => {
   const d = new Date(date);
+  const locale = getCurrentResolvedLanguage() === 'th' ? 'th-TH' : 'en-US';
   const options: Intl.DateTimeFormatOptions = { 
     weekday: 'long', 
     day: 'numeric', 
     month: 'long' 
   };
-  return d.toLocaleDateString('th-TH', options);
+  return d.toLocaleDateString(locale, options);
 };
 
 const getShiftTimeLabel = (time: string): string => {
-  const timeMap: Record<string, string> = {
-    '08:00-16:00': 'เวรเช้า',
-    '16:00-00:00': 'เวรบ่าย', 
-    '00:00-08:00': 'เวรดึก',
-    '08:00-20:00': 'เช้า-บ่าย',
-    '20:00-08:00': 'บ่าย-ดึก',
-    '00:00-24:00': 'ทั้งวัน',
-  };
-  return timeMap[time] || time;
+  return getShiftTimeDisplayName(time, true);
 };
 
 const getJobStartLabel = (job: JobPost): string => {
   if (job.postType === 'job') {
-    return job.startDateNote || 'ตามตกลง';
+    return job.startDateNote || translate(getCurrentResolvedLanguage(), 'jobDetail.negotiable');
   }
   return formatShiftDate(job.shiftDate);
 };
 
 const getJobTimeLabel = (job: JobPost): string => {
   if (job.postType === 'job') {
-    return job.workHours || job.shiftTime || 'ตามตกลง';
+    return job.workHours || job.shiftTime || translate(getCurrentResolvedLanguage(), 'jobDetail.negotiable');
   }
   const key = (job.shiftDates?.[0] || (job.shiftDate instanceof Date ? job.shiftDate.toISOString() : String(job.shiftDate)))?.slice(0, 10);
   const slot = key ? job.shiftTimeSlots?.[key] : undefined;
-  return slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || 'ตามตกลง');
+  return slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || translate(getCurrentResolvedLanguage(), 'jobDetail.negotiable'));
 };
 
 const getCampaignSummary = (job: JobPost): string | null => {
@@ -104,8 +108,8 @@ const getCampaignSummary = (job: JobPost): string | null => {
   const datesCount = job.shiftDates?.length || (job.shiftDate ? 1 : 0);
   const slotsNeeded = Math.max(1, Number(job.slotsNeeded || 1));
   if (!datesCount) return null;
-  if (datesCount === 1) return `ต้องการ ${slotsNeeded} คนในรอบนี้`;
-  return `ต้องการ ${slotsNeeded} คนต่อรอบ • ${datesCount} วัน`;
+  if (datesCount === 1) return translate(getCurrentResolvedLanguage(), 'jobDetail.campaignSlots', { slots: slotsNeeded });
+  return translate(getCurrentResolvedLanguage(), 'jobDetail.campaignSlotsMultiDay', { slots: slotsNeeded, days: datesCount });
 };
 
 // ============================================
@@ -120,6 +124,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { t } = useI18n();
 
   const [isContacting, setIsContacting] = useState(false);
   const [hasContacted, setHasContacted] = useState(false);
@@ -294,7 +299,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>กำลังโหลดรายละเอียดประกาศ...</Text>
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>{t('jobDetail.loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -305,13 +310,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}> 
           <Ionicons name="document-text-outline" size={52} color={colors.textMuted} />
-          <Text style={[styles.loadingText, { color: colors.text }]}>ไม่พบประกาศนี้</Text>
+          <Text style={[styles.loadingText, { color: colors.text }]}>{t('jobDetail.notFound')}</Text>
           <TouchableOpacity
             style={[styles.retryButton, { backgroundColor: colors.primary }]}
             onPress={() => navigation.goBack()}
             activeOpacity={0.8}
           >
-            <Text style={[styles.retryButtonText, { color: colors.white }]}>ย้อนกลับ</Text>
+            <Text style={[styles.retryButtonText, { color: colors.white }]}>{t('jobDetail.goBack')}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -322,7 +327,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const handleContact = () => {
     requireAuth(() => {
       if (hasContacted) {
-        setAlert(createAlert.info('แจ้งเตือน', 'คุณได้ติดต่อเรื่องงานนี้ไปแล้ว') as AlertState);
+        setAlert(createAlert.info(t('jobDetail.alerts.alreadyContacted'), t('jobDetail.alerts.alreadyContactedMessage')) as AlertState);
         return;
       }
       setShowContactModal(true);
@@ -337,7 +342,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     try {
       const applyUsage = await getFeatureUsageStatus(user.uid, 'job_application');
       if (!applyUsage.canUse) {
-        setAlert(createAlert.info('ใช้สิทธิ์สมัครครบแล้ว', applyUsage.reason || 'บัญชีนี้ใช้สิทธิ์สมัครงานครบตามรอบเดือนนี้แล้ว') as AlertState);
+        setAlert(createAlert.info(t('jobDetail.alerts.applyQuotaReached'), applyUsage.reason || t('jobDetail.alerts.applyQuotaReachedMessage')) as AlertState);
         return;
       }
 
@@ -359,7 +364,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       await contactForShift(
         job.id, 
         user.uid, 
-        user.displayName || 'ผู้ใช้',
+        user.displayName || t('jobDetail.userFallback'),
         user.phone || ''
       );
       if (applyUsage.limit != null) {
@@ -370,7 +375,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       // Show success modal with contact options
       setShowContactSuccessModal(true);
     } catch (error: any) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่') as AlertState);
+      setAlert(createAlert.error(t('jobDetail.alerts.errorGeneric'), error.message || t('jobDetail.alerts.errorRetry')) as AlertState);
     } finally {
       setIsContacting(false);
     }
@@ -383,9 +388,9 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       await updateJobStatus(job.id, 'closed');
       setJobStatus('closed');
       setShowCloseModal(false);
-      setAlert(createAlert.success('ปิดรับสมัครแล้ว', 'ประกาศจะไม่แสดงในหน้าแรกอีกต่อไป') as AlertState);
+      setAlert(createAlert.success(t('jobDetail.alerts.closedSuccess'), t('jobDetail.alerts.closedSuccessMessage')) as AlertState);
     } catch (error: any) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่') as AlertState);
+      setAlert(createAlert.error(t('jobDetail.alerts.errorGeneric'), error.message || t('jobDetail.alerts.errorRetry')) as AlertState);
     } finally {
       setIsClosing(false);
     }
@@ -396,9 +401,9 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     try {
       await updateJobStatus(job.id, 'active');
       setJobStatus('active');
-      setAlert(createAlert.success('เปิดรับสมัครอีกครั้งแล้ว', 'ประกาศแสดงในหน้าแรกแล้ว') as AlertState);
+      setAlert(createAlert.success(t('jobDetail.alerts.reopenedSuccess'), t('jobDetail.alerts.reopenedSuccessMessage')) as AlertState);
     } catch (error: any) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', error.message || 'กรุณาลองใหม่') as AlertState);
+      setAlert(createAlert.error(t('jobDetail.alerts.errorGeneric'), error.message || t('jobDetail.alerts.errorRetry')) as AlertState);
     }
   };
 
@@ -410,26 +415,26 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   // Handle call
   const handleCall = () => {
     if (!canRevealExternalContact) {
-      setAlert(createAlert.info('ดูแลข้อมูลติดต่อไว้ก่อน', 'เริ่มแชทในแอปหรือแสดงความสนใจก่อน แล้วระบบจะเปิดเบอร์โทรตามที่ผู้โพสต์อนุญาต') as AlertState);
+      setAlert(createAlert.info(t('jobDetail.alerts.contactLocked'), t('jobDetail.alerts.contactLockedMessage')) as AlertState);
       return;
     }
     if (job.contactPhone) {
       callPhone(job.contactPhone);
     } else {
-      setAlert(createAlert.info('ไม่มีเบอร์โทร', 'ประกาศนี้ไม่ได้ระบุเบอร์โทรติดต่อ') as AlertState);
+      setAlert(createAlert.info(t('jobDetail.alerts.noPhone'), t('jobDetail.alerts.noPhoneMessage')) as AlertState);
     }
   };
 
   // Handle LINE
   const handleLine = () => {
     if (!canRevealExternalContact) {
-      setAlert(createAlert.info('ดูแลข้อมูลติดต่อไว้ก่อน', 'เริ่มแชทในแอปหรือแสดงความสนใจก่อน แล้วระบบจะเปิด LINE ตามที่ผู้โพสต์อนุญาต') as AlertState);
+      setAlert(createAlert.info(t('jobDetail.alerts.contactLocked'), t('jobDetail.alerts.contactLockedLine')) as AlertState);
       return;
     }
     if (job.contactLine) {
       openLine(job.contactLine);
     } else {
-      setAlert(createAlert.info('ไม่มี LINE ID', 'ประกาศนี้ไม่ได้ระบุ LINE ID') as AlertState);
+      setAlert(createAlert.info(t('jobDetail.alerts.noLine'), t('jobDetail.alerts.noLineMessage')) as AlertState);
     }
   };
 
@@ -456,7 +461,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     if (searchTerm) {
       openMapsDirections(searchTerm);
     } else {
-      setAlert(createAlert.info('ไม่มีที่อยู่', 'ประกาศนี้ไม่ได้ระบุที่ตั้ง') as AlertState);
+      setAlert(createAlert.info(t('jobDetail.alerts.noAddress'), t('jobDetail.alerts.noAddressMessage')) as AlertState);
     }
   };
 
@@ -479,14 +484,14 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       });
 
       const rateText = formatShiftRate(job.shiftRate, job.rateType);
-      const dateLabel = job.postType === 'job' ? 'เริ่มงาน' : 'วันที่';
-      const timeLabel = job.postType === 'job' ? 'เวลางาน' : 'เวลา';
+      const dateLabel = job.postType === 'job' ? t('jobDetail.share.dateLabel') : t('jobDetail.share.shiftDateLabel');
+      const timeLabel = job.postType === 'job' ? t('jobDetail.share.timeLabel') : t('jobDetail.share.shiftTimeLabel');
       const dateText = getJobStartLabel(job);
       const timeText = getJobTimeLabel(job);
       const shareUrl = `https://nursego.co/job/${job.id}`;
       const appLink = ExpoLinking.createURL(`/job/${job.id}`);
       await Share.share({
-        message: `${job.title}\n${dateLabel}: ${dateText}\n${timeLabel}: ${timeText}\n${job.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}: ${rateText}\nสถานที่: ${job.location?.hospital || job.location?.province}\n\nดูรายละเอียด: ${shareUrl}\nเปิดตรงในแอป: ${appLink}`,
+        message: `${job.title}\n${dateLabel}: ${dateText}\n${timeLabel}: ${timeText}\n${job.postType === 'job' ? t('jobDetail.share.salary') : t('jobDetail.share.compensation')}: ${rateText}\n${t('jobDetail.share.location')}: ${job.location?.hospital || job.location?.province}\n\n${t('jobDetail.share.viewDetails')}: ${shareUrl}\n${t('jobDetail.share.openInApp')}: ${appLink}`,
         title: job.title,
         url: shareUrl,
       });
@@ -506,13 +511,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         const isNow = await toggleFavorite(user.uid, job.id);
         setIsSaved(isNow);
         if (isNow) {
-          toast.success(`บันทึก "${job.title}" ไว้ในรายการโปรดแล้ว`, '❤️ บันทึกแล้ว');
+          toast.success(t('jobDetail.save.saved', { title: job.title }), t('jobDetail.save.savedToast'));
         } else {
-          toast.info('ลบออกจากรายการโปรดแล้ว', '💔 ลบออกแล้ว');
+          toast.info(t('jobDetail.save.removed'), t('jobDetail.save.removedToast'));
         }
       } catch {
         setIsSaved(prev); // rollback
-        toast.error('ไม่สามารถบันทึกงานได้ กรุณาลองใหม่');
+        toast.error(t('jobDetail.save.failed'));
       } finally {
         setIsSavingFav(false);
       }
@@ -526,7 +531,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       
       // Don't allow chatting with yourself
       if (user.uid === job.posterId || user.id === job.posterId) {
-        setAlert(createAlert.warning('ไม่สามารถแชทได้', 'คุณไม่สามารถแชทกับตัวเองได้') as AlertState);
+        setAlert(createAlert.warning(t('jobDetail.alerts.cannotChatSelf'), t('jobDetail.alerts.cannotChatSelfMessage')) as AlertState);
         return;
       }
       
@@ -534,7 +539,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       try {
         const chatUsage = await getFeatureUsageStatus(user.uid, 'chat_start');
         if (!chatUsage.canUse) {
-          setAlert(createAlert.info('ใช้สิทธิ์เริ่มแชทครบแล้ว', chatUsage.reason || 'บัญชีนี้ใช้สิทธิ์เริ่มแชทครบตามรอบเดือนนี้แล้ว') as AlertState);
+          setAlert(createAlert.info(t('jobDetail.alerts.chatQuotaReached'), chatUsage.reason || t('jobDetail.alerts.chatQuotaReachedMessage')) as AlertState);
           return;
         }
 
@@ -556,9 +561,9 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
         const { conversationId, created } = await getOrCreateConversationWithStatus(
           user.uid,
-          user.displayName || 'ผู้ใช้',
+          user.displayName || t('jobDetail.userFallback'),
           job.posterId,
-          job.posterName || 'ผู้โพสต์',
+          job.posterName || t('jobDetail.posterFallback'),
           job.id,
           job.title,
           job.location?.hospital || undefined
@@ -571,12 +576,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         (navigation as any).navigate('ChatRoom', {
           conversationId,
           recipientId: job.posterId,
-          recipientName: job.posterName || 'ผู้โพสต์',
+          recipientName: job.posterName || t('jobDetail.posterFallback'),
           recipientPhoto: job.posterPhoto || undefined,
           jobTitle: job.title,
+          jobId: job.id,
         });
       } catch (error: any) {
-        setErrorMessage(error.message || 'ไม่สามารถเริ่มแชทได้ กรุณาลองใหม่');
+        setErrorMessage(error.message || t('jobDetail.alerts.chatError'));
         setShowErrorModal(true);
       } finally {
         setIsStartingChat(false);
@@ -600,7 +606,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       setShowSuccessModal(true);
     } catch (error: any) {
       setShowDeleteModal(false);
-      setErrorMessage(error.message || 'ไม่สามารถลบได้ กรุณาลองใหม่');
+      setErrorMessage(error.message || t('jobDetail.alerts.deleteError'));
       setShowErrorModal(true);
     } finally {
       setIsDeleting(false);
@@ -643,7 +649,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     requireAuth(async () => {
       if (!user || !job.posterId) return;
       if (hasContacted) {
-        setAlert(createAlert.info('สมัครไว้แล้ว', 'คุณเคยแสดงความสนใจงานนี้แล้ว ลองเปิดแชทเพื่อคุยต่อได้เลย') as AlertState);
+        setAlert(createAlert.info(t('jobDetail.alerts.quickApplyAlreadyDone'), t('jobDetail.alerts.quickApplyAlreadyDoneMessage')) as AlertState);
         return;
       }
 
@@ -651,15 +657,15 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       try {
         const applyUsage = await getFeatureUsageStatus(user.uid, 'job_application');
         if (!applyUsage.canUse) {
-          setAlert(createAlert.info('ใช้สิทธิ์สมัครครบแล้ว', applyUsage.reason || 'บัญชีนี้ใช้สิทธิ์สมัครงานครบตามรอบเดือนนี้แล้ว') as AlertState);
+          setAlert(createAlert.info(t('jobDetail.alerts.applyQuotaReached'), applyUsage.reason || t('jobDetail.alerts.applyQuotaReachedMessage')) as AlertState);
           return;
         }
 
         const documents = await getUserDocuments(user.uid);
         const latestDocument = pickLatestQuickApplyDocument(documents);
         const quickApplyMessage = latestDocument
-          ? `สนใจงานนี้ครับ/ค่ะ ส่งเอกสารล่าสุด (${latestDocument.name}) ให้แล้ว หากสะดวกขอคุยรายละเอียดต่อได้เลยนะครับ/คะ`
-          : 'สนใจงานนี้ครับ/ค่ะ โปรไฟล์พร้อมเริ่มงาน หากสะดวกขอคุยรายละเอียดต่อได้เลยนะครับ/คะ';
+          ? t('jobDetail.quickApply.messageWithDoc', { docName: latestDocument.name })
+          : t('jobDetail.quickApply.messageNoDoc');
 
         await trackEvent({
           eventName: 'apply_cta_clicked',
@@ -679,7 +685,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         await contactForShift(
           job.id,
           user.uid,
-          user.displayName || 'ผู้ใช้',
+          user.displayName || t('jobDetail.userFallback'),
           user.phone || '',
           quickApplyMessage,
         );
@@ -693,9 +699,9 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         if (chatUsage?.canUse !== false) {
           const { conversationId, created } = await getOrCreateConversationWithStatus(
             user.uid,
-            user.displayName || 'ผู้ใช้',
+            user.displayName || t('jobDetail.userFallback'),
             job.posterId,
-            job.posterName || 'ผู้โพสต์',
+            job.posterName || t('jobDetail.posterFallback'),
             job.id,
             job.title,
             job.location?.hospital || undefined,
@@ -706,12 +712,12 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             await consumeFeatureUsage(user.uid, 'chat_start').catch(() => {});
           }
 
-          await sendMessage(conversationId, user.uid, user.displayName || 'ผู้ใช้', quickApplyMessage);
+          await sendMessage(conversationId, user.uid, user.displayName || t('jobDetail.userFallback'), quickApplyMessage);
           if (latestDocument?.fileUrl) {
             await sendSavedDocument(
               conversationId,
               user.uid,
-              user.displayName || 'ผู้ใช้',
+              user.displayName || t('jobDetail.userFallback'),
               latestDocument.fileUrl,
               latestDocument.fileName || latestDocument.name,
               latestDocument.type,
@@ -721,13 +727,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
 
         setHasContacted(true);
         setAlert(createAlert.success(
-          'ส่ง Quick Apply เรียบร้อยแล้ว',
+          t('jobDetail.alerts.quickApplySuccess'),
           openedConversationId
-            ? 'ระบบส่งความสนใจ ข้อความแนะนำตัว และเอกสารล่าสุดให้แล้ว เปิดแชทต่อได้ทันที'
-            : 'ระบบส่งความสนใจให้เรียบร้อยแล้ว หากต้องการแนบเอกสารเพิ่ม สามารถเริ่มแชทภายหลังได้'
+            ? t('jobDetail.alerts.quickApplySuccessWithChat')
+            : t('jobDetail.alerts.quickApplySuccessNoChat')
         ) as AlertState);
       } catch (error: any) {
-        setAlert(createAlert.error('ส่ง Quick Apply ไม่สำเร็จ', error.message || 'กรุณาลองใหม่อีกครั้ง') as AlertState);
+        setAlert(createAlert.error(t('jobDetail.alerts.quickApplyFailed'), error.message || t('jobDetail.alerts.errorRetry')) as AlertState);
       } finally {
         setIsQuickApplying(false);
       }
@@ -738,10 +744,10 @@ export default function JobDetailScreen({ navigation, route }: Props) {
   const handleMarkAsFilled = async () => {
     try {
       await updateJob(job.id, { status: 'closed' });
-      setAlert(createAlert.success('ปิดรับสมัครแล้ว', '') as AlertState);
+      setAlert(createAlert.success(t('jobDetail.alerts.markedFilled'), '') as AlertState);
       navigation.goBack();
     } catch (error) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', 'กรุณาลองใหม่') as AlertState);
+      setAlert(createAlert.error(t('jobDetail.alerts.errorGeneric'), t('jobDetail.alerts.errorRetry')) as AlertState);
     }
   };
 
@@ -753,7 +759,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       if (commerceStatus.freeAccessEnabled) {
         const usage = user?.uid ? await getFeatureUsageStatus(user.uid, 'extend_post') : null;
         if (usage && !usage.canUse) {
-          setAlert(createAlert.info('ใช้สิทธิ์ต่ออายุครบแล้ว', usage.reason || 'บัญชีนี้ใช้สิทธิ์ต่ออายุประกาศครบตามรอบเดือนนี้แล้ว') as AlertState);
+          setAlert(createAlert.info(t('jobDetail.alerts.extendQuotaReached'), usage.reason || t('jobDetail.alerts.extendQuotaReachedMessage')) as AlertState);
           return;
         }
 
@@ -762,19 +768,19 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           await consumeFeatureUsage(user.uid, 'extend_post');
         }
         setJob((prev) => (prev ? { ...prev, expiresAt: newExpiry, updatedAt: new Date() } : prev));
-        setAlert(createAlert.success('ต่ออายุประกาศแล้ว', 'ประกาศนี้ถูกต่ออายุเพิ่มอีก 1 วันเรียบร้อยแล้ว') as AlertState);
+        setAlert(createAlert.success(t('jobDetail.alerts.extendedSuccess'), t('jobDetail.alerts.extendedSuccessMessage')) as AlertState);
         return;
       }
 
       navigation.navigate('Payment', {
-        title: 'ต่ออายุประกาศ +1 วัน',
+        title: t('jobDetail.owner.paymentExtend'),
         amount: PRICING.extendPost,
         jobId: job.id,
         type: 'extend_post',
-        description: 'ต่ออายุเวลาแสดงประกาศเพิ่มอีก 1 วัน',
+        description: t('jobDetail.owner.paymentExtendDesc'),
       });
     } catch (error: any) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', error?.message || 'ไม่สามารถต่ออายุประกาศได้') as AlertState);
+      setAlert(createAlert.error(t('jobDetail.alerts.errorGeneric'), error?.message || t('jobDetail.alerts.errorRetry')) as AlertState);
     } finally {
       setIsApplyingAddon(false);
     }
@@ -786,7 +792,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
     await markFreeUrgentUsed(user.uid);
     setJob((prev) => (prev ? { ...prev, status: 'urgent', isUrgent: true, updatedAt: new Date() } : prev));
     setJobStatus('urgent');
-    setAlert(createAlert.success('เปิดป้ายด่วนแล้ว', 'ประกาศนี้ถูกทำเครื่องหมายด่วนเรียบร้อยแล้ว') as AlertState);
+    setAlert(createAlert.success(t('jobDetail.alerts.urgentApplied'), t('jobDetail.alerts.urgentAppliedMessage')) as AlertState);
   };
 
   const handleUrgentAddon = async () => {
@@ -797,7 +803,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       if (commerceStatus.freeAccessEnabled) {
         const canUseUrgent = await canUseFreeUrgent(user.uid);
         if (!canUseUrgent) {
-          setAlert(createAlert.info('ใช้สิทธิ์ป้ายด่วนครบแล้ว', 'ตอนนี้บัญชีนี้ใช้สิทธิ์ป้ายด่วนครบแล้ว แต่ยังจัดการประกาศอื่นได้ตามปกติ') as AlertState);
+          setAlert(createAlert.info(t('jobDetail.alerts.urgentQuotaReached'), t('jobDetail.alerts.urgentQuotaReachedMessage')) as AlertState);
           return;
         }
         await applyUrgentNow();
@@ -805,14 +811,14 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       }
 
       navigation.navigate('Payment', {
-        title: 'ป้ายด่วน (Urgent)',
+        title: t('jobDetail.owner.paymentUrgent'),
         amount: PRICING.urgentPost,
         jobId: job.id,
         type: 'urgent_post',
-        description: 'ช่วยให้ประกาศนี้เด่นขึ้นในรายการประกาศ',
+        description: t('jobDetail.owner.paymentUrgentDesc'),
       });
     } catch (error: any) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', error?.message || 'ไม่สามารถเปิดป้ายด่วนได้') as AlertState);
+      setAlert(createAlert.error(t('jobDetail.alerts.errorGeneric'), error?.message || t('jobDetail.alerts.errorRetry')) as AlertState);
     } finally {
       setIsApplyingAddon(false);
     }
@@ -826,7 +832,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       if (commerceStatus.freeAccessEnabled) {
         const usage = await getFeatureUsageStatus(user.uid, 'boost_post');
         if (!usage.canUse) {
-          setAlert(createAlert.info('ใช้สิทธิ์ดันโพสต์ครบแล้ว', usage.reason || 'บัญชีนี้ใช้สิทธิ์ดันโพสต์ครบตามรอบเดือนนี้แล้ว') as AlertState);
+          setAlert(createAlert.info(t('jobDetail.alerts.boostQuotaReached'), usage.reason || t('jobDetail.alerts.boostQuotaReachedMessage')) as AlertState);
           return;
         }
 
@@ -835,19 +841,19 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           await consumeFeatureUsage(user.uid, 'boost_post');
         }
         setJob((prev) => (prev ? { ...prev, boostedAt, updatedAt: boostedAt } : prev));
-        setAlert(createAlert.success('ดันโพสต์แล้ว', 'ประกาศนี้ถูกดันขึ้นไปอยู่ลำดับบนสุดของรายการล่าสุดแล้ว') as AlertState);
+        setAlert(createAlert.success(t('jobDetail.alerts.boostedSuccess'), t('jobDetail.alerts.boostedSuccessMessage')) as AlertState);
         return;
       }
 
       navigation.navigate('Payment', {
-        title: 'ดันโพสต์ขึ้นบนสุด',
+        title: t('jobDetail.owner.paymentBoost'),
         amount: PRICING.extraPost,
         jobId: job.id,
         type: 'boost_post',
-        description: 'ดันประกาศนี้ขึ้นบนสุดของลำดับประกาศล่าสุดอีกครั้ง',
+        description: t('jobDetail.owner.paymentBoostDesc'),
       });
     } catch (error: any) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', error?.message || 'ไม่สามารถดันโพสต์ได้') as AlertState);
+      setAlert(createAlert.error(t('jobDetail.alerts.errorGeneric'), error?.message || t('jobDetail.alerts.errorRetry')) as AlertState);
     } finally {
       setIsApplyingAddon(false);
     }
@@ -941,7 +947,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                   );
                 })}
               </View>
-              <Text style={styles.postedTime}>โพสต์ {formatRelativeTime(job.createdAt)}</Text>
+              <Text style={styles.postedTime}>{t('jobDetail.postedTime', { time: formatRelativeTime(job.createdAt) })}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
@@ -952,26 +958,26 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           {/* Badges */}
           <View style={styles.badges}>
             {(job.status === 'urgent' || job.isUrgent) && (
-              <Badge text="🔥 ด่วน" variant="danger" />
+              <Badge text={t('jobDetail.badgeUrgent')} variant="danger" />
             )}
             {job.department ? (
-              <Badge text={job.department} variant="primary" />
+              <Badge text={getDepartmentDisplayName(job.department)} variant="primary" />
             ) : null}
             {job.staffType ? (
               <Badge text={getStaffTypeLabel(job.staffType as StaffType)} variant="info" />
             ) : null}
             {job.locationType === 'HOME' ? (
-              <Badge text="🏠 ดูแลบ้าน" variant="warning" />
+              <Badge text={t('jobDetail.badgeHomeCare')} variant="warning" />
             ) : null}
             {job.paymentType === 'NET' ? (
-              <Badge text="NET (รับเต็ม)" variant="success" />
+              <Badge text={getPaymentTypeDisplayName(job.paymentType)} variant="success" />
             ) : null}
             {job.paymentType === 'DEDUCT_PERCENT' && job.deductPercent ? (
-              <Badge text={`หัก ${job.deductPercent}%`} variant="danger" />
+              <Badge text={getCurrentResolvedLanguage() === 'th' ? `หัก ${job.deductPercent}%` : `Deduct ${job.deductPercent}%`} variant="danger" />
             ) : null}
             {job.postType === 'job' && job.employmentType ? (
               <Badge
-                text={job.employmentType === 'full_time' ? 'งานประจำ' : job.employmentType === 'part_time' ? 'พาร์ตไทม์' : job.employmentType === 'contract' ? 'สัญญาจ้าง' : 'ชั่วคราว'}
+                text={getEmploymentTypeLabel(job.employmentType)}
                 variant="secondary"
               />
             ) : null}
@@ -985,7 +991,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         <Card style={styles.section}>
           <View style={styles.sectionTitleRow}>
             <Ionicons name="document-text-outline" size={18} color={colors.primary} />
-            <Text style={styles.sectionTitle}>รายละเอียดงาน</Text>
+            <Text style={styles.sectionTitle}>{t('jobDetail.sections.jobDetails')}</Text>
           </View>
 
           {job.postType === 'job' ? (
@@ -994,10 +1000,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 <View style={styles.detailRow}>
                   <Ionicons name="briefcase-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                   <View style={styles.detailContent}>
-                    <Text style={styles.detailLabel}>ประเภทการจ้าง</Text>
-                    <Text style={styles.detailValue}>
-                      {job.employmentType === 'full_time' ? 'งานประจำ' : job.employmentType === 'part_time' ? 'พาร์ตไทม์' : job.employmentType === 'contract' ? 'สัญญาจ้าง' : 'ชั่วคราว'}
-                    </Text>
+                    <Text style={styles.detailLabel}>{t('jobDetail.sections.employmentType')}</Text>
+                    <Text style={styles.detailValue}>{getEmploymentTypeLabel(job.employmentType)}</Text>
                   </View>
                 </View>
               ) : null}
@@ -1005,7 +1009,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <View style={styles.detailRow}>
                 <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>วันเริ่มงาน</Text>
+                  <Text style={styles.detailLabel}>{t('jobDetail.sections.startDate')}</Text>
                   <Text style={styles.detailValue}>{getJobStartLabel(job)}</Text>
                 </View>
               </View>
@@ -1013,7 +1017,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <View style={styles.detailRow}>
                 <Ionicons name="time-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>วันและเวลาทำงาน</Text>
+                  <Text style={styles.detailLabel}>{t('jobDetail.sections.workSchedule')}</Text>
                   <Text style={styles.detailValue}>{getJobTimeLabel(job)}</Text>
                 </View>
               </View>
@@ -1022,8 +1026,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 <View style={styles.detailRow}>
                   <Ionicons name="gift-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                   <View style={styles.detailContent}>
-                    <Text style={styles.detailLabel}>สวัสดิการ</Text>
-                    <Text style={styles.detailValue}>{job.benefits.join(' • ')}</Text>
+                    <Text style={styles.detailLabel}>{t('jobDetail.sections.benefits')}</Text>
+                    <Text style={styles.detailValue}>{job.benefits.map((benefit) => getBenefitDisplayName(benefit)).join(' • ')}</Text>
                   </View>
                 </View>
               ) : null}
@@ -1033,13 +1037,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <View style={styles.detailRow}>
                 <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>ตารางเวร ({job.shiftDates.length} วัน)</Text>
+                  <Text style={styles.detailLabel}>{t('jobDetail.sections.shiftSchedule', { count: job.shiftDates.length })}</Text>
                 </View>
               </View>
               {job.shiftDates.map((isoDate, idx) => {
                 const key = isoDate.slice(0, 10);
                 const slot = job.shiftTimeSlots?.[key];
-                const timeStr = slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || 'ตามตกลง');
+                const timeStr = slot ? `${slot.start} – ${slot.end}` : (job.shiftTime || translate(getCurrentResolvedLanguage(), 'jobDetail.negotiable'));
                 const d = new Date(isoDate);
                 const dateStr = d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' });
                 return (
@@ -1063,14 +1067,14 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <View style={styles.detailRow}>
                 <Ionicons name="calendar-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>วันที่</Text>
+                  <Text style={styles.detailLabel}>{t('jobDetail.sections.date')}</Text>
                   <Text style={styles.detailValue}>{formatShiftDate(job.shiftDate)}</Text>
                 </View>
               </View>
               <View style={styles.detailRow}>
                 <Ionicons name="time-outline" size={20} color={colors.primary} style={styles.detailIcon} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>เวลา</Text>
+                  <Text style={styles.detailLabel}>{t('jobDetail.sections.time')}</Text>
                   <Text style={styles.detailValue}>{getJobTimeLabel(job)}</Text>
                 </View>
               </View>
@@ -1080,7 +1084,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <View style={styles.detailRow}>
             <Ionicons name="cash-outline" size={20} color={colors.success} style={styles.detailIcon} />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>{job.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}</Text>
+              <Text style={styles.detailLabel}>{job.postType === 'job' ? t('jobDetail.sections.salary') : t('jobDetail.sections.compensation')}</Text>
               <Text style={[styles.detailValue, styles.rateValue]}>
                 {formatShiftRate(job.shiftRate, job.rateType)}
               </Text>
@@ -1092,14 +1096,14 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         <Card style={styles.section}>
           <View style={styles.sectionTitleRow}>
             <Ionicons name="location-outline" size={18} color={colors.primary} />
-            <Text style={styles.sectionTitle}>สถานที่</Text>
+            <Text style={styles.sectionTitle}>{t('jobDetail.sections.location')}</Text>
           </View>
           
           {job.location?.hospital && (
             <View style={styles.detailRow}>
               <Ionicons name="business-outline" size={20} color={colors.primary} style={styles.detailIcon} />
               <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>โรงพยาบาล/สถานที่</Text>
+                <Text style={styles.detailLabel}>{t('jobDetail.sections.hospitalPlace')}</Text>
                 <Text style={styles.detailValue}>{job.location.hospital}</Text>
               </View>
             </View>
@@ -1108,10 +1112,10 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <View style={styles.detailRow}>
             <Ionicons name="map-outline" size={20} color={colors.primary} style={styles.detailIcon} />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>พื้นที่</Text>
+              <Text style={styles.detailLabel}>{t('jobDetail.sections.area')}</Text>
               <Text style={styles.detailValue}>
                 {job.location?.district ? `${job.location.district}, ` : ''}
-                {job.location?.province || 'ไม่ระบุ'}
+                {job.location?.province || t('jobDetail.sections.notSpecified')}
               </Text>
             </View>
           </View>
@@ -1119,7 +1123,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           {(job.location?.hospital || job.location?.address) && (
             <TouchableOpacity style={styles.mapButton} onPress={handleDirections}>
               <Ionicons name="navigate-outline" size={16} color={colors.white} />
-              <Text style={styles.mapButtonText}>ดูแผนที่</Text>
+              <Text style={styles.mapButtonText}>{t('jobDetail.sections.viewMap')}</Text>
             </TouchableOpacity>
           )}
         </Card>
@@ -1129,7 +1133,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <Card style={styles.section}>
             <View style={styles.sectionTitleRow}>
               <Ionicons name="create-outline" size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>รายละเอียดเพิ่มเติม</Text>
+              <Text style={styles.sectionTitle}>{t('jobDetail.sections.additionalDetails')}</Text>
             </View>
             <Text style={styles.description}>{job.description}</Text>
           </Card>
@@ -1139,7 +1143,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <Card style={styles.section}>
             <View style={styles.sectionTitleRow}>
               <Ionicons name="layers-outline" size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>ภาพรวมรอบงาน</Text>
+              <Text style={styles.sectionTitle}>{t('jobDetail.sections.campaignOverview')}</Text>
             </View>
             <Text style={styles.detailValue}>{getCampaignSummary(job)}</Text>
             {job.scheduleNote ? <Text style={styles.helperCopy}>{job.scheduleNote}</Text> : null}
@@ -1151,19 +1155,19 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <Card style={styles.ownerSection}>
             <View style={styles.sectionTitleRow}>
               <Ionicons name="settings-outline" size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>จัดการประกาศ</Text>
+              <Text style={styles.sectionTitle}>{t('jobDetail.sections.managePost')}</Text>
             </View>
-            <Text style={styles.ownerNote}>คุณเป็นเจ้าของประกาศนี้</Text>
+            <Text style={styles.ownerNote}>{t('jobDetail.sections.ownerNote')}</Text>
             
             <View style={styles.ownerActions}>
               <TouchableOpacity style={styles.ownerButton} onPress={handleEdit}>
                 <Ionicons name="pencil-outline" size={20} color={colors.primary} />
-                <Text style={styles.ownerButtonText}>แก้ไข</Text>
+                <Text style={styles.ownerButtonText}>{t('jobDetail.owner.edit')}</Text>
               </TouchableOpacity>
               
               <TouchableOpacity style={styles.ownerButton} onPress={handleMarkAsFilled}>
                 <Ionicons name="checkmark-circle-outline" size={20} color={colors.success} />
-                <Text style={styles.ownerButtonText}>ปิดรับ</Text>
+                <Text style={styles.ownerButtonText}>{t('jobDetail.owner.closeApplications')}</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -1171,13 +1175,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 onPress={() => setShowDeleteModal(true)}
               >
                 <Ionicons name="trash-outline" size={20} color={colors.error} />
-                <Text style={[styles.ownerButtonText, styles.deleteButtonText]}>ลบ</Text>
+                <Text style={[styles.ownerButtonText, styles.deleteButtonText]}>{t('jobDetail.owner.delete')}</Text>
               </TouchableOpacity>
             </View>
 
             <View style={styles.ownerAddonHeader}>
-              <Text style={styles.ownerAddonTitle}>บริการเสริมของประกาศนี้</Text>
-              <Text style={styles.ownerAddonHint}>จัดการ add-on ได้จากหน้านี้โดยไม่ต้องย้อนกลับไปหน้าโพสต์ของฉัน</Text>
+              <Text style={styles.ownerAddonTitle}>{t('jobDetail.owner.addons')}</Text>
+              <Text style={styles.ownerAddonHint}>{t('jobDetail.owner.addonsHint')}</Text>
             </View>
 
             <View style={styles.ownerAddonGrid}>
@@ -1185,30 +1189,30 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 <View style={[styles.ownerAddonIcon, { backgroundColor: colors.primaryBackground }]}> 
                   <Ionicons name="arrow-up-circle-outline" size={20} color={colors.primary} />
                 </View>
-                <Text style={styles.ownerAddonCardTitle}>ดันโพสต์</Text>
-                <Text style={styles.ownerAddonCardSub}>ดันประกาศนี้ขึ้นบนสุดอีกครั้ง</Text>
+                <Text style={styles.ownerAddonCardTitle}>{t('jobDetail.owner.boost')}</Text>
+                <Text style={styles.ownerAddonCardSub}>{t('jobDetail.owner.boostSub')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.ownerAddonCard} onPress={handleExtendAddon} disabled={isApplyingAddon || jobStatus === 'closed'}>
                 <View style={[styles.ownerAddonIcon, { backgroundColor: colors.successLight }]}> 
                   <Ionicons name="time-outline" size={20} color={colors.success} />
                 </View>
-                <Text style={styles.ownerAddonCardTitle}>ต่ออายุ</Text>
-                <Text style={styles.ownerAddonCardSub}>เพิ่มเวลาแสดงประกาศอีก 1 วัน</Text>
+                <Text style={styles.ownerAddonCardTitle}>{t('jobDetail.owner.extend')}</Text>
+                <Text style={styles.ownerAddonCardSub}>{t('jobDetail.owner.extendSub')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.ownerAddonCard} onPress={handleUrgentAddon} disabled={isApplyingAddon || jobStatus === 'closed' || jobStatus === 'urgent'}>
                 <View style={[styles.ownerAddonIcon, { backgroundColor: colors.warningLight || '#FFF3E0' }]}> 
                   <Ionicons name="flash-outline" size={20} color={colors.warning} />
                 </View>
-                <Text style={styles.ownerAddonCardTitle}>ป้ายด่วน</Text>
-                <Text style={styles.ownerAddonCardSub}>{jobStatus === 'urgent' ? 'ประกาศนี้เป็นด่วนอยู่แล้ว' : 'ทำให้ประกาศเด่นขึ้น'}</Text>
+                <Text style={styles.ownerAddonCardTitle}>{t('jobDetail.owner.urgentBadge')}</Text>
+                <Text style={styles.ownerAddonCardSub}>{jobStatus === 'urgent' ? t('jobDetail.owner.urgentAlreadyActive') : t('jobDetail.owner.urgentBadgeSub')}</Text>
               </TouchableOpacity>
             </View>
 
             <View style={[styles.ownerAddonNoteBox, { backgroundColor: colors.backgroundSecondary }]}> 
               <Text style={styles.ownerAddonNoteText}>
-                ป้ายด่วนตอนนี้ยังไม่มีเวลาหมดอายุแยก จะอยู่จนกว่าคุณปิดประกาศหรือประกาศหมดอายุเอง
+                {t('jobDetail.owner.urgentNote')}
               </Text>
             </View>
           </Card>
@@ -1219,15 +1223,15 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <Card style={styles.section}>
             <View style={styles.sectionTitleRow}>
               <Ionicons name="call-outline" size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>ช่องทางติดต่อ</Text>
+              <Text style={styles.sectionTitle}>{t('jobDetail.sections.contactChannel')}</Text>
             </View>
 
             {!canRevealExternalContact ? (
               <View style={[styles.lockedInlineCard, { backgroundColor: colors.primaryBackground }]}> 
                 <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.lockedInlineTitle}>เริ่มคุยผ่านแอปก่อน</Text>
-                  <Text style={styles.lockedInlineText}>เริ่มแชทหรือแสดงความสนใจก่อน เพื่อช่วยดูแลความเป็นส่วนตัวและค่อยเปิดช่องทางติดต่อที่ผู้โพสต์อนุญาต</Text>
+                  <Text style={styles.lockedInlineTitle}>{t('jobDetail.sections.contactLocked.title')}</Text>
+                  <Text style={styles.lockedInlineText}>{t('jobDetail.sections.contactLocked.text')}</Text>
                 </View>
               </View>
             ) : (
@@ -1235,14 +1239,14 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 {(resolvedContactMode === 'phone' || resolvedContactMode === 'phone_or_line') && job.contactPhone ? (
                   <TouchableOpacity style={styles.contactButton} onPress={handleCall}>
                     <Ionicons name="call" size={18} color={colors.primary} />
-                    <Text style={styles.contactText}>โทร {job.contactPhone}</Text>
+                    <Text style={styles.contactText}>{t('jobDetail.contact.phoneLabel', { phone: job.contactPhone })}</Text>
                   </TouchableOpacity>
                 ) : null}
 
                 {(resolvedContactMode === 'line' || resolvedContactMode === 'phone_or_line') && job.contactLine ? (
                   <TouchableOpacity style={styles.contactButton} onPress={handleLine}>
                     <Ionicons name="chatbubble-ellipses" size={18} color={colors.success} />
-                    <Text style={styles.contactText}>LINE: {job.contactLine}</Text>
+                    <Text style={styles.contactText}>{t('jobDetail.contact.lineLabel', { lineId: job.contactLine })}</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -1252,12 +1256,12 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           <Card style={styles.lockedSection}>
             <View style={styles.lockedContent}>
               <Ionicons name="lock-closed" size={32} color={colors.textMuted} />
-              <Text style={styles.lockedTitle}>เข้าสู่ระบบเพื่อดูข้อมูลติดต่อ</Text>
+              <Text style={styles.lockedTitle}>{t('jobDetail.sections.loginToView')}</Text>
               <Text style={styles.lockedDescription}>
-                สมัครสมาชิกฟรี เพื่อดูรายละเอียดงานและติดต่อผู้โพสต์
+                {t('jobDetail.sections.loginDescription')}
               </Text>
               <Button
-                title="เข้าสู่ระบบ / สมัครสมาชิก"
+                title={t('jobDetail.sections.loginButton')}
                 onPress={() => (navigation as any).navigate('Auth')}
                 style={{ marginTop: SPACING.md }}
               />
@@ -1268,23 +1272,23 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         {!isOwner && isAuthenticated && !hasContacted && (
           <Card style={styles.quickApplyCard}>
             <View style={styles.quickApplyBadge}>
-              <Ionicons name="sparkles" size={14} color="#92400E" />
-              <Text style={styles.quickApplyBadgeText}>สมัครไวแบบโปรไฟล์พร้อมส่ง</Text>
+              <Ionicons name="sparkles" size={14} color={colors.warning} />
+              <Text style={styles.quickApplyBadgeText}>{t('jobDetail.quickApply.badge')}</Text>
             </View>
             <View style={styles.quickApplyRow}>
               <View style={styles.quickApplyCopy}>
                 <Text style={styles.quickApplyTitle}>Quick Apply</Text>
                 <Text style={styles.quickApplyDescription}>
-                  ส่งความสนใจ พร้อมข้อความแนะนำตัวและเอกสารล่าสุดให้ครบในครั้งเดียว ช่วยให้เริ่มคุยงานต่อได้เร็วขึ้น
+                    {t('jobDetail.quickApply.description')}
                 </Text>
                 <View style={styles.quickApplyHighlights}>
                   <View style={styles.quickApplyHighlightPill}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={12} color="#92400E" />
-                    <Text style={styles.quickApplyHighlightText}>ข้อความแนะนำตัวอัตโนมัติ</Text>
+                    <Ionicons name="chatbubble-ellipses-outline" size={12} color={colors.warning} />
+                    <Text style={styles.quickApplyHighlightText}>{t('jobDetail.quickApply.autoMessage')}</Text>
                   </View>
                   <View style={styles.quickApplyHighlightPill}>
-                    <Ionicons name="document-text-outline" size={12} color="#92400E" />
-                    <Text style={styles.quickApplyHighlightText}>แนบเอกสารล่าสุดทันที</Text>
+                    <Ionicons name="document-text-outline" size={12} color={colors.warning} />
+                    <Text style={styles.quickApplyHighlightText}>{t('jobDetail.quickApply.attachDocument')}</Text>
                   </View>
                 </View>
               </View>
@@ -1295,7 +1299,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 activeOpacity={0.85}
               >
                 <Ionicons name="flash" size={16} color="#FFFFFF" />
-                <Text style={styles.quickApplyButtonText}>{isQuickApplying ? 'กำลังส่ง...' : 'ส่งเลย'}</Text>
+                <Text style={styles.quickApplyButtonText}>{isQuickApplying ? t('jobDetail.quickApply.sending') : t('jobDetail.quickApply.send')}</Text>
               </TouchableOpacity>
             </View>
           </Card>
@@ -1305,7 +1309,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
         {viewsCount !== undefined && (
           <View style={styles.viewsRow}>
             <Ionicons name="eye-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.viewsText}>{viewsCount} คนดู</Text>
+            <Text style={styles.viewsText}>{t('jobDetail.views', { count: viewsCount })}</Text>
           </View>
         )}
 
@@ -1317,7 +1321,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) + SPACING.md }]}>
         {!isOwner && (
           <View style={styles.bottomRate}>
-            <Text style={styles.bottomRateLabel}>{job.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}</Text>
+            <Text style={styles.bottomRateLabel}>{job.postType === 'job' ? t('jobDetail.bottom.salary') : t('jobDetail.bottom.compensation')}</Text>
             <Text style={styles.bottomRateValue}>
               {formatShiftRate(job.shiftRate, job.rateType)}
             </Text>
@@ -1334,13 +1338,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             >
               <Ionicons name="chatbubble-outline" size={22} color={colors.primary} />
               <Text style={styles.chatButtonText}>
-                {isStartingChat ? 'กำลังเปิด...' : 'แชท'}
+                {isStartingChat ? t('jobDetail.bottom.opening') : t('jobDetail.bottom.chat')}
               </Text>
             </TouchableOpacity>
             
             {/* Contact Button */}
             <Button
-              title={hasContacted ? '✓ แสดงความสนใจแล้ว' : 'สนใจงานนี้'}
+              title={hasContacted ? t('jobDetail.bottom.alreadyInterested') : t('jobDetail.bottom.interested')}
               onPress={handleContact}
               disabled={hasContacted}
               style={styles.contactMainButton}
@@ -1357,7 +1361,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
             >
               <Ionicons name="people-outline" size={18} color={colors.primary} />
               <Text style={[styles.applicantsButtonText, { color: colors.primary }]}>
-                ผู้สมัคร ({applicantsCount})
+                {t('jobDetail.owner.applicants', { count: applicantsCount })}
               </Text>
             </TouchableOpacity>
 
@@ -1382,7 +1386,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                   { color: jobStatus === 'closed' ? '#fff' : colors.textSecondary }
                 ]}
               >
-                {jobStatus === 'closed' ? 'เปิดอีกครั้ง' : 'ปิดรับ'}
+                {jobStatus === 'closed' ? t('jobDetail.owner.reopenLabel') : t('jobDetail.owner.closeLabel')}
               </Text>
             </TouchableOpacity>
 
@@ -1401,7 +1405,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showContactModal}
         onClose={() => setShowContactModal(false)}
-        title="ยืนยันความสนใจ"
+        title={t('jobDetail.modals.confirmInterest')}
       >
         <View style={styles.modalContent}>
           <Text style={styles.modalIcon}>📞</Text>
@@ -1414,19 +1418,19 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           </Text>
           
           <Text style={styles.modalNote}>
-            กดยืนยันเพื่อบันทึกความสนใจ{'\n'}
-              {resolvedContactMode === 'in_app' ? 'จากนั้นคุยรายละเอียดงานต่อผ่านแอปได้ทันที ทั้งสะดวก เป็นส่วนตัว และตามงานต่อได้ง่าย' : 'จากนั้นดูช่องทางติดต่อที่ผู้โพสต์เปิดไว้ให้คุณ'}
+            {t('jobDetail.modals.confirmNote')}{"\n"}
+              {resolvedContactMode === 'in_app' ? t('jobDetail.modals.confirmNoteInApp') : t('jobDetail.modals.confirmNoteExternal')}
           </Text>
 
           <View style={styles.modalActions}>
             <Button
-              title="ยกเลิก"
+              title={t('jobDetail.modals.cancel')}
               variant="outline"
               onPress={() => setShowContactModal(false)}
               style={{ flex: 1, marginRight: SPACING.sm }}
             />
             <Button
-              title={isContacting ? 'กำลังบันทึก...' : 'ยืนยัน'}
+              title={isContacting ? t('jobDetail.modals.confirming') : t('jobDetail.modals.confirm')}
               onPress={submitContact}
               loading={isContacting}
               disabled={isContacting}
@@ -1439,10 +1443,10 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       {/* Delete Confirmation Modal */}
       <ConfirmModal
         visible={showDeleteModal}
-        title="ลบประกาศ"
-        message={`คุณต้องการลบประกาศ "${job.title}" หรือไม่?\n\nการดำเนินการนี้ไม่สามารถย้อนกลับได้`}
-        confirmText={isDeleting ? 'กำลังลบ...' : 'ลบประกาศ'}
-        cancelText="ยกเลิก"
+        title={t('jobDetail.modals.deleteTitle')}
+        message={t('jobDetail.modals.deleteMessage', { title: job.title })}
+        confirmText={isDeleting ? t('jobDetail.modals.deleting') : t('jobDetail.modals.deleteConfirm')}
+        cancelText={t('jobDetail.modals.cancel')}
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteModal(false)}
         type="danger"
@@ -1451,8 +1455,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       {/* Success Modal */}
       <SuccessModal
         visible={showSuccessModal}
-        title="ลบสำเร็จ"
-        message="ลบประกาศเรียบร้อยแล้ว"
+        title={t('jobDetail.modals.deleteSuccess')}
+        message={t('jobDetail.modals.deleteSuccessMessage')}
         icon="✅"
         onClose={() => {
           setShowSuccessModal(false);
@@ -1463,7 +1467,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       {/* Error Modal */}
       <ErrorModal
         visible={showErrorModal}
-        title="เกิดข้อผิดพลาด"
+        title={t('jobDetail.modals.errorTitle')}
         message={errorMessage}
         onClose={() => setShowErrorModal(false)}
       />
@@ -1478,7 +1482,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
           targetName={job.title}
           targetDescription={job.description}
           reporterId={user.uid}
-          reporterName={user.displayName || 'ผู้ใช้'}
+          reporterName={user.displayName || t('jobDetail.reporter')}
           reporterEmail={user.email || ''}
         />
       )}
@@ -1487,14 +1491,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showContactSuccessModal}
         onClose={() => setShowContactSuccessModal(false)}
-        title="✅ บันทึกความสนใจแล้ว!"
+        title={t('jobDetail.modals.contactSuccess')}
       >
         <View style={styles.modalContent}>
           <Text style={styles.successIcon}>🎉</Text>
-          <Text style={styles.modalTitle}>เยี่ยมมาก!</Text>
+          <Text style={styles.modalTitle}>{t('jobDetail.modals.contactSuccessTitle')}</Text>
           <Text style={styles.modalSubtitle}>
-            ระบบบันทึกความสนใจของคุณแล้ว{'\n'}
-              เลือกคุยต่อในแอปหรือช่องทางที่ผู้โพสต์อนุญาตได้เลย
+            {t('jobDetail.modals.contactSuccessSubtitle')}
           </Text>
           
           <View style={styles.contactOptionsContainer}>
@@ -1507,7 +1510,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
                 }}
               >
                 <Ionicons name="call" size={24} color="#FFFFFF" />
-                <Text style={styles.contactOptionText}>โทรเลย</Text>
+                <Text style={styles.contactOptionText}>{t('jobDetail.modals.callNow')}</Text>
                 <Text style={styles.contactOptionSubtext}>{job.contactPhone}</Text>
               </TouchableOpacity>
             )}
@@ -1534,13 +1537,13 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               }}
             >
               <Ionicons name="chatbubbles" size={24} color="#FFFFFF" />
-              <Text style={styles.contactOptionText}>แชทในแอพ</Text>
-              <Text style={styles.contactOptionSubtext}>ส่งข้อความ</Text>
+              <Text style={styles.contactOptionText}>{t('jobDetail.modals.chatInAppOption')}</Text>
+              <Text style={styles.contactOptionSubtext}>{t('jobDetail.contact.sendMessage')}</Text>
             </TouchableOpacity>
           </View>
           
           <Button
-            title="ปิด"
+            title={t('jobDetail.modals.close')}
             variant="outline"
             onPress={() => setShowContactSuccessModal(false)}
             style={{ marginTop: SPACING.md }}
@@ -1551,10 +1554,10 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       {/* Close Job Modal - สำหรับปิดรับสมัคร */}
       <ConfirmModal
         visible={showCloseModal}
-        title="ปิดรับสมัคร"
-        message={`คุณต้องการปิดรับสมัครประกาศ "${job.title}" หรือไม่?\n\nประกาศจะไม่แสดงในหน้าแรกอีกต่อไป แต่คุณยังสามารถเปิดรับสมัครอีกครั้งได้`}
-        confirmText={isClosing ? 'กำลังปิด...' : 'ปิดรับสมัคร'}
-        cancelText="ยกเลิก"
+        title={t('jobDetail.modals.closeTitle')}
+        message={t('jobDetail.modals.closeMessage', { title: job.title })}
+        confirmText={isClosing ? t('jobDetail.modals.closing') : t('jobDetail.modals.closeConfirm')}
+        cancelText={t('jobDetail.modals.cancel')}
         onConfirm={handleCloseJob}
         onCancel={() => setShowCloseModal(false)}
         type="warning"
@@ -1564,7 +1567,7 @@ export default function JobDetailScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showOptionsModal}
         onClose={() => setShowOptionsModal(false)}
-        title="จัดการประกาศ"
+        title={t('jobDetail.owner.moreOptions')}
       >
         <View style={{ paddingBottom: 8 }}>
           <TouchableOpacity
@@ -1575,8 +1578,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="arrow-up-circle-outline" size={22} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>ดันโพสต์</Text>
-              <Text style={[styles.optionSub, { color: colors.textMuted }]}>ดันประกาศนี้ขึ้นบนสุดอีกครั้ง</Text>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>{t('jobDetail.owner.boost')}</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{t('jobDetail.owner.boostSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
@@ -1592,8 +1595,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="time-outline" size={22} color={colors.success} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>ต่ออายุประกาศ</Text>
-              <Text style={[styles.optionSub, { color: colors.textMuted }]}>เพิ่มเวลาแสดงอีก 1 วัน</Text>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>{t('jobDetail.owner.extend')}</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{t('jobDetail.owner.extendSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
@@ -1609,8 +1612,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="flash-outline" size={22} color={colors.warning} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>เปิดป้ายด่วน</Text>
-              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{jobStatus === 'urgent' ? 'ประกาศนี้เป็นด่วนอยู่แล้ว' : 'เพิ่มสถานะด่วนให้ประกาศนี้'}</Text>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>{t('jobDetail.owner.urgentBadge')}</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{jobStatus === 'urgent' ? t('jobDetail.owner.urgentAlreadyActive') : t('jobDetail.owner.urgentBadgeSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
@@ -1625,8 +1628,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="create-outline" size={22} color={colors.info} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>แก้ไขประกาศ</Text>
-              <Text style={[styles.optionSub, { color: colors.textMuted }]}>เปลี่ยนรายละเอียดประกาศ</Text>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>{t('jobDetail.owner.editPost')}</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{t('jobDetail.owner.editPostSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
@@ -1641,8 +1644,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="copy-outline" size={22} color={colors.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>โพสต์คล้ายเดิม</Text>
-              <Text style={[styles.optionSub, { color: colors.textMuted }]}>เปิดเป็นร่างใหม่พร้อมคัดลอกข้อมูลสำคัญไว้ให้ แก้เฉพาะวันที่ เวลา หรือจุดที่ต่าง</Text>
+              <Text style={[styles.optionLabel, { color: colors.text }]}>{t('jobDetail.owner.duplicatePost')}</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{t('jobDetail.owner.duplicatePostSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
@@ -1657,8 +1660,8 @@ export default function JobDetailScreen({ navigation, route }: Props) {
               <Ionicons name="trash-outline" size={22} color={colors.error} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.error }]}>ลบประกาศ</Text>
-              <Text style={[styles.optionSub, { color: colors.textMuted }]}>ลบประกาศออกจากระบบถาวร</Text>
+              <Text style={[styles.optionLabel, { color: colors.error }]}>{t('jobDetail.owner.deletePost')}</Text>
+              <Text style={[styles.optionSub, { color: colors.textMuted }]}>{t('jobDetail.owner.deletePostSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
@@ -2172,7 +2175,7 @@ const createStyles = (COLORS: any) => StyleSheet.create({
   quickApplyBadgeText: {
     fontSize: FONT_SIZES.xs,
     fontWeight: '700',
-    color: '#92400E',
+    color: COLORS.warning,
   },
   quickApplyRow: {
     flexDirection: 'row',
@@ -2211,7 +2214,7 @@ const createStyles = (COLORS: any) => StyleSheet.create({
   quickApplyHighlightText: {
     fontSize: FONT_SIZES.xs,
     fontWeight: '600',
-    color: '#92400E',
+    color: COLORS.warning,
   },
   quickApplyButton: {
     flexDirection: 'row',
@@ -2239,7 +2242,7 @@ const createStyles = (COLORS: any) => StyleSheet.create({
   },
   ownerNote: {
     fontSize: FONT_SIZES.sm,
-    color: '#92400e',
+    color: COLORS.warning,
     marginBottom: SPACING.md,
   },
   ownerActions: {
@@ -2397,7 +2400,7 @@ const createStyles = (COLORS: any) => StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     borderWidth: 1.5,
     borderColor: COLORS.primary,
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    backgroundColor: COLORS.primaryBackground,
     gap: 4,
     flexShrink: 0,
   },

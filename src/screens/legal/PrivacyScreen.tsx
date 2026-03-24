@@ -17,13 +17,15 @@ import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
 import { LEGAL_CONTACT_EMAIL, LEGAL_LAST_UPDATED, PRIVACY_SECTIONS } from '../../legal/legalContent';
+import { useI18n } from '../../i18n';
 
 export default function PrivacyScreen() {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { colors } = useTheme();
 
   const handleContactDPO = () => {
-    Linking.openURL(`mailto:${LEGAL_CONTACT_EMAIL}?subject=คำถามเกี่ยวกับข้อมูลส่วนบุคคล`);
+    Linking.openURL(`mailto:${LEGAL_CONTACT_EMAIL}?subject=${t('privacy.emailSubject')}`);
   };
 
   return (
@@ -33,7 +35,7 @@ export default function PrivacyScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>นโยบายความเป็นส่วนตัว</Text>
+        <Text style={styles.headerTitle}>{t('privacy.headerTitle')}</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -41,7 +43,7 @@ export default function PrivacyScreen() {
         {/* Last Updated */}
         <View style={styles.lastUpdated}>
           <Ionicons name="time-outline" size={16} color={colors.textMuted} />
-          <Text style={styles.lastUpdatedText}>อัปเดตล่าสุด: {LEGAL_LAST_UPDATED}</Text>
+          <Text style={styles.lastUpdatedText}>{t('privacy.lastUpdatedLabel')} {LEGAL_LAST_UPDATED}</Text>
         </View>
 
         {/* Introduction */}
@@ -49,31 +51,30 @@ export default function PrivacyScreen() {
           <View style={styles.introIcon}>
             <Ionicons name="shield-checkmark" size={32} color={colors.primary} />
           </View>
-          <Text style={styles.introTitle}>ความเป็นส่วนตัวของคุณสำคัญสำหรับเรา</Text>
+          <Text style={styles.introTitle}>{t('privacy.introTitle')}</Text>
           <Text style={styles.introText}>
-            NurseGo มุ่งมั่นปกป้องข้อมูลส่วนบุคคลของคุณ นโยบายฉบับนี้อธิบายว่าเราเก็บ ใช้ เปิดเผย
-            และดูแลข้อมูลอย่างไรตามกรอบกฎหมายที่ใช้บังคับและตามข้อเท็จจริงของบริการในปัจจุบัน
+            {t('privacy.introText')}
           </Text>
         </View>
 
         {/* Quick Summary */}
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>สรุปสั้นๆ</Text>
+          <Text style={styles.summaryTitle}>{t('privacy.summaryTitle')}</Text>
           <View style={styles.summaryItem}>
             <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-            <Text style={styles.summaryText}>เราเก็บข้อมูลเท่าที่จำเป็นต่อการให้บริการ</Text>
+            <Text style={styles.summaryText}>{t('privacy.summary1')}</Text>
           </View>
           <View style={styles.summaryItem}>
             <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-            <Text style={styles.summaryText}>ข้อมูลของคุณได้รับการเข้ารหัสและปกป้อง</Text>
+            <Text style={styles.summaryText}>{t('privacy.summary2')}</Text>
           </View>
           <View style={styles.summaryItem}>
             <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-            <Text style={styles.summaryText}>เราไม่ขายข้อมูลของคุณให้บุคคลภายนอก</Text>
+            <Text style={styles.summaryText}>{t('privacy.summary3')}</Text>
           </View>
           <View style={styles.summaryItem}>
             <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-            <Text style={styles.summaryText}>คุณสามารถลบบัญชีและข้อมูลได้ตลอดเวลา</Text>
+            <Text style={styles.summaryText}>{t('privacy.summary4')}</Text>
           </View>
         </View>
 
@@ -105,19 +106,17 @@ export default function PrivacyScreen() {
             <Ionicons name="mail" size={24} color={colors.white} />
           </View>
           <View style={styles.contactInfo}>
-            <Text style={styles.contactTitle}>มีคำถามเกี่ยวกับความเป็นส่วนตัว?</Text>
-            <Text style={styles.contactSubtitle}>ติดต่อเราเพื่อสอบถามหรือใช้สิทธิ์เกี่ยวกับข้อมูลส่วนบุคคล</Text>
+            <Text style={styles.contactTitle}>{t('privacy.contactTitle')}</Text>
+            <Text style={styles.contactSubtitle}>{t('privacy.contactSubtitle')}</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
         </TouchableOpacity>
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            © 2569 NurseGo. สงวนลิขสิทธิ์.
-          </Text>
+          <Text style={styles.footerText}>{t('privacy.footerCopyright')}</Text>
           <Text style={styles.footerSubtext}>
-            หากในอนาคตมีเว็บไซต์หรือบริการใหม่เพิ่มเติม อาจมีประกาศข้อมูลส่วนบุคคลเฉพาะช่องทางนั้นเพิ่มเติม
+            {t('privacy.futureServicesNote')}
           </Text>
         </View>
       </ScrollView>

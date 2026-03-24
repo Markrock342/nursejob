@@ -11,6 +11,7 @@ import {
   ScrollView,
   TextInput,
   Animated,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +24,7 @@ import { STAFF_TYPES } from '../../constants/jobOptions';
 import { POPULAR_PROVINCES, ALL_PROVINCES } from '../../constants/locations';
 import { RootStackParamList } from '../../types';
 import { trackEvent } from '../../services/analyticsService';
+import { useI18n } from '../../i18n';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'OnboardingSurvey'>;
 
@@ -32,45 +34,45 @@ interface Props {
 
 type AppRole = 'nurse' | 'hospital' | 'user';
 
-const NURSE_WORK_STYLES = [
-  { key: 'fulltime', label: 'ประจำ / เต็มเวลา', icon: 'briefcase-outline' as const, color: '#2563EB' },
-  { key: 'parttime', label: 'พาร์ทไทม์ / ชั่วคราว', icon: 'time-outline' as const, color: '#7C3AED' },
-  { key: 'weekend', label: 'เฉพาะวันหยุด / เสาร์-อาทิตย์', icon: 'calendar-outline' as const, color: '#059669' },
-  { key: 'flexible', label: 'ยืดหยุ่น / รับทุกรูปแบบ', icon: 'options-outline' as const, color: '#D97706' },
+const getNurseWorkStyles = (t: any) => [
+  { key: 'fulltime', label: t('onboarding.workFulltime'), icon: 'briefcase-outline' as const, color: '#2563EB' },
+  { key: 'parttime', label: t('onboarding.workParttime'), icon: 'time-outline' as const, color: '#7C3AED' },
+  { key: 'weekend', label: t('onboarding.workWeekend'), icon: 'calendar-outline' as const, color: '#059669' },
+  { key: 'flexible', label: t('onboarding.workFlexible'), icon: 'options-outline' as const, color: '#D97706' },
 ];
 
-const USER_CARE_TYPES = [
-  { key: 'elderly', label: 'ดูแลผู้สูงอายุทั่วไป', icon: 'people-outline' as const, color: '#0EA5E9' },
-  { key: 'bedridden', label: 'ดูแลผู้ป่วยติดเตียง', icon: 'bed-outline' as const, color: '#EF4444' },
-  { key: 'postsurg', label: 'ดูแลหลังผ่าตัด / พักฟื้น', icon: 'medkit-outline' as const, color: '#8B5CF6' },
-  { key: 'child', label: 'ดูแลเด็ก / เด็กป่วย', icon: 'happy-outline' as const, color: '#F59E0B' },
-  { key: 'terminal', label: 'ดูแลผู้ป่วยระยะท้าย', icon: 'heart-outline' as const, color: '#EC4899' },
-  { key: 'other', label: 'อื่นๆ', icon: 'ellipsis-horizontal-outline' as const, color: '#6B7280' },
+const getUserCareTypes = (t: any) => [
+  { key: 'elderly', label: t('onboarding.careElderly'), icon: 'people-outline' as const, color: '#0EA5E9' },
+  { key: 'bedridden', label: t('onboarding.careBedridden'), icon: 'bed-outline' as const, color: '#EF4444' },
+  { key: 'postsurg', label: t('onboarding.carePostSurg'), icon: 'medkit-outline' as const, color: '#8B5CF6' },
+  { key: 'child', label: t('onboarding.careChild'), icon: 'happy-outline' as const, color: '#F59E0B' },
+  { key: 'terminal', label: t('onboarding.careTerminal'), icon: 'heart-outline' as const, color: '#EC4899' },
+  { key: 'other', label: t('onboarding.careOther'), icon: 'ellipsis-horizontal-outline' as const, color: '#6B7280' },
 ];
 
-const HOSPITAL_URGENCY = [
-  { key: 'now', label: 'เร่งด่วนมาก', icon: 'flash-outline' as const, color: '#EF4444' },
-  { key: 'week', label: 'ภายใน 1 สัปดาห์', icon: 'calendar-outline' as const, color: '#F59E0B' },
-  { key: 'month', label: 'ภายใน 1 เดือน', icon: 'hourglass-outline' as const, color: '#0EA5E9' },
-  { key: 'plan', label: 'วางแผนล่วงหน้า', icon: 'clipboard-outline' as const, color: '#10B981' },
+const getHospitalUrgency = (t: any) => [
+  { key: 'now', label: t('onboarding.urgencyNow'), icon: 'flash-outline' as const, color: '#EF4444' },
+  { key: 'week', label: t('onboarding.urgencyWeek'), icon: 'calendar-outline' as const, color: '#F59E0B' },
+  { key: 'month', label: t('onboarding.urgencyMonth'), icon: 'hourglass-outline' as const, color: '#0EA5E9' },
+  { key: 'plan', label: t('onboarding.urgencyPlan'), icon: 'clipboard-outline' as const, color: '#10B981' },
 ];
 
-const STEP_META = [
+const getStepMeta = (t: any) => [
   {
-    title: 'เริ่มใช้งานได้คล่องในไม่กี่นาที',
-    subtitle: 'สรุปให้ว่าบทบาทของคุณทำอะไรได้บ้าง และเริ่มตรงไหนถึงจะเร็วและง่ายที่สุด',
+    title: t('onboarding.step1Title'),
+    subtitle: t('onboarding.step1Subtitle'),
   },
   {
-    title: 'ฟีเจอร์หลักอยู่ตรงไหน',
-    subtitle: 'ดูทางลัดของแอปก่อนเริ่มใช้งานจริง เพื่อไปถึงหน้าสำคัญได้ไวขึ้น',
+    title: t('onboarding.step2Title'),
+    subtitle: t('onboarding.step2Subtitle'),
   },
   {
-    title: 'ปรับแอปให้ตรงกับคุณ',
-    subtitle: 'เลือกข้อมูลพื้นฐานเพื่อให้ระบบแนะนำงานหรือผู้ดูแลได้ตรงและปลอดภัยยิ่งขึ้น',
+    title: t('onboarding.step3Title'),
+    subtitle: t('onboarding.step3Subtitle'),
   },
 ];
 
-const ROLE_GUIDE: Record<AppRole, {
+const getRoleGuide = (t: any): Record<AppRole, {
   badge: string;
   icon: keyof typeof Ionicons.glyphMap;
   heroTitle: string;
@@ -79,65 +81,65 @@ const ROLE_GUIDE: Record<AppRole, {
   featureTips: Array<{ icon: keyof typeof Ionicons.glyphMap; title: string; description: string }>;
   setupTitle: string;
   setupSubtitle: string;
-}> = {
+}> => ({
   nurse: {
-    badge: 'สำหรับพยาบาล',
+    badge: t('onboarding.badgeNurse'),
     icon: 'medical-outline',
-    heroTitle: 'หางานไว คุยสะดวก และจัดการโปรไฟล์ได้ในที่เดียว',
-    heroSubtitle: 'NurseGo จะช่วยเรียงงานที่เหมาะกับความถนัด พื้นที่ และเวลาที่คุณต้องการ พร้อมขั้นตอนคุยงานที่ต่อเนื่องและเข้าใจง่าย',
+    heroTitle: t('onboarding.heroNurse'),
+    heroSubtitle: t('onboarding.nurseHeroSubtitle'),
     highlights: [
-      { icon: 'swap-horizontal-outline', title: 'หางานแทนเวรได้ไว', description: 'ดูงานล่าสุด กรองตามจังหวัด แผนก หรือเปิดโหมดงานใกล้คุณได้ทันที' },
-      { icon: 'chatbubbles-outline', title: 'คุยกับผู้โพสต์ได้ต่อเนื่อง', description: 'เริ่มแชทจากหน้าโพสต์และติดตามรายละเอียดงานต่อได้สะดวกในแท็บข้อความ' },
-      { icon: 'shield-checkmark-outline', title: 'เพิ่มความมั่นใจให้โปรไฟล์', description: 'ยืนยันตัวตนและเติมโปรไฟล์ให้ครบ เพื่อให้ผู้จ้างตัดสินใจได้ง่ายและมั่นใจขึ้น' },
+      { icon: 'swap-horizontal-outline', title: t('onboarding.nurseHighlight1'), description: t('onboarding.nurseHighlightDesc1') },
+      { icon: 'chatbubbles-outline', title: t('onboarding.nurseHighlight2'), description: t('onboarding.nurseHighlightDesc2') },
+      { icon: 'shield-checkmark-outline', title: t('onboarding.nurseHighlight3'), description: t('onboarding.nurseHighlightDesc3') },
     ],
     featureTips: [
-      { icon: 'home-outline', title: 'หน้าแรก', description: 'รวมงานใหม่ ฟิลเตอร์ และโหมดงานใกล้คุณไว้ในที่เดียว' },
-      { icon: 'add-circle-outline', title: 'โพสต์', description: 'สำหรับพยาบาล แท็บนี้จะพาไปยังหน้าประกาศหาคนช่วยขึ้นเวรแทนได้ทันที' },
-      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'รวมทุกห้องแชทเรื่องงานไว้ในที่เดียว เพื่อคุยต่อได้เร็วและไม่หลุดบริบท' },
-      { icon: 'person-outline', title: 'โปรไฟล์', description: 'ดูรีวิว ยืนยันตัวตน และจัดการข้อมูลที่ช่วยเพิ่มความน่าเชื่อถือ' },
+      { icon: 'home-outline', title: t('onboarding.nurseFeature1'), description: t('onboarding.nurseFeatureDesc1') },
+      { icon: 'add-circle-outline', title: t('onboarding.nurseFeature2'), description: t('onboarding.nurseFeatureDesc2') },
+      { icon: 'chatbubble-ellipses-outline', title: t('onboarding.nurseFeature3'), description: t('onboarding.nurseFeatureDesc3') },
+      { icon: 'person-outline', title: t('onboarding.nurseFeature4'), description: t('onboarding.nurseFeatureDesc4') },
     ],
-    setupTitle: 'บอกเราว่าคุณทำงานแบบไหน',
-    setupSubtitle: 'ข้อมูลนี้ช่วยให้แอปกรองงานได้แม่นขึ้นตั้งแต่ครั้งแรก และช่วยให้เจองานได้เร็วขึ้น',
+    setupTitle: t('onboarding.nurseSetupTitle'),
+    setupSubtitle: t('onboarding.nurseSetupSubtitle'),
   },
   hospital: {
-    badge: 'สำหรับองค์กร',
+    badge: t('onboarding.badgeHospital'),
     icon: 'business-outline',
-    heroTitle: 'โพสต์รับสมัคร ดูผู้สนใจ และคุยต่อได้ในที่เดียว',
-    heroSubtitle: 'บทบาทองค์กรจะโฟกัสที่การลงประกาศอย่างเป็นระบบ ดูรายชื่อผู้สนใจ และติดตามต่อได้รวดเร็ว',
+    heroTitle: t('onboarding.heroHospital'),
+    heroSubtitle: t('onboarding.hospitalHeroSubtitle'),
     highlights: [
-      { icon: 'briefcase-outline', title: 'ลงประกาศรับสมัครได้เร็ว', description: 'สร้างประกาศงานพร้อมเงินเดือน สวัสดิการ และช่องทางคุยที่จัดการได้ง่าย' },
-      { icon: 'people-outline', title: 'ดูผู้สนใจเป็นระเบียบ', description: 'ติดตามคนที่สนใจจากหน้า Applicants และแยกตามประกาศได้ชัดเจน' },
-      { icon: 'chatbubbles-outline', title: 'คุยต่อได้ทันที', description: 'เปิดแชทกับผู้สมัครต่อในแอปได้เลย เพื่อให้ข้อมูลครบและติดตามง่าย' },
+      { icon: 'briefcase-outline', title: t('onboarding.hospitalHighlightTitle1'), description: t('onboarding.hospitalHighlightDesc1') },
+      { icon: 'people-outline', title: t('onboarding.hospitalHighlightTitle2'), description: t('onboarding.hospitalHighlightDesc2') },
+      { icon: 'chatbubbles-outline', title: t('onboarding.hospitalHighlightTitle3'), description: t('onboarding.hospitalHighlightDesc3') },
     ],
     featureTips: [
-      { icon: 'home-outline', title: 'หน้าแรก', description: 'ดูบอร์ดงานและคำแนะนำต่าง ๆ แต่จุดหลักของคุณคือการโพสต์และจัดการผู้สนใจ' },
-      { icon: 'add-circle-outline', title: 'โพสต์', description: 'แท็บนี้จะเปิดหน้าสำหรับลงประกาศรับสมัครบุคลากรให้เหมาะกับการใช้งานขององค์กรโดยอัตโนมัติ' },
-      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'ใช้คุยกับผู้สมัครต่อได้อย่างรวดเร็วโดยไม่ต้องสลับแอป' },
-      { icon: 'person-outline', title: 'โปรไฟล์', description: 'เข้าถึงประกาศ Applicants และข้อมูลองค์กรเพื่อบริหารงานต่อได้ง่าย' },
+      { icon: 'home-outline', title: t('onboarding.nurseFeature1'), description: t('onboarding.hospitalFeatureDesc1') },
+      { icon: 'add-circle-outline', title: t('onboarding.nurseFeature2'), description: t('onboarding.hospitalFeatureDesc2') },
+      { icon: 'chatbubble-ellipses-outline', title: t('onboarding.nurseFeature3'), description: t('onboarding.hospitalFeatureDesc3') },
+      { icon: 'person-outline', title: t('onboarding.nurseFeature4'), description: t('onboarding.hospitalFeatureDesc4') },
     ],
-    setupTitle: 'ตั้งค่าพื้นฐานขององค์กร',
-    setupSubtitle: 'ระบุจังหวัดและระดับความเร่งด่วน เพื่อให้การโพสต์และจัดการผู้สนใจลื่นไหลขึ้น',
+    setupTitle: t('onboarding.hospitalSetupTitle'),
+    setupSubtitle: t('onboarding.hospitalSetupSubtitle'),
   },
   user: {
-    badge: 'สำหรับผู้ใช้งานทั่วไป',
+    badge: t('onboarding.badgeUser'),
     icon: 'heart-outline',
-    heroTitle: 'ค้นหาผู้ดูแลที่เหมาะสม ติดต่ออย่างเป็นส่วนตัว และตัดสินใจได้มั่นใจ',
-    heroSubtitle: 'แอปจะช่วยให้คุณหาผู้ดูแลที่ตรงประเภทงานและพื้นที่ พร้อมดูโปรไฟล์ รีวิว และคุยต่อได้อย่างสะดวก',
+    heroTitle: t('onboarding.userHeroTitle'),
+    heroSubtitle: t('onboarding.userHeroSubtitle'),
     highlights: [
-      { icon: 'home-outline', title: 'ดูประกาศที่ตรงความต้องการ', description: 'ใช้ตัวกรองเพื่อหาผู้ดูแลที่เหมาะกับงานและพื้นที่ได้เร็วขึ้น' },
-      { icon: 'person-circle-outline', title: 'ดูโปรไฟล์ก่อนตัดสินใจ', description: 'เช็กประสบการณ์ รีวิว และสถานะการยืนยันตัวตนเพื่อเพิ่มความมั่นใจ' },
-      { icon: 'call-outline', title: 'คุยได้ตามช่องทางที่สะดวก', description: 'เลือกโทร, LINE หรือแชทในแอปตามช่องทางที่ผู้โพสต์เปิดไว้' },
+      { icon: 'home-outline', title: t('onboarding.userHighlightTitle1'), description: t('onboarding.userHighlightDesc1') },
+      { icon: 'person-circle-outline', title: t('onboarding.userHighlightTitle2'), description: t('onboarding.userHighlightDesc2') },
+      { icon: 'call-outline', title: t('onboarding.userHighlightTitle3'), description: t('onboarding.userHighlightDesc3') },
     ],
     featureTips: [
-      { icon: 'home-outline', title: 'หน้าแรก', description: 'ค้นหาโพสต์ดูแลผู้ป่วยและใช้ตัวกรองเพื่อเจอคนที่เหมาะได้เร็วขึ้น' },
-      { icon: 'add-circle-outline', title: 'โพสต์', description: 'ถ้าต้องการหาผู้ดูแลเอง แท็บนี้จะเปิดหน้ากรอกข้อมูลแบบเป็นขั้นตอนให้ทันที' },
-      { icon: 'chatbubble-ellipses-outline', title: 'ข้อความ', description: 'ติดตามการพูดคุยกับผู้ดูแลที่คุณสนใจได้ต่อเนื่องในที่เดียว' },
-      { icon: 'person-outline', title: 'โปรไฟล์', description: 'จัดการข้อมูลส่วนตัว รายการโปรด และการตั้งค่าความเป็นส่วนตัวต่าง ๆ' },
+      { icon: 'home-outline', title: t('onboarding.nurseFeature1'), description: t('onboarding.userFeatureDesc1') },
+      { icon: 'add-circle-outline', title: t('onboarding.nurseFeature2'), description: t('onboarding.userFeatureDesc2') },
+      { icon: 'chatbubble-ellipses-outline', title: t('onboarding.nurseFeature3'), description: t('onboarding.userFeatureDesc3') },
+      { icon: 'person-outline', title: t('onboarding.nurseFeature4'), description: t('onboarding.userFeatureDesc4') },
     ],
-    setupTitle: 'บอกประเภทการดูแลที่คุณสนใจ',
-    setupSubtitle: 'ข้อมูลพื้นฐานนี้ช่วยให้แอปแนะนำผู้ดูแลได้ตรงกับความต้องการมากขึ้น และช่วยให้เลือกได้ง่ายขึ้น',
+    setupTitle: t('onboarding.userSetupTitle'),
+    setupSubtitle: t('onboarding.userSetupSubtitle'),
   },
-};
+});
 
 function getRole(userRole?: string): AppRole {
   if (userRole === 'hospital') return 'hospital';
@@ -145,7 +147,14 @@ function getRole(userRole?: string): AppRole {
   return 'nurse';
 }
 
-export default function OnboardingSurveyScreen({ navigation }: Props) {
+export default function OnboardingSurveyScreen({
+  navigation }: Props) {
+  const { t } = useI18n();
+  const NURSE_WORK_STYLES = useMemo(() => getNurseWorkStyles(t), [t]);
+  const USER_CARE_TYPES = useMemo(() => getUserCareTypes(t), [t]);
+  const HOSPITAL_URGENCY = useMemo(() => getHospitalUrgency(t), [t]);
+  const STEP_META = useMemo(() => getStepMeta(t), [t]);
+  const ROLE_GUIDE = useMemo(() => getRoleGuide(t), [t]);
   const { user, updateUser } = useAuth();
   const { colors, isDark } = useTheme();
   const role = getRole(user?.role);
@@ -193,20 +202,20 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
       return {
         single: false,
         options: NURSE_WORK_STYLES,
-        label: 'รูปแบบงานที่คุณสนใจ',
+        label: t('onboarding.nurseSetupLabel'),
       };
     }
     if (role === 'hospital') {
       return {
         single: true,
         options: HOSPITAL_URGENCY,
-        label: 'ความเร่งด่วนในการหาคน',
+        label: t('onboarding.hospitalSetupLabel'),
       };
     }
     return {
       single: false,
       options: USER_CARE_TYPES,
-      label: 'ประเภทการดูแลที่ต้องการ',
+      label: t('onboarding.userSetupLabel'),
     };
   }, [role]);
 
@@ -286,7 +295,9 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
 
     try {
       await updateUser(updates);
-    } catch (_) {}
+    } catch (_) {
+      Alert.alert(t('common.alerts.errorTitle'), t('common.alerts.saveErrorMessage'));
+    }
 
     trackEvent({
       eventName: 'onboarding_completed',
@@ -332,8 +343,8 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
   const selectedSetupSummary = useMemo(() => {
     const items: string[] = [];
     if (selectedProvince) items.push(selectedProvince);
-    if (role === 'nurse' && selectedTypes.length > 0) items.push(`${selectedTypes.length} ประเภทวิชาชีพ`);
-    if (selectedStep3.length > 0) items.push(`${selectedStep3.length} ตัวเลือกที่สนใจ`);
+    if (role === 'nurse' && selectedTypes.length > 0) items.push(t('onboarding.selectedTypesCount').replace('{count}', String(selectedTypes.length)));
+    if (selectedStep3.length > 0) items.push(t('onboarding.selectedOptionsCount').replace('{count}', String(selectedStep3.length)));
     return items;
   }, [role, selectedProvince, selectedStep3.length, selectedTypes.length]);
 
@@ -367,7 +378,7 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
 
       <View style={[styles.noticeCard, { backgroundColor: isDark ? colors.card : colors.backgroundSecondary }]}> 
         <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
-        <Text style={[styles.noticeText, { color: colors.textSecondary }]}>ทุกขั้นตอนข้ามได้ และกลับมาดูใหม่ได้จากหน้า Settings</Text>
+        <Text style={[styles.noticeText, { color: colors.textSecondary }]}>{t('onboarding.skipNotice')}</Text>
       </View>
     </ScrollView>
   );
@@ -387,27 +398,27 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
       ))}
 
       <View style={[styles.quickActionsCard, { backgroundColor: colors.primaryBackground }]}> 
-        <Text style={[styles.quickActionsTitle, { color: colors.primaryDark }]}>เริ่มจาก 3 อย่างนี้ จะใช้งานได้คล่องขึ้นทันที</Text>
+        <Text style={[styles.quickActionsTitle, { color: colors.primaryDark }]}>{t('onboarding.quickActionsTitle')}</Text>
         <View style={styles.quickActionsList}>
           {role === 'nurse' && (
             <>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>1. เปิดงานใกล้คุณ เพื่อรู้ไวเมื่อมีเวรใหม่ในพื้นที่ที่สนใจ</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>2. ยืนยันตัวตน เพื่อให้ผู้จ้างมั่นใจและตัดสินใจได้เร็วขึ้น</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>3. เติมโปรไฟล์และรีวิวให้ครบ เพื่อให้โอกาสงานเข้าหาคุณง่ายขึ้น</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.nurseQuickAction1')}</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.nurseQuickAction2')}</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.nurseQuickAction3')}</Text>
             </>
           )}
           {role === 'hospital' && (
             <>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>1. เติมข้อมูลองค์กรในโปรไฟล์</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>2. สร้างประกาศแรกจากแท็บโพสต์</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>3. ติดตามผู้สมัครจาก Applicants และแชท</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.hospitalQuickAction1')}</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.hospitalQuickAction2')}</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.hospitalQuickAction3')}</Text>
             </>
           )}
           {role === 'user' && (
             <>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>1. ค้นหาผู้ดูแลจากหน้าแรกก่อน</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>2. ดูโปรไฟล์และรีวิวก่อนติดต่อ</Text>
-              <Text style={[styles.quickActionText, { color: colors.text }]}>3. บันทึกประกาศที่สนใจไว้เปรียบเทียบ</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.userQuickAction1')}</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.userQuickAction2')}</Text>
+              <Text style={[styles.quickActionText, { color: colors.text }]}>{t('onboarding.userQuickAction3')}</Text>
             </>
           )}
         </View>
@@ -434,8 +445,8 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
 
       {role === 'nurse' && (
         <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>ประเภทวิชาชีพของคุณ</Text>
-          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>เลือกได้หลายประเภท หากคุณทำงานได้มากกว่าหนึ่งสาย</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('onboarding.staffTypeTitle')}</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{t('onboarding.multipleTypesHint')}</Text>
           <View style={styles.chipRow}>
             {STAFF_TYPES.map((item) => {
               const active = selectedTypes.includes(item.code);
@@ -459,8 +470,8 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
       )}
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>จังหวัดที่ใช้งานบ่อย</Text>
-        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>ใช้สำหรับตั้งต้นการค้นหาและช่วยให้ผลลัพธ์ตรงพื้นที่มากขึ้น</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('onboarding.provinceTitle')}</Text>
+        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{t('onboarding.locationHint')}</Text>
 
         {selectedProvince ? (
           <View style={[styles.selectedTag, { backgroundColor: colors.primaryBackground }]}> 
@@ -476,7 +487,7 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
           <Ionicons name="search-outline" size={16} color={colors.textMuted} style={{ marginRight: 6 }} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
-            placeholder="ค้นหาจังหวัด..."
+            placeholder={t('onboarding.provinceSearchPlaceholder')}
             placeholderTextColor={colors.textMuted}
             value={provinceQuery}
             onChangeText={setProvinceQuery}
@@ -537,7 +548,7 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
         <Text style={[styles.sectionTitle, { color: colors.text }]}>{setupOptions.label}</Text>
-        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>เลือกเฉพาะที่เกี่ยวกับคุณจริง ๆ เพื่อให้คำแนะนำที่แม่นขึ้น</Text>
+        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{t('onboarding.interestHint')}</Text>
 
         {setupOptions.options.map((item) => {
           const active = selectedStep3.includes(item.key);
@@ -577,7 +588,7 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
       <View style={styles.topBar}>
         <Text style={[styles.stepCounter, { color: colors.textSecondary }]}>{step + 1} / {STEP_META.length}</Text>
         <TouchableOpacity onPress={skipAll}>
-          <Text style={[styles.skipAll, { color: colors.textMuted }]}>ข้ามทั้งหมด</Text>
+          <Text style={[styles.skipAll, { color: colors.textMuted }]}>{t('onboarding.skipAll')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -598,16 +609,16 @@ export default function OnboardingSurveyScreen({ navigation }: Props) {
         {step > 0 ? (
           <TouchableOpacity style={styles.backBtn} onPress={() => goToStep(step - 1)}>
             <Ionicons name="chevron-back" size={18} color={colors.text} />
-            <Text style={[styles.backText, { color: colors.text }]}>ย้อนกลับ</Text>
+            <Text style={[styles.backText, { color: colors.text }]}>{t('onboarding.goBack')}</Text>
           </TouchableOpacity>
         ) : <View />}
 
         <View style={styles.bottomActions}>
           <TouchableOpacity style={styles.skipStepBtn} onPress={skipStep}>
-            <Text style={[styles.skipStepText, { color: colors.textSecondary }]}>ข้ามขั้นตอนนี้</Text>
+            <Text style={[styles.skipStepText, { color: colors.textSecondary }]}>{t('onboarding.skipStep')}</Text>
           </TouchableOpacity>
           <Button style={styles.nextBtn} onPress={step < STEP_META.length - 1 ? () => goToStep(step + 1) : finishSurvey}>
-            {step < STEP_META.length - 1 ? 'ถัดไป' : 'เข้าแอปเลย'}
+            {step < STEP_META.length - 1 ? t('onboarding.next') : t('onboarding.enterApp')}
           </Button>
         </View>
       </View>

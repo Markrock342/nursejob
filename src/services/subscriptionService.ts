@@ -12,7 +12,9 @@ import {
   query,
   where,
   getDocs,
+  onSnapshot,
   Timestamp,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Subscription, SubscriptionPlan, SUBSCRIPTION_PLANS, PRICING, BillingCycle, SubscriptionUsageFeature } from '../types';
@@ -21,8 +23,18 @@ import { grantReferralReward } from './referralService';
 
 const USERS_COLLECTION = 'users';
 const JOBS_COLLECTION = 'shifts';
+const APP_CONFIG_COLLECTION = 'app_config';
+const LAUNCH_USAGE_LIMITS_CONFIG_ID = 'launch_usage_limits';
 
-const LAUNCH_USAGE_LIMITS: Record<string, Partial<Record<SubscriptionUsageFeature, number>>> = {
+export type LaunchUsageRole = 'user' | 'nurse' | 'hospital' | 'admin';
+
+export interface LaunchUsageLimitsConfig {
+  roles: Record<LaunchUsageRole, Partial<Record<SubscriptionUsageFeature, number>>>;
+  updatedAt?: Date | null;
+  updatedBy?: string | null;
+}
+
+export const DEFAULT_LAUNCH_USAGE_LIMITS: Record<LaunchUsageRole, Partial<Record<SubscriptionUsageFeature, number>>> = {
   user: {
     post_create: 2,
     job_application: 5,
@@ -56,6 +68,28 @@ const LAUNCH_USAGE_LIMITS: Record<string, Partial<Record<SubscriptionUsageFeatur
     boost_post: 10,
   },
 };
+
+const LAUNCH_USAGE_FEATURES: SubscriptionUsageFeature[] = [
+  'post_create',
+  'job_application',
+  'chat_start',
+  'urgent_post',
+  'extend_post',
+  'boost_post',
+];
+
+let launchUsageLimitsCache: LaunchUsageLimitsConfig = {
+  roles: {
+    user: { ...DEFAULT_LAUNCH_USAGE_LIMITS.user },
+    nurse: { ...DEFAULT_LAUNCH_USAGE_LIMITS.nurse },
+    hospital: { ...DEFAULT_LAUNCH_USAGE_LIMITS.hospital },
+    admin: { ...DEFAULT_LAUNCH_USAGE_LIMITS.admin },
+  },
+  updatedAt: null,
+  updatedBy: null,
+};
+let launchUsageLimitsLoadPromise: Promise<LaunchUsageLimitsConfig> | null = null;
+let launchUsageLimitsRuntimeUnsubscribe: Unsubscribe | null = null;
 
 const LAUNCH_USAGE_LABELS: Record<SubscriptionUsageFeature, { label: string; description: string }> = {
   post_create: {
@@ -114,10 +148,178 @@ function getMonthlyPeriodKey(date = new Date()): string {
   return `${year}-${month}`;
 }
 
-function getLaunchFeatureLimit(role: string | null | undefined, feature: SubscriptionUsageFeature): number | null {
-  const roleLimits = LAUNCH_USAGE_LIMITS[role || 'user'] || LAUNCH_USAGE_LIMITS.user;
+function getLaunchUsageLimitsDocRef() {
+  return doc(db, APP_CONFIG_COLLECTION, LAUNCH_USAGE_LIMITS_CONFIG_ID);
+}
+
+function resolveLaunchUsageRole(role: string | null | undefined): LaunchUsageRole {
+  if (role === 'nurse' || role === 'hospital' || role === 'admin') {
+    return role;
+  }
+  return 'user';
+}
+
+function cloneLaunchUsageRoleLimits(
+  role: LaunchUsageRole,
+  source?: Partial<Record<SubscriptionUsageFeature, number>>,
+): Partial<Record<SubscriptionUsageFeature, number>> {
+  return {
+    ...DEFAULT_LAUNCH_USAGE_LIMITS[role],
+    ...(source || {}),
+  };
+}
+
+function cloneLaunchUsageLimitsConfig(config: LaunchUsageLimitsConfig): LaunchUsageLimitsConfig {
+  return {
+    roles: {
+      user: cloneLaunchUsageRoleLimits('user', config.roles.user),
+      nurse: cloneLaunchUsageRoleLimits('nurse', config.roles.nurse),
+      hospital: cloneLaunchUsageRoleLimits('hospital', config.roles.hospital),
+      admin: cloneLaunchUsageRoleLimits('admin', config.roles.admin),
+    },
+    updatedAt: config.updatedAt ?? null,
+    updatedBy: config.updatedBy ?? null,
+  };
+}
+
+export function getDefaultLaunchUsageLimitsConfigSnapshot(): LaunchUsageLimitsConfig {
+  return cloneLaunchUsageLimitsConfig({
+    roles: {
+      user: DEFAULT_LAUNCH_USAGE_LIMITS.user,
+      nurse: DEFAULT_LAUNCH_USAGE_LIMITS.nurse,
+      hospital: DEFAULT_LAUNCH_USAGE_LIMITS.hospital,
+      admin: DEFAULT_LAUNCH_USAGE_LIMITS.admin,
+    },
+    updatedAt: null,
+    updatedBy: null,
+  });
+}
+
+function normalizeLaunchUsageRoleLimits(
+  role: LaunchUsageRole,
+  rawValue: unknown,
+): Partial<Record<SubscriptionUsageFeature, number>> {
+  const normalized = cloneLaunchUsageRoleLimits(role);
+  if (!rawValue || typeof rawValue !== 'object') {
+    return normalized;
+  }
+
+  LAUNCH_USAGE_FEATURES.forEach((feature) => {
+    const candidate = (rawValue as Partial<Record<SubscriptionUsageFeature, unknown>>)[feature];
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      normalized[feature] = Math.max(0, Math.floor(candidate));
+    }
+  });
+
+  return normalized;
+}
+
+function normalizeLaunchUsageLimitsConfig(rawValue: unknown): LaunchUsageLimitsConfig {
+  const raw = rawValue && typeof rawValue === 'object' ? rawValue as Record<string, any> : {};
+  const rawRoles = raw.roles && typeof raw.roles === 'object' ? raw.roles as Record<string, unknown> : {};
+  const updatedAtRaw = raw.updatedAt;
+
+  return {
+    roles: {
+      user: normalizeLaunchUsageRoleLimits('user', rawRoles.user),
+      nurse: normalizeLaunchUsageRoleLimits('nurse', rawRoles.nurse),
+      hospital: normalizeLaunchUsageRoleLimits('hospital', rawRoles.hospital),
+      admin: normalizeLaunchUsageRoleLimits('admin', rawRoles.admin),
+    },
+    updatedAt:
+      updatedAtRaw instanceof Timestamp
+        ? updatedAtRaw.toDate()
+        : typeof updatedAtRaw?.toDate === 'function'
+          ? updatedAtRaw.toDate()
+          : updatedAtRaw instanceof Date
+            ? updatedAtRaw
+            : null,
+    updatedBy: typeof raw.updatedBy === 'string' ? raw.updatedBy : null,
+  };
+}
+
+function setLaunchUsageLimitsCache(config: LaunchUsageLimitsConfig): LaunchUsageLimitsConfig {
+  launchUsageLimitsCache = cloneLaunchUsageLimitsConfig(config);
+  return launchUsageLimitsCache;
+}
+
+function getLaunchFeatureLimitFromConfig(
+  config: LaunchUsageLimitsConfig,
+  role: string | null | undefined,
+  feature: SubscriptionUsageFeature,
+): number | null {
+  const resolvedRole = resolveLaunchUsageRole(role);
+  const roleLimits = config.roles[resolvedRole] || config.roles.user;
   const limit = roleLimits[feature];
   return typeof limit === 'number' ? limit : null;
+}
+
+function ensureLaunchUsageLimitsRuntimeSubscription(): void {
+  if (launchUsageLimitsRuntimeUnsubscribe) return;
+
+  launchUsageLimitsRuntimeUnsubscribe = onSnapshot(
+    getLaunchUsageLimitsDocRef(),
+    (snapshot) => {
+      const nextConfig = snapshot.exists()
+        ? normalizeLaunchUsageLimitsConfig(snapshot.data())
+        : getDefaultLaunchUsageLimitsConfigSnapshot();
+      setLaunchUsageLimitsCache(nextConfig);
+    },
+    (error) => {
+      console.warn('[subscriptionService] launch quota subscription failed', error);
+      launchUsageLimitsRuntimeUnsubscribe = null;
+    },
+  );
+}
+
+export function getCachedLaunchUsageLimitsConfig(): LaunchUsageLimitsConfig {
+  ensureLaunchUsageLimitsRuntimeSubscription();
+  return cloneLaunchUsageLimitsConfig(launchUsageLimitsCache);
+}
+
+export async function getLaunchUsageLimitsConfig(): Promise<LaunchUsageLimitsConfig> {
+  ensureLaunchUsageLimitsRuntimeSubscription();
+
+  if (!launchUsageLimitsLoadPromise) {
+    launchUsageLimitsLoadPromise = getDoc(getLaunchUsageLimitsDocRef())
+      .then((snapshot) => {
+        const nextConfig = snapshot.exists()
+          ? normalizeLaunchUsageLimitsConfig(snapshot.data())
+          : getDefaultLaunchUsageLimitsConfigSnapshot();
+        return setLaunchUsageLimitsCache(nextConfig);
+      })
+      .catch((error) => {
+        console.warn('[subscriptionService] failed to load launch quota config', error);
+        return getCachedLaunchUsageLimitsConfig();
+      })
+      .finally(() => {
+        launchUsageLimitsLoadPromise = null;
+      });
+  }
+
+  return launchUsageLimitsLoadPromise;
+}
+
+export function subscribeLaunchUsageLimitsConfig(
+  onChange: (config: LaunchUsageLimitsConfig) => void,
+): Unsubscribe {
+  return onSnapshot(
+    getLaunchUsageLimitsDocRef(),
+    (snapshot) => {
+      const nextConfig = snapshot.exists()
+        ? normalizeLaunchUsageLimitsConfig(snapshot.data())
+        : getDefaultLaunchUsageLimitsConfigSnapshot();
+      onChange(setLaunchUsageLimitsCache(nextConfig));
+    },
+    (error) => {
+      console.warn('[subscriptionService] failed to subscribe launch quota config', error);
+      onChange(getCachedLaunchUsageLimitsConfig());
+    },
+  );
+}
+
+function getLaunchFeatureLimit(role: string | null | undefined, feature: SubscriptionUsageFeature): number | null {
+  return getLaunchFeatureLimitFromConfig(getCachedLaunchUsageLimitsConfig(), role, feature);
 }
 
 export function getLaunchUsageLimitForRole(
@@ -130,8 +332,8 @@ export function getLaunchUsageLimitForRole(
 export function getLaunchUsageLimitsForRole(
   role: string | null | undefined,
 ): Partial<Record<SubscriptionUsageFeature, number>> {
-  const roleLimits = LAUNCH_USAGE_LIMITS[role || 'user'] || LAUNCH_USAGE_LIMITS.user;
-  return { ...roleLimits };
+  const resolvedRole = resolveLaunchUsageRole(role);
+  return { ...getCachedLaunchUsageLimitsConfig().roles[resolvedRole] };
 }
 
 function getCurrentFeatureUsage(subscription: Subscription | undefined, feature: SubscriptionUsageFeature, periodKey: string): number {
@@ -200,12 +402,13 @@ export async function getFeatureUsageStatus(userId: string, feature: Subscriptio
   reason?: string;
 }> {
   try {
+    const launchUsageLimitsConfig = await getLaunchUsageLimitsConfig();
     const { role, subscription, commerceStatus } = await getRawUserSubscriptionState(userId);
     if (!commerceStatus.freeAccessEnabled) {
       return { canUse: true, remaining: null, limit: null, used: 0 };
     }
 
-    const limit = getLaunchFeatureLimit(role, feature);
+    const limit = getLaunchFeatureLimitFromConfig(launchUsageLimitsConfig, role, feature);
     if (limit == null) {
       return { canUse: true, remaining: null, limit: null, used: 0 };
     }
@@ -228,6 +431,7 @@ export async function getFeatureUsageStatus(userId: string, feature: Subscriptio
 
 export async function getLaunchQuotaSummary(userId: string): Promise<LaunchQuotaSummary | null> {
   try {
+    const launchUsageLimitsConfig = await getLaunchUsageLimitsConfig();
     const { role, subscription, commerceStatus } = await getRawUserSubscriptionState(userId);
     if (!commerceStatus.freeAccessEnabled) return null;
 
@@ -236,7 +440,7 @@ export async function getLaunchQuotaSummary(userId: string): Promise<LaunchQuota
     const periodKey = getMonthlyPeriodKey();
     const items = features
       .map((feature) => {
-        const limit = getLaunchFeatureLimit(role, feature);
+        const limit = getLaunchFeatureLimitFromConfig(launchUsageLimitsConfig, role, feature);
         if (!limit || limit <= 0) return null;
         const used = getCurrentFeatureUsage(subscription, feature, periodKey);
         const remaining = Math.max(limit - used, 0);
@@ -265,6 +469,7 @@ export async function getLaunchQuotaSummary(userId: string): Promise<LaunchQuota
 }
 
 export async function consumeFeatureUsage(userId: string, feature: SubscriptionUsageFeature): Promise<void> {
+  const launchUsageLimitsConfig = await getLaunchUsageLimitsConfig();
   const { commerceStatus } = await getRawUserSubscriptionState(userId);
   if (!commerceStatus.freeAccessEnabled) return;
 
@@ -276,7 +481,7 @@ export async function consumeFeatureUsage(userId: string, feature: SubscriptionU
     const data = userDoc.data() || {};
     const role = (data.role as string | null | undefined) || null;
     const subscription = (data.subscription as Subscription | undefined) || { plan: 'free' };
-    const limit = getLaunchFeatureLimit(role, feature);
+    const limit = getLaunchFeatureLimitFromConfig(launchUsageLimitsConfig, role, feature);
     if (limit == null) return;
 
     const periodKey = getMonthlyPeriodKey();

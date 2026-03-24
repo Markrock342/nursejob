@@ -107,6 +107,38 @@ const ADMIN_EMAILS = [
   // 'your-email@gmail.com',
 ];
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stripUndefinedDeep(item))
+      .filter((item) => item !== undefined) as T;
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const sanitizedEntries = Object.entries(value).reduce<Record<string, unknown>>((acc, [key, nestedValue]) => {
+    if (nestedValue === undefined) {
+      return acc;
+    }
+
+    const sanitizedValue = stripUndefinedDeep(nestedValue);
+    if (sanitizedValue !== undefined) {
+      acc[key] = sanitizedValue;
+    }
+    return acc;
+  }, {});
+
+  return sanitizedEntries as T;
+}
+
 function toErrorMessage(error: any): string {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -590,7 +622,7 @@ export async function updateUserProfile(
   updates: Partial<Omit<UserProfile, 'id' | 'email' | 'createdAt'>>
 ): Promise<void> {
   try {
-    const sanitizedUpdates = { ...(updates as Record<string, any>) };
+    const sanitizedUpdates = stripUndefinedDeep({ ...(updates as Record<string, any>) });
     delete sanitizedUpdates.role;
     delete sanitizedUpdates.isAdmin;
     delete sanitizedUpdates.uid;

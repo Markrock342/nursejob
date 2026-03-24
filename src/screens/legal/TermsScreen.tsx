@@ -16,8 +16,10 @@ import { useNavigation } from '@react-navigation/native';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
 import { LEGAL_LAST_UPDATED, TERMS_SECTIONS } from '../../legal/legalContent';
+import { useI18n } from '../../i18n';
 
 export default function TermsScreen() {
+  const { t } = useI18n();
   const navigation = useNavigation();
   const { colors } = useTheme();
 
@@ -28,7 +30,7 @@ export default function TermsScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ข้อกำหนดการใช้งาน</Text>
+        <Text style={styles.headerTitle}>{t('terms.headerTitle')}</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -36,14 +38,13 @@ export default function TermsScreen() {
         {/* Last Updated */}
         <View style={styles.lastUpdated}>
           <Ionicons name="time-outline" size={16} color={colors.textMuted} />
-          <Text style={styles.lastUpdatedText}>อัปเดตล่าสุด: {LEGAL_LAST_UPDATED}</Text>
+          <Text style={styles.lastUpdatedText}>{t('terms.lastUpdatedLabel')} {LEGAL_LAST_UPDATED}</Text>
         </View>
 
         {/* Introduction */}
         <View style={styles.intro}>
           <Text style={styles.introText}>
-            กรุณาอ่านข้อกำหนดการใช้งานฉบับนี้อย่างละเอียดก่อนสมัครสมาชิกหรือใช้บริการ
-            เนื้อหาฉบับนี้ออกแบบให้สอดคล้องกับสถานะการให้บริการของ NurseGo ในปัจจุบันและจะมีการปรับปรุงเมื่อมีการเปลี่ยนแปลงสาระสำคัญ
+            {t('terms.introText')}
           </Text>
         </View>
 
@@ -61,9 +62,7 @@ export default function TermsScreen() {
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            © 2569 NurseGo. สงวนลิขสิทธิ์.
-          </Text>
+          <Text style={styles.footerText}>{t('terms.footerCopyright')}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

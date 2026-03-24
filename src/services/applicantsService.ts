@@ -93,57 +93,66 @@ export async function getHospitalApplications(posterId: string): Promise<Applica
       const shiftData = shiftDoc?.data();
       
       for (const contactDoc of contactsSnapshot.docs) {
-        const contactData = contactDoc.data();
-        const userProfile = await getUserProfile(contactData.interestedUserId);
-        
-        contacts.push({
-          id: contactDoc.id,
-          jobId: contactData.jobId,
-          userId: contactData.interestedUserId,
-          userName: contactData.interestedUserName,
-          userPhone: contactData.interestedUserPhone,
-          message: contactData.message,
-          status: contactData.status || 'interested',
-          contactedAt: (contactData.contactedAt as Timestamp)?.toDate() || new Date(),
-          job: shiftData ? {
-            id: shiftId,
-            title: shiftData.title,
-            posterName: shiftData.posterName,
-            posterId: shiftData.posterId,
-            department: shiftData.department,
-            shiftRate: shiftData.shiftRate,
-            rateType: shiftData.rateType,
-            shiftDate: shiftData.shiftDate?.toDate() || new Date(),
-            shiftTime: shiftData.shiftTime,
-            status: shiftData.status,
-            createdAt: shiftData.createdAt?.toDate() || new Date(),
-          } as JobPost : undefined,
-          userProfile: userProfile ? {
-            id: userProfile.id,
-            displayName: userProfile.displayName,
-            firstName: userProfile.firstName,
-            lastName: userProfile.lastName,
-            email: userProfile.email,
-            phone: userProfile.phone,
-            photoURL: userProfile.photoURL || undefined,
-            role: userProfile.role,
-            orgType: userProfile.orgType,
-            staffType: userProfile.staffType,
-            staffTypes: userProfile.staffTypes,
-            interestedStaffTypes: userProfile.interestedStaffTypes,
-            workStyle: userProfile.workStyle,
-            careNeeds: userProfile.careNeeds,
-            careTypes: userProfile.careTypes,
-            hiringUrgency: userProfile.hiringUrgency,
-            preferredProvince: userProfile.preferredProvince,
-            location: userProfile.location,
-            isVerified: userProfile.isVerified,
-            licenseNumber: userProfile.licenseNumber,
-            experience: userProfile.experience,
-            skills: userProfile.skills,
-            bio: userProfile.bio,
-          } : undefined,
-        });
+        try {
+          const contactData = contactDoc.data();
+          let userProfile: Awaited<ReturnType<typeof getUserProfile>> | null = null;
+          try {
+            userProfile = await getUserProfile(contactData.interestedUserId);
+          } catch {
+            // Individual profile fetch failure shouldn't block the entire list
+          }
+
+          contacts.push({
+            id: contactDoc.id,
+            jobId: contactData.jobId,
+            userId: contactData.interestedUserId,
+            userName: contactData.interestedUserName,
+            userPhone: contactData.interestedUserPhone,
+            message: contactData.message,
+            status: contactData.status || 'interested',
+            contactedAt: (contactData.contactedAt as Timestamp)?.toDate() || new Date(),
+            job: shiftData ? {
+              id: shiftId,
+              title: shiftData.title,
+              posterName: shiftData.posterName,
+              posterId: shiftData.posterId,
+              department: shiftData.department,
+              shiftRate: shiftData.shiftRate,
+              rateType: shiftData.rateType,
+              shiftDate: shiftData.shiftDate?.toDate() || new Date(),
+              shiftTime: shiftData.shiftTime,
+              status: shiftData.status,
+              createdAt: shiftData.createdAt?.toDate() || new Date(),
+            } as JobPost : undefined,
+            userProfile: userProfile ? {
+              id: userProfile.id,
+              displayName: userProfile.displayName,
+              firstName: userProfile.firstName,
+              lastName: userProfile.lastName,
+              email: userProfile.email,
+              phone: userProfile.phone,
+              photoURL: userProfile.photoURL || undefined,
+              role: userProfile.role,
+              orgType: userProfile.orgType,
+              staffType: userProfile.staffType,
+              staffTypes: userProfile.staffTypes,
+              interestedStaffTypes: userProfile.interestedStaffTypes,
+              workStyle: userProfile.workStyle,
+              careNeeds: userProfile.careNeeds,
+              careTypes: userProfile.careTypes,
+              hiringUrgency: userProfile.hiringUrgency,
+              preferredProvince: userProfile.preferredProvince,
+              location: userProfile.location,
+              isVerified: userProfile.isVerified,
+              licenseNumber: userProfile.licenseNumber,
+              experience: userProfile.experience,
+              skills: userProfile.skills,
+              bio: userProfile.bio,
+            } : undefined,
+          });
+        } catch {
+          // Skip this contact entry if parsing fails
+        }
       }
     }
     
@@ -171,44 +180,53 @@ export async function getJobApplications(shiftId: string): Promise<ApplicantDeta
     const contacts: ApplicantDetails[] = [];
     
     for (const contactDoc of snapshot.docs) {
-      const contactData = contactDoc.data();
-      const userProfile = await getUserProfile(contactData.interestedUserId);
-      
-      contacts.push({
-        id: contactDoc.id,
-        jobId: contactData.jobId,
-        userId: contactData.interestedUserId,
-        userName: contactData.interestedUserName,
-        userPhone: contactData.interestedUserPhone,
-        message: contactData.message,
-        status: contactData.status || 'interested',
-        contactedAt: (contactData.contactedAt as Timestamp)?.toDate() || new Date(),
-        userProfile: userProfile ? {
-          id: userProfile.id,
-          displayName: userProfile.displayName,
-          firstName: userProfile.firstName,
-          lastName: userProfile.lastName,
-          email: userProfile.email,
-          phone: userProfile.phone,
-          photoURL: userProfile.photoURL || undefined,
-          role: userProfile.role,
-          orgType: userProfile.orgType,
-          staffType: userProfile.staffType,
-          staffTypes: userProfile.staffTypes,
-          interestedStaffTypes: userProfile.interestedStaffTypes,
-          workStyle: userProfile.workStyle,
-          careNeeds: userProfile.careNeeds,
-          careTypes: userProfile.careTypes,
-          hiringUrgency: userProfile.hiringUrgency,
-          preferredProvince: userProfile.preferredProvince,
-          location: userProfile.location,
-          isVerified: userProfile.isVerified,
-          licenseNumber: userProfile.licenseNumber,
-          experience: userProfile.experience,
-          skills: userProfile.skills,
-          bio: userProfile.bio,
-        } : undefined,
-      });
+      try {
+        const contactData = contactDoc.data();
+        let userProfile: Awaited<ReturnType<typeof getUserProfile>> | null = null;
+        try {
+          userProfile = await getUserProfile(contactData.interestedUserId);
+        } catch {
+          // Individual profile fetch failure shouldn't block the list
+        }
+
+        contacts.push({
+          id: contactDoc.id,
+          jobId: contactData.jobId,
+          userId: contactData.interestedUserId,
+          userName: contactData.interestedUserName,
+          userPhone: contactData.interestedUserPhone,
+          message: contactData.message,
+          status: contactData.status || 'interested',
+          contactedAt: (contactData.contactedAt as Timestamp)?.toDate() || new Date(),
+          userProfile: userProfile ? {
+            id: userProfile.id,
+            displayName: userProfile.displayName,
+            firstName: userProfile.firstName,
+            lastName: userProfile.lastName,
+            email: userProfile.email,
+            phone: userProfile.phone,
+            photoURL: userProfile.photoURL || undefined,
+            role: userProfile.role,
+            orgType: userProfile.orgType,
+            staffType: userProfile.staffType,
+            staffTypes: userProfile.staffTypes,
+            interestedStaffTypes: userProfile.interestedStaffTypes,
+            workStyle: userProfile.workStyle,
+            careNeeds: userProfile.careNeeds,
+            careTypes: userProfile.careTypes,
+            hiringUrgency: userProfile.hiringUrgency,
+            preferredProvince: userProfile.preferredProvince,
+            location: userProfile.location,
+            isVerified: userProfile.isVerified,
+            licenseNumber: userProfile.licenseNumber,
+            experience: userProfile.experience,
+            skills: userProfile.skills,
+            bio: userProfile.bio,
+          } : undefined,
+        });
+      } catch {
+        // Skip this contact entry if parsing fails
+      }
     }
     
     return contacts;

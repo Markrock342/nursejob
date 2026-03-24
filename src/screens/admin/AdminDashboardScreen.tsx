@@ -85,6 +85,9 @@ import {
   FraudAlertCenterResult,
   RetentionMonitorSummary,
   ScheduledBroadcastCampaign,
+  resetLaunchUsageLimitsAdminSettings,
+  subscribeLaunchUsageLimitsAdminSettings,
+  updateLaunchUsageLimits,
 } from '../../services/adminService';
 import {
   CAMPAIGN_PACKAGE_OPTIONS,
@@ -98,7 +101,7 @@ import {
   setCampaignCodeActive,
   updateCampaignCode,
 } from '../../services/campaignCodeService';
-import { getLaunchUsageLimitForRole } from '../../services/subscriptionService';
+import { getDefaultLaunchUsageLimitsConfigSnapshot, getLaunchUsageLimitForRole, LaunchUsageLimitsConfig, LaunchUsageRole } from '../../services/subscriptionService';
 import {
   StickyAnnouncement,
   getStickyAnnouncementsAdmin,
@@ -188,6 +191,13 @@ const ACCESS_USAGE_FEATURES: Array<{ key: SubscriptionUsageFeature; label: strin
   { key: 'urgent_post', label: 'ป้ายด่วน' },
   { key: 'extend_post', label: 'ต่ออายุโพสต์' },
   { key: 'boost_post', label: 'ดันโพสต์' },
+];
+
+const LAUNCH_QUOTA_ROLE_OPTIONS: Array<{ key: LaunchUsageRole; label: string; hint: string }> = [
+  { key: 'user', label: 'ผู้ใช้ทั่วไป', hint: 'เหมาะกับสมาชิกที่ยังอยู่ในช่วงทดลองใช้' },
+  { key: 'nurse', label: 'พยาบาล', hint: 'โควตาสำหรับบัญชีสายวิชาชีพที่ผ่านการยืนยันแล้ว' },
+  { key: 'hospital', label: 'โรงพยาบาล', hint: 'ใช้กับองค์กรที่ลงประกาศและคุยกับผู้สมัครเป็นหลัก' },
+  { key: 'admin', label: 'ผู้ดูแลระบบ', hint: 'เผื่อใช้ทดสอบ flow หรือจัดการเคสในทีมงาน' },
 ];
 
 const ROLE_PLAN_OPTIONS: Record<'user' | 'nurse' | 'hospital' | 'admin', SubscriptionPlan[]> = {
@@ -356,6 +366,15 @@ export default function AdminDashboardScreen() {
   const [announcementEndsAtInput, setAnnouncementEndsAtInput] = useState('');
   const [savingAnnouncement, setSavingAnnouncement] = useState(false);
   const [updatingOnboardingSurvey, setUpdatingOnboardingSurvey] = useState(false);
+  const [launchQuotaConfig, setLaunchQuotaConfig] = useState<LaunchUsageLimitsConfig | null>(null);
+  const [launchQuotaDraft, setLaunchQuotaDraft] = useState<LaunchUsageLimitsConfig>(getDefaultLaunchUsageLimitsConfigSnapshot());
+  const [savingLaunchQuota, setSavingLaunchQuota] = useState(false);
+  const [resettingLaunchQuota, setResettingLaunchQuota] = useState(false);
+
+  const launchQuotaHasChanges = useMemo(() => {
+    if (!launchQuotaConfig) return false;
+    return JSON.stringify(launchQuotaConfig.roles) !== JSON.stringify(launchQuotaDraft.roles);
+  }, [launchQuotaConfig, launchQuotaDraft]);
 
   // Modal
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
@@ -572,6 +591,14 @@ export default function AdminDashboardScreen() {
 
   useEffect(() => {
     const unsubscribe = subscribeStickyAnnouncementsAdmin(setStickyAnnouncementItems);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeLaunchUsageLimitsAdminSettings((config) => {
+      setLaunchQuotaConfig(config);
+      setLaunchQuotaDraft(config);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -1028,6 +1055,76 @@ export default function AdminDashboardScreen() {
     ]);
   };
 
+  const handleLaunchQuotaDraftChange = (
+    role: LaunchUsageRole,
+    feature: SubscriptionUsageFeature,
+    rawValue: string,
+  ) => {
+    const normalized = rawValue.replace(/[^0-9]/g, '');
+    setLaunchQuotaDraft((prev) => ({
+      ...prev,
+      roles: {
+        ...prev.roles,
+        [role]: {
+          ...prev.roles[role],
+          [feature]: normalized === '' ? 0 : Number(normalized),
+        },
+      },
+    }));
+  };
+
+  const handleRestoreLaunchQuotaDraft = () => {
+    if (!launchQuotaConfig) return;
+    setLaunchQuotaDraft(launchQuotaConfig);
+  };
+
+  const handleSaveLaunchQuota = async () => {
+    if (!adminUser?.uid) {
+      Alert.alert('บันทึกไม่ได้', 'ไม่พบบัญชีผู้ดูแลระบบที่กำลังใช้งานอยู่');
+      return;
+    }
+
+    try {
+      setSavingLaunchQuota(true);
+      const savedConfig = await updateLaunchUsageLimits(adminUser.uid, launchQuotaDraft);
+      setLaunchQuotaConfig(savedConfig);
+      setLaunchQuotaDraft(savedConfig);
+      Alert.alert('บันทึกแล้ว', 'อัปเดต launch quota ราย role เรียบร้อย');
+    } catch (error: any) {
+      Alert.alert('ผิดพลาด', error?.message || 'ไม่สามารถบันทึก launch quota ได้');
+    } finally {
+      setSavingLaunchQuota(false);
+    }
+  };
+
+  const handleResetLaunchQuotaDefaults = async () => {
+    if (!adminUser?.uid) {
+      Alert.alert('รีเซ็ตไม่ได้', 'ไม่พบบัญชีผู้ดูแลระบบที่กำลังใช้งานอยู่');
+      return;
+    }
+
+    Alert.alert('รีเซ็ตกลับค่า default', 'ต้องการรีเซ็ต launch quota ทั้งหมดกลับเป็นค่าเริ่มต้นของระบบหรือไม่?', [
+      { text: 'ยกเลิก', style: 'cancel' },
+      {
+        text: 'รีเซ็ต',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setResettingLaunchQuota(true);
+            const defaultConfig = await resetLaunchUsageLimitsAdminSettings(adminUser.uid);
+            setLaunchQuotaConfig(defaultConfig);
+            setLaunchQuotaDraft(defaultConfig);
+            Alert.alert('รีเซ็ตแล้ว', 'คืนค่า launch quota กลับเป็นค่า default ของระบบเรียบร้อย');
+          } catch (error: any) {
+            Alert.alert('ผิดพลาด', error?.message || 'ไม่สามารถรีเซ็ต launch quota ได้');
+          } finally {
+            setResettingLaunchQuota(false);
+          }
+        },
+      },
+    ]);
+  };
+
   // ============================================
   // Job Actions
   // ============================================
@@ -1386,8 +1483,11 @@ export default function AdminDashboardScreen() {
   };
 
   const openEditCodeModal = (item: CampaignCode) => {
-    const expiresAt = item.rule.expiresAt
-      ? ('toDate' in (item.rule.expiresAt as any) ? (item.rule.expiresAt as any).toDate() : item.rule.expiresAt)
+    const rawExpires = item.rule.expiresAt;
+    const expiresAt = rawExpires
+      ? (typeof (rawExpires as any).toDate === 'function'
+          ? (rawExpires as any).toDate()
+          : rawExpires instanceof Date ? rawExpires : null)
       : null;
     setSelectedCode(item);
     setCodeForm({
@@ -1938,6 +2038,79 @@ export default function AdminDashboardScreen() {
               <Text style={styles.insightLabel}>{item.label}</Text>
             </View>
           ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>ตั้งค่า launch quota ราย role</Text>
+        <View style={styles.card}>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabelWide}>สถานะ config</Text>
+            <Text style={styles.breakdownCountWide}>
+              {launchQuotaConfig?.updatedAt ? `อัปเดต ${formatDateTime(launchQuotaConfig.updatedAt)}` : 'ใช้ค่า default ของระบบ'}
+            </Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabelWide}>แก้ไขล่าสุดโดย</Text>
+            <Text style={styles.breakdownCountWide}>{launchQuotaConfig?.updatedBy || '-'}</Text>
+          </View>
+          <Text style={[styles.sectionSubtitle, { maxWidth: '100%', marginBottom: 12 }]}>ค่าที่เปลี่ยนตรงนี้จะถูกใช้ทันทีในหน้า profile, post, chat, shop และ flow สิทธิ์รายเดือนทั้งหมดที่อิง launch quota</Text>
+
+          {LAUNCH_QUOTA_ROLE_OPTIONS.map((roleOption) => (
+            <View key={roleOption.key} style={[styles.card, { backgroundColor: '#F8F4ED', marginBottom: 12 }]}> 
+              <Text style={styles.codeTitle}>{roleOption.label}</Text>
+              <Text style={[styles.sectionSubtitle, { maxWidth: '100%', marginBottom: 12 }]}>{roleOption.hint}</Text>
+              {ACCESS_USAGE_FEATURES.map((feature) => (
+                <View key={`${roleOption.key}-${feature.key}`} style={[styles.breakdownRow, { alignItems: 'center', gap: 12 }]}> 
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={styles.breakdownLabelWide}>{feature.label}</Text>
+                    <Text style={styles.headerTopSubLabel}>
+                      ค่า default {getDefaultLaunchUsageLimitsConfigSnapshot().roles[roleOption.key][feature.key] ?? 0} ครั้ง
+                    </Text>
+                  </View>
+                  <TextInput
+                    value={String(launchQuotaDraft.roles[roleOption.key][feature.key] ?? 0)}
+                    onChangeText={(value) => handleLaunchQuotaDraftChange(roleOption.key, feature.key, value)}
+                    keyboardType="number-pad"
+                    style={[styles.formInput, { width: 92, marginBottom: 0, textAlign: 'center' }]}
+                  />
+                </View>
+              ))}
+            </View>
+          ))}
+
+          <View style={styles.broadcastHistoryActionRow}>
+            <TouchableOpacity
+              style={[
+                styles.broadcastHistoryGhostButton,
+                (!launchQuotaHasChanges || savingLaunchQuota || resettingLaunchQuota) && { opacity: 0.6 },
+              ]}
+              onPress={handleRestoreLaunchQuotaDraft}
+              disabled={!launchQuotaHasChanges || savingLaunchQuota || resettingLaunchQuota}
+            >
+              <Text style={styles.broadcastHistoryGhostButtonText}>คืนค่าตาม config ปัจจุบัน</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.broadcastHistoryGhostButton,
+                resettingLaunchQuota && { opacity: 0.6 },
+              ]}
+              onPress={handleResetLaunchQuotaDefaults}
+              disabled={resettingLaunchQuota || savingLaunchQuota}
+            >
+              <Text style={styles.broadcastHistoryGhostButtonText}>{resettingLaunchQuota ? 'กำลังรีเซ็ต...' : 'รีเซ็ตกลับค่า default'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.broadcastHistoryPrimaryButton,
+              { marginTop: 12 },
+              (!launchQuotaHasChanges || savingLaunchQuota || resettingLaunchQuota) && { opacity: 0.6 },
+            ]}
+            onPress={handleSaveLaunchQuota}
+            disabled={!launchQuotaHasChanges || savingLaunchQuota || resettingLaunchQuota}
+          >
+            <Text style={styles.broadcastHistoryPrimaryButtonText}>{savingLaunchQuota ? 'กำลังบันทึก...' : 'บันทึก quota'}</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.sectionTitle}>พื้นที่และช่วงเวลาที่น่าสนใจ</Text>

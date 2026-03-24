@@ -27,7 +27,8 @@ import { useNotifications } from '../../context/NotificationContext';
 import { useTheme } from '../../context/ThemeContext';
 import { encodeGeohash } from '../../utils/geohash';
 import { SPACING, BORDER_RADIUS, FONT_SIZES } from '../../theme';
-import { STAFF_TYPES } from '../../constants/jobOptions';
+import { getStaffTypeOptions } from '../../constants/jobOptions';
+import { useI18n } from '../../i18n';
 
 // ─── Constants ────────────────────────────────
 const RADIUS_OPTIONS = [1, 3, 5, 10, 20, 50];
@@ -38,6 +39,8 @@ export default function NearbyJobAlertScreen() {
   const { user, updateUser } = useAuth();
   const { hasPermission, registerForNotifications } = useNotifications();
   const { colors, isDark } = useTheme();
+  const { t } = useI18n();
+  const staffTypeOptions = getStaffTypeOptions();
 
   const permissionTone = hasPermission
     ? {
@@ -136,8 +139,8 @@ export default function NearbyJobAlertScreen() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(
-          'ไม่ได้รับอนุญาต',
-          'กรุณาเปิดการเข้าถึงตำแหน่งในการตั้งค่าของมือถือ',
+          t('nearbyAlerts.alerts.permissionDeniedTitle'),
+          t('nearbyAlerts.alerts.permissionDeniedMessage'),
         );
         return;
       }
@@ -149,7 +152,7 @@ export default function NearbyJobAlertScreen() {
       setLng(longitude);
       await reverseGeocode(latitude, longitude);
     } catch (_) {
-      Alert.alert('ไม่สามารถหาตำแหน่งได้', 'กรุณาลองใหม่อีกครั้ง');
+      Alert.alert(t('nearbyAlerts.alerts.locationErrorTitle'), t('nearbyAlerts.alerts.locationErrorMessage'));
     } finally {
       setIsLoadingLocation(false);
     }
@@ -161,8 +164,8 @@ export default function NearbyJobAlertScreen() {
 
     if (enabled && (!lat || !lng)) {
       Alert.alert(
-        'ต้องการตำแหน่งของคุณ',
-        'กรุณากดปุ่ม "หาตำแหน่งปัจจุบัน" ก่อนเปิดการแจ้งเตือน',
+        t('nearbyAlerts.alerts.locationRequiredTitle'),
+        t('nearbyAlerts.alerts.locationRequiredMessage'),
       );
       return;
     }
@@ -179,7 +182,7 @@ export default function NearbyJobAlertScreen() {
       const maxRate = maxRateText ? Number(maxRateText) || undefined : undefined;
 
       if (minRate && maxRate && minRate > maxRate) {
-        Alert.alert('ช่วงค่าจ้างไม่ถูกต้อง', 'กรุณาตั้งค่าขั้นต่ำให้น้อยกว่าหรือเท่ากับค่าสูงสุด');
+        Alert.alert(t('nearbyAlerts.alerts.invalidRangeTitle'), t('nearbyAlerts.alerts.invalidRangeMessage'));
         setIsSaving(false);
         return;
       }
@@ -201,14 +204,14 @@ export default function NearbyJobAlertScreen() {
       });
 
       Alert.alert(
-        'บันทึกแจ้งเตือนเรียบร้อย',
+        t('nearbyAlerts.alerts.saveSuccessTitle'),
         enabled
-          ? `ระบบจะคัดงานใหม่ในระยะ ${radiusKm} กม. และใช้เงื่อนไขที่คุณเลือกก่อนส่งแจ้งเตือน`
-          : 'ปิดแจ้งเตือนงานใกล้คุณเรียบร้อยแล้ว',
-        [{ text: 'ตกลง', onPress: () => navigation.goBack() }],
+          ? t('nearbyAlerts.alerts.saveEnabledMessage', { radius: radiusKm })
+          : t('nearbyAlerts.alerts.saveDisabledMessage'),
+        [{ text: t('common.actions.ok'), onPress: () => navigation.goBack() }],
       );
     } catch (_) {
-      Alert.alert('บันทึกไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
+      Alert.alert(t('nearbyAlerts.alerts.saveFailedTitle'), t('common.alerts.genericTryAgain'));
     } finally {
       setIsSaving(false);
     }
@@ -241,7 +244,7 @@ export default function NearbyJobAlertScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>งานใกล้คุณ</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('nearbyAlerts.headerTitle')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -251,28 +254,28 @@ export default function NearbyJobAlertScreen() {
             <View style={styles.quickIntroHeader}>
               <View>
                 <Text style={[styles.quickEyebrow, { color: colors.primary }]}>Smart Alerts</Text>
-                <Text style={[styles.quickTitle, { color: colors.text }]}>ให้แจ้งเตือนเฉพาะงานที่ใช่</Text>
+                <Text style={[styles.quickTitle, { color: colors.text }]}>{t('nearbyAlerts.quickTitle')}</Text>
               </View>
               <View style={[styles.quickIntroBadge, { backgroundColor: isDark ? colors.card : colors.primaryBackground }]}> 
                 <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                <Text style={[styles.quickIntroBadgeText, { color: colors.primary }]}>ละเอียดขึ้น</Text>
+                <Text style={[styles.quickIntroBadgeText, { color: colors.primary }]}>{t('nearbyAlerts.smartBadge')}</Text>
               </View>
             </View>
             <Text style={[styles.quickSubtitle, { color: colors.textSecondary }]}> 
-              เลือกพื้นที่ สายงาน และเรตที่รับจริง ระบบจะช่วยกันแจ้งเตือนที่ไม่ตรงโจทย์ออกให้มากที่สุด
+              {t('nearbyAlerts.quickSubtitle')}
             </Text>
             <View style={styles.signalSummaryRow}>
               <View style={[styles.signalSummaryPill, { backgroundColor: isDark ? colors.card : colors.background }]}> 
                 <Text style={[styles.signalSummaryValue, { color: colors.text }]}>{radiusKm}</Text>
-                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>กม.</Text>
+                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>{t('nearbyAlerts.signals.distance')}</Text>
               </View>
               <View style={[styles.signalSummaryPill, { backgroundColor: isDark ? colors.card : colors.background }]}> 
                 <Text style={[styles.signalSummaryValue, { color: colors.text }]}>{preferredStaffTypes.length || 0}</Text>
-                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>สายงาน</Text>
+                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>{t('nearbyAlerts.signals.staffTypes')}</Text>
               </View>
               <View style={[styles.signalSummaryPill, { backgroundColor: isDark ? colors.card : colors.background }]}> 
                 <Text style={[styles.signalSummaryValue, { color: colors.text }]}>{selectedSignalCount}</Text>
-                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>เงื่อนไข</Text>
+                <Text style={[styles.signalSummaryLabel, { color: colors.textSecondary }]}>{t('nearbyAlerts.signals.filters')}</Text>
               </View>
             </View>
             <View style={[styles.permissionPill, { backgroundColor: permissionTone.background }]}> 
@@ -282,7 +285,7 @@ export default function NearbyJobAlertScreen() {
                 color={permissionTone.text}
               />
               <Text style={[styles.permissionPillText, { color: permissionTone.text }]}> 
-                {hasPermission ? 'แจ้งเตือนพร้อมใช้งาน' : 'ระบบจะขอสิทธิ์แจ้งเตือนตอนบันทึก'}
+                {hasPermission ? t('nearbyAlerts.permissionReady') : t('nearbyAlerts.permissionOnSave')}
               </Text>
             </View>
           </View>
@@ -295,9 +298,9 @@ export default function NearbyJobAlertScreen() {
           >
             <View style={styles.toggleRow}>
               <View style={styles.toggleCopy}> 
-                <Text style={[styles.cardTitle, { color: colors.text }]}>เปิดแจ้งเตือนงานใกล้คุณ</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('nearbyAlerts.toggleTitle')}</Text>
                 <Text style={[styles.cardHint, { color: colors.textSecondary }]}> 
-                  เมื่อมีงานใหม่ในระยะที่กำหนด ระบบจะส่งแจ้งเตือนให้ทันที
+                  {t('nearbyAlerts.toggleSubtitle')}
                 </Text>
               </View>
               <Switch
@@ -317,9 +320,9 @@ export default function NearbyJobAlertScreen() {
                   { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}
               >
-                <Text style={[styles.cardTitle, { color: colors.text }]}>ตำแหน่ง</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('nearbyAlerts.locationTitle')}</Text>
                 <Text style={[styles.cardHint, { color: colors.textSecondary }]}> 
-                  ใช้เป็นจุดศูนย์กลางสำหรับหางานใกล้ตัว ไม่ได้แสดงให้ผู้ใช้คนอื่นเห็น
+                  {t('nearbyAlerts.locationSubtitle')}
                 </Text>
                 <TouchableOpacity
                   style={[styles.locationButton, { backgroundColor: isDark ? colors.card : colors.primaryBackground }]}
@@ -335,13 +338,13 @@ export default function NearbyJobAlertScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.locationPrimary, { color: lat ? colors.text : colors.textMuted }]}> 
                       {isLoadingLocation
-                        ? 'กำลังหาตำแหน่ง...'
-                        : locationLabel ?? 'แตะเพื่อใช้ตำแหน่งปัจจุบัน'}
+                        ? t('nearbyAlerts.findingLocation')
+                        : locationLabel ?? t('nearbyAlerts.useCurrentLocation')}
                     </Text>
                     <Text style={[styles.locationSecondary, { color: colors.textSecondary }]}> 
                       {lat !== null && lng !== null
                         ? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
-                        : 'ยังไม่ได้เลือกตำแหน่ง'}
+                        : t('nearbyAlerts.noLocationSelected')}
                     </Text>
                   </View>
                   <Ionicons name="refresh" size={18} color={colors.primary} />
@@ -354,9 +357,9 @@ export default function NearbyJobAlertScreen() {
                   { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}
               >
-                <Text style={[styles.cardTitle, { color: colors.text }]}>รัศมีแจ้งเตือน</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('nearbyAlerts.radiusTitle')}</Text>
                 <Text style={[styles.cardHint, { color: colors.textSecondary }]}> 
-                  ตอนนี้จะคัดงานใหม่ในระยะประมาณ {radiusKm} กม. จากจุดที่คุณเลือก
+                  {t('nearbyAlerts.radiusSubtitle', { radius: radiusKm })}
                 </Text>
                 <View style={styles.radiusGrid}>
                   {RADIUS_OPTIONS.map((r) => {
@@ -380,7 +383,7 @@ export default function NearbyJobAlertScreen() {
                             { color: isActive ? colors.white : colors.textSecondary },
                           ]}
                         >
-                          {r} กม.
+                          {r} {t('nearbyAlerts.signals.distance')}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -394,22 +397,22 @@ export default function NearbyJobAlertScreen() {
                   { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}
               >
-                <Text style={[styles.cardTitle, { color: colors.text }]}>กรองงานที่อยากรับจริง</Text>
-                <Text style={[styles.cardHint, { color: colors.textSecondary }]}>เพิ่มชั้นกรองให้ระบบส่งเฉพาะงานที่เข้าใกล้สิ่งที่คุณกำลังมองหา</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{t('nearbyAlerts.filtersTitle')}</Text>
+                <Text style={[styles.cardHint, { color: colors.textSecondary }]}>{t('nearbyAlerts.filtersSubtitle')}</Text>
 
-                <Text style={[styles.fieldLabel, { color: colors.text }]}>จังหวัดที่สนใจ</Text>
+                <Text style={[styles.fieldLabel, { color: colors.text }]}>{t('nearbyAlerts.provinceLabel')}</Text>
                 <TextInput
                   style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: isDark ? colors.card : colors.background }]}
-                  placeholder="เช่น กรุงเทพมหานคร"
+                  placeholder={t('nearbyAlerts.provincePlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={preferredProvince}
                   onChangeText={setPreferredProvince}
                 />
-                <Text style={[styles.fieldHint, { color: colors.textMuted }]}>เว้นว่างได้ ถ้าต้องการดูทุกจังหวัดรอบตำแหน่งของคุณ</Text>
+                <Text style={[styles.fieldHint, { color: colors.textMuted }]}>{t('nearbyAlerts.provinceHint')}</Text>
 
-                <Text style={[styles.fieldLabel, { color: colors.text }]}>ประเภทบุคลากร</Text>
+                <Text style={[styles.fieldLabel, { color: colors.text }]}>{t('nearbyAlerts.staffTypeLabel')}</Text>
                 <View style={styles.staffTypeWrap}>
-                  {STAFF_TYPES.map((item) => {
+                  {staffTypeOptions.map((item) => {
                     const selected = preferredStaffTypes.includes(item.code);
                     return (
                       <TouchableOpacity
@@ -423,17 +426,17 @@ export default function NearbyJobAlertScreen() {
                         ]}
                         onPress={() => setPreferredStaffTypes((prev) => selected ? prev.filter((code) => code !== item.code) : [...prev, item.code])}
                       >
-                        <Text style={[styles.filterChipText, { color: selected ? colors.white : colors.textSecondary }]}>{item.shortName}</Text>
+                        <Text style={[styles.filterChipText, { color: selected ? colors.white : colors.textSecondary }]}>{item.shortDisplayName}</Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
 
-                <Text style={[styles.fieldLabel, { color: colors.text }]}>ค่าตอบแทนที่ต้องการ</Text>
+                <Text style={[styles.fieldLabel, { color: colors.text }]}>{t('nearbyAlerts.compensationLabel')}</Text>
                 <View style={styles.rateRow}>
                   <TextInput
                     style={[styles.input, styles.rateInput, { borderColor: colors.border, color: colors.text, backgroundColor: isDark ? colors.card : colors.background }]}
-                    placeholder="ขั้นต่ำ"
+                    placeholder={t('nearbyAlerts.minPlaceholder')}
                     placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"
                     value={minRateText}
@@ -442,14 +445,14 @@ export default function NearbyJobAlertScreen() {
                   <Text style={[styles.rateSeparator, { color: colors.textMuted }]}>-</Text>
                   <TextInput
                     style={[styles.input, styles.rateInput, { borderColor: colors.border, color: colors.text, backgroundColor: isDark ? colors.card : colors.background }]}
-                    placeholder="สูงสุด"
+                    placeholder={t('nearbyAlerts.maxPlaceholder')}
                     placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"
                     value={maxRateText}
                     onChangeText={setMaxRateText}
                   />
                 </View>
-                <Text style={[styles.fieldHint, { color: colors.textMuted }]}>ใส่ช่วงเรตที่รับจริง เพื่อช่วยลดแจ้งเตือนที่เรตต่ำหรือสูงเกินโจทย์</Text>
+                <Text style={[styles.fieldHint, { color: colors.textMuted }]}>{t('nearbyAlerts.compensationHint')}</Text>
               </View>
             </>
           )}
@@ -467,7 +470,7 @@ export default function NearbyJobAlertScreen() {
           ) : (
             <>
               <Ionicons name="checkmark-circle" size={20} color={colors.white} />
-              <Text style={styles.saveBtnText}>บันทึกการตั้งค่า</Text>
+              <Text style={styles.saveBtnText}>{t('nearbyAlerts.saveButton')}</Text>
             </>
           )}
         </TouchableOpacity>

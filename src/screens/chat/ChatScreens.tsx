@@ -4,7 +4,7 @@
 // in-app toast, push notifications
 // ============================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -59,37 +59,34 @@ import { trackEvent } from '../../services/analyticsService';
 import { StickyInboxItem, subscribeStickyInboxItems } from '../../services/communicationsService';
 import { getUserDocuments, Document as SavedDocument, formatFileSize } from '../../services/documentsService';
 import MapPickerModal, { PickedLocation } from '../../components/common/MapPickerModal';
+import { useI18n, translate } from '../../i18n';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── Helpers ────────────────────────────────
-function formatTime(date: any): string {
+function formatTime(date: any, lang = 'th'): string {
   if (!date) return '';
   const d = date?.toDate ? date.toDate() : new Date(date);
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
   const diffDays = Math.floor(diffMs / 86400000);
-  if (diffDays === 0) return d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-  if (diffDays === 1) return 'เมื่อวาน';
-  if (diffDays < 7) return `${diffDays} วันที่แล้ว`;
-  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  if (diffDays === 0) return d.toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour: '2-digit', minute: '2-digit' });
+  if (diffDays === 1) return translate(lang as any, 'chat.yesterday');
+  if (diffDays < 7) return translate(lang as any, 'chat.daysAgo', { count: String(diffDays) });
+  return d.toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short' });
 }
 
-const QUICK_REPLY_TEMPLATES = [
-  'สนใจงานนี้ครับ/ค่ะ',
-  'ส่งเอกสารล่าสุดให้แล้วครับ/ค่ะ',
-  'ขอรายละเอียดเพิ่มอีกนิดได้ไหมครับ/คะ',
-  'สะดวกคุยต่อช่วงไหนครับ/คะ',
-];
+// QUICK_REPLY_TEMPLATES is defined inside ChatRoomScreen (needs t() hook)
 
 // ─── Simple Avatar fallback ─────────────────
 function Avatar({ uri, name, size }: { uri?: string; name: string; size: number }) {
+  const [imgError, setImgError] = React.useState(false);
   const initial = (name || '?')[0].toUpperCase();
   const colours = ['#0EA5E9','#10B981','#F59E0B','#8B5CF6','#EF4444'];
   const bg = colours[initial.charCodeAt(0) % colours.length];
 
-  if (uri) {
-    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+  if (uri && !imgError) {
+    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} onError={() => setImgError(true)} />;
   }
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}>
@@ -111,6 +108,7 @@ interface ConvItemProps {
 }
 
 function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: ConvItemProps) {
+  const { t, resolvedLanguage } = useI18n();
   const swipeRef = useRef<Swipeable>(null);
   const other = item.participantDetails?.find((p: any) => p.id !== userId);
   const unread = item.unreadBy?.[userId] ?? item.unreadCount ?? 0;
@@ -122,7 +120,7 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
       onPress={() => { swipeRef.current?.close(); onHide(); }}
     >
       <Ionicons name="eye-off-outline" size={22} color="#FFF" />
-      <Text style={styles.swipeLabel}>ซ่อน</Text>
+      <Text style={styles.swipeLabel}>{t('chat.hide')}</Text>
     </TouchableOpacity>
   );
 
@@ -132,7 +130,7 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
       onPress={() => { swipeRef.current?.close(); onDelete(); }}
     >
       <Ionicons name="trash-outline" size={22} color="#FFF" />
-      <Text style={styles.swipeLabel}>ลบ</Text>
+      <Text style={styles.swipeLabel}>{t('chat.delete')}</Text>
     </TouchableOpacity>
   );
 
@@ -161,10 +159,10 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
         <View style={styles.convContent}>
           <View style={styles.convTop}>
             <Text style={[styles.convName, { color: colors.text, fontWeight: isUnread ? '700' : '500' }]} numberOfLines={1}>
-              {other?.displayName || other?.name || 'ผู้ใช้'}
+              {other?.displayName || other?.name || t('chat.unknownUser')}
             </Text>
             <Text style={[styles.convTime, { color: colors.textMuted }]}>
-              {item.lastMessageAt ? formatTime(item.lastMessageAt) : ''}
+              {item.lastMessageAt ? formatTime(item.lastMessageAt, resolvedLanguage) : ''}
             </Text>
           </View>
 
@@ -177,7 +175,7 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
               style={[styles.convMsg, { color: isUnread ? colors.text : colors.textSecondary, fontWeight: isUnread ? '600' : '400' }]}
               numberOfLines={1}
             >
-              {item.lastMessage || 'เริ่มต้นการสนทนา'}
+              {item.lastMessage || t('chat.startConversation')}
             </Text>
             {isUnread && (
               <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
@@ -195,6 +193,7 @@ function ConversationRow({ item, userId, onPress, onHide, onDelete, colors }: Co
 // CHAT LIST SCREEN
 // ============================================
 export function ChatListScreen({ navigation }: any) {
+  const { t, resolvedLanguage } = useI18n();
   useScreenPerformance('ChatList');
   const { user } = useAuth();
   const { colors } = useTheme();
@@ -253,12 +252,12 @@ export function ChatListScreen({ navigation }: any) {
       <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
         <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
         <View style={[styles.chatHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 14 }]}> 
-          <Text style={styles.chatHeaderTitle}>ข้อความ</Text>
+          <Text style={styles.chatHeaderTitle}>{t('chat.messagesTitle')}</Text>
         </View>
         <View style={styles.centered}>
           <Ionicons name="chatbubble-outline" size={56} color={colors.border} />
-          <Text style={{ color: colors.textSecondary, marginTop: 16, fontSize: 16, fontWeight: '600' }}>ยังไม่ได้เข้าสู่ระบบ</Text>
-          <Text style={{ color: colors.textMuted, marginTop: 8, fontSize: 13, textAlign: 'center', paddingHorizontal: 32 }}>เข้าสู่ระบบเพื่อดูข้อความสนทนาของคุณ</Text>
+          <Text style={{ color: colors.textSecondary, marginTop: 16, fontSize: 16, fontWeight: '600' }}>{t('chat.notLoggedIn')}</Text>
+          <Text style={{ color: colors.textMuted, marginTop: 8, fontSize: 13, textAlign: 'center', paddingHorizontal: 32 }}>{t('chat.loginToSeeMessages')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -295,32 +294,35 @@ export function ChatListScreen({ navigation }: any) {
     navigation.navigate('ChatRoom', {
       conversationId: c.id,
       recipientId: other?.id,
-      recipientName: other?.displayName || other?.name || 'ผู้ใช้',
+      recipientName: other?.displayName || other?.name || t('chat.unknownUser'),
       recipientPhoto: other?.photoURL,
       jobTitle: c.jobTitle,
+      jobId: c.jobId,
     });
   };
 
   const handleHide = async (c: any) => {
     if (!user?.uid) return;
-    try { await hideConversation(c.id, user.uid); } catch {}
+    try { await hideConversation(c.id, user.uid); } catch {
+      Alert.alert(t('chat.error'), t('common.alerts.hideError'));
+    }
   };
 
   const handleDelete = (c: any) => {
     const other = c.participantDetails?.find((p: any) => p.id !== user?.uid);
     Alert.alert(
-      'ลบการสนทนา',
-      `ลบแชทกับ "${other?.displayName || 'ผู้ใช้'}" ออกจากรายการของคุณ?`,
+      t('chat.deleteConversationTitle'),
+      t('chat.deleteConversationMessage', { name: other?.displayName || other?.name || t('chat.unknownUser') }),
       [
-        { text: 'ยกเลิก', style: 'cancel' },
+        { text: t('chat.cancel'), style: 'cancel' },
         {
-          text: 'ลบ',
+          text: t('chat.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteConversation(c.id, user.uid);
             } catch (error: any) {
-              Alert.alert('ผิดพลาด', error?.message || 'ไม่สามารถลบการสนทนาได้');
+              Alert.alert(t('chat.error'), error?.message || t('chat.deleteConversationError'));
             }
           },
         },
@@ -333,7 +335,9 @@ export function ChatListScreen({ navigation }: any) {
     try {
       const { unhideConversation } = await import('../../services/chatService');
       await unhideConversation(c.id, user.uid);
-    } catch {}
+    } catch {
+      Alert.alert(t('chat.error'), t('common.alerts.unhideError'));
+    }
   };
 
   if (isLoading) {
@@ -341,7 +345,7 @@ export function ChatListScreen({ navigation }: any) {
       <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
         <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
         <View style={[styles.chatHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 14 }]}> 
-          <Text style={styles.chatHeaderTitle}>ข้อความ</Text>
+          <Text style={styles.chatHeaderTitle}>{t('chat.messagesTitle')}</Text>
         </View>
         <View style={styles.centered}><ActivityIndicator color={colors.primary} /></View>
       </SafeAreaView>
@@ -352,7 +356,7 @@ export function ChatListScreen({ navigation }: any) {
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
       <StatusBar backgroundColor={headerBackground} barStyle="light-content" translucent={false} />
       <View style={[styles.chatHeader, { backgroundColor: headerBackground, paddingTop: insets.top + 14 }]}> 
-        <Text style={styles.chatHeaderTitle}>ข้อความ</Text>
+        <Text style={styles.chatHeaderTitle}>{t('chat.messagesTitle')}</Text>
         {hidden.length > 0 && (
           <TouchableOpacity onPress={() => setShowHidden(true)} style={styles.hiddenBtn}>
             <Ionicons name="eye-off-outline" size={18} color="rgba(255,255,255,0.85)" />
@@ -365,7 +369,7 @@ export function ChatListScreen({ navigation }: any) {
         <Ionicons name="search-outline" size={18} color={colors.textMuted} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
-          placeholder="ค้นหาการสนทนา..."
+          placeholder={t('chat.searchPlaceholder')}
           placeholderTextColor={colors.textMuted}
           value={search}
           onChangeText={setSearch}
@@ -381,9 +385,9 @@ export function ChatListScreen({ navigation }: any) {
         <FirstVisitTip
           storageKey={`first_tip_chat_${user.uid}`}
           icon="chatbubbles-outline"
-          title="ข้อความทั้งหมดจะถูกรวมไว้ที่นี่"
-          description="เมื่อคุณติดต่อจากหน้าโพสต์ ระบบจะสร้างห้องแชทให้อัตโนมัติ คุณปัดเพื่อซ่อนหรือลบห้องได้ และกลับมาดูภาพรวมการใช้งานจากคู่มือได้ทุกเมื่อ"
-          actionLabel="ดูคู่มือ"
+          title={t('chat.firstVisitTipTitle')}
+          description={t('chat.firstVisitTipDescription')}
+          actionLabel={t('chat.viewGuide')}
           onAction={onboardingSurveyEnabled ? () => navigation.navigate('OnboardingSurvey') : undefined}
           containerStyle={{ marginHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: 4 }}
         />
@@ -394,20 +398,14 @@ export function ChatListScreen({ navigation }: any) {
       {visible.length === 0 && !search ? (
         <View style={styles.centered}>
           <Text style={{ fontSize: 48, marginBottom: 12 }}>💬</Text>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>ยังไม่มีข้อความ</Text>
-          <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
-            เมื่อคุณติดต่อกับผู้โพสต์ ข้อความจะแสดงที่นี่
-          </Text>
-          <Text style={[styles.swipeHint, { color: colors.textMuted }]}>
-            💡 ปัดซ้าย = ลบ · ปัดขวา = ซ่อน
-          </Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('chat.noMessages')}</Text>
+          <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>{t('chat.noMessagesDescription')}</Text>
+          <Text style={[styles.swipeHint, { color: colors.textMuted }]}>{t('chat.swipeHint')}</Text>
         </View>
       ) : (
         <>
           {visible.length > 0 && (
-            <Text style={[styles.swipeHintInline, { color: colors.textMuted }]}>
-              💡 ปัดซ้าย = ลบ · ปัดขวา = ซ่อน
-            </Text>
+            <Text style={[styles.swipeHintInline, { color: colors.textMuted }]}>{t('chat.swipeHint')}</Text>
           )}
           <FlatList
             ref={listRef}
@@ -436,12 +434,12 @@ export function ChatListScreen({ navigation }: any) {
             <TouchableOpacity onPress={() => setShowHidden(false)} style={{ padding: 4 }}>
               <Ionicons name="arrow-back" size={24} color="#FFF" />
             </TouchableOpacity>
-            <Text style={[styles.chatHeaderTitle, { marginLeft: 8 }]}>แชทที่ซ่อน ({hidden.length})</Text>
+            <Text style={[styles.chatHeaderTitle, { marginLeft: 8 }]}>{t('chat.hiddenChatsTitle', { count: String(hidden.length) })}</Text>
             <View style={{ width: 32 }} />
           </View>
           {hidden.length === 0 ? (
             <View style={styles.centered}>
-              <Text style={{ color: colors.textSecondary }}>ไม่มีแชทที่ซ่อน</Text>
+              <Text style={{ color: colors.textSecondary }}>{t('chat.noHiddenChats')}</Text>
             </View>
           ) : (
             <FlatList
@@ -453,14 +451,14 @@ export function ChatListScreen({ navigation }: any) {
                   <View style={[styles.convRow, { backgroundColor: colors.card, borderBottomColor: colors.borderLight }]}>
                     <Avatar uri={other?.photoURL} name={other?.displayName || '?'} size={48} />
                     <View style={{ flex: 1, marginLeft: 12 }}>
-                      <Text style={[styles.convName, { color: colors.text }]}>{other?.displayName || other?.name || 'ผู้ใช้'}</Text>
+                      <Text style={[styles.convName, { color: colors.text }]}>{other?.displayName || other?.name || t('chat.unknownUser')}</Text>
                       <Text style={[styles.convMsg, { color: colors.textSecondary }]} numberOfLines={1}>{item.lastMessage || ''}</Text>
                     </View>
                     <TouchableOpacity
                       style={[styles.unhideBtn, { backgroundColor: colors.primaryBackground, borderColor: colors.primary }]}
                       onPress={() => unhide(item)}
                     >
-                      <Text style={[styles.unhideBtnText, { color: colors.primary }]}>นำกลับ</Text>
+                      <Text style={[styles.unhideBtnText, { color: colors.primary }]}>{t('chat.unhide')}</Text>
                     </TouchableOpacity>
                   </View>
                 );
@@ -489,11 +487,12 @@ function MessageBubble({
   onLongPress: () => void;
   onImagePress: (uri: string) => void;
 }) {
+  const { t, resolvedLanguage } = useI18n();
   const isDeleted = (msg as any).isDeleted;
   const hasImage = (msg as any).imageUrl;
   const hasDocument = Boolean((msg as any).fileUrl) && ['document', 'saved_document'].includes((msg as any).type || '');
   const hasLocation = (msg as any).type === 'location' && Boolean((msg as any).location);
-  const time = msg.createdAt ? formatTime(msg.createdAt) : '';
+  const time = msg.createdAt ? formatTime(msg.createdAt, resolvedLanguage) : ''
 
   return (
     <View style={[styles.bubbleWrap, isOwn ? styles.bubbleWrapOwn : styles.bubbleWrapOther]}>
@@ -509,23 +508,21 @@ function MessageBubble({
         ]}
       >
         {isDeleted ? (
-          <Text style={[styles.deletedText, { color: isOwn ? 'rgba(255,255,255,0.6)' : colors.textMuted }]}>
-            🗑 ข้อความนี้ถูกลบแล้ว
-          </Text>
+          <Text style={[styles.deletedText, { color: isOwn ? 'rgba(255,255,255,0.6)' : colors.textMuted }]}>{t('chat.messageDeleted')}</Text>
         ) : hasImage ? (
           <TouchableOpacity
             onPress={() => onImagePress((msg as any).imageUrl)}
             activeOpacity={0.9}
           >
-            <Image source={{ uri: (msg as any).imageUrl }} style={styles.msgImage} resizeMode="cover" />
+            <Image source={{ uri: (msg as any).imageUrl }} style={styles.msgImage} resizeMode="cover" onError={() => {}} />
             <View style={styles.imageHintBadge}>
               <Ionicons name="open-outline" size={12} color="#FFF" />
-              <Text style={styles.imageHintText}>แตะเพื่อเปิด</Text>
+              <Text style={styles.imageHintText}>{t('chat.tapToOpen')}</Text>
             </View>
           </TouchableOpacity>
         ) : hasDocument ? (
           <TouchableOpacity
-            onPress={() => Linking.openURL((msg as any).fileUrl).catch(() => Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเปิดเอกสารได้'))}
+            onPress={() => Linking.openURL((msg as any).fileUrl).catch(() => Alert.alert(t('chat.error'), t('chat.openDocError')))}
             activeOpacity={0.9}
             style={[styles.docBubble, { borderColor: isOwn ? 'rgba(255,255,255,0.25)' : colors.border }]}
           >
@@ -533,15 +530,15 @@ function MessageBubble({
               <Ionicons name="document-text-outline" size={20} color={isOwn ? '#FFF' : colors.primary} />
             </View>
             <View style={styles.docMeta}>
-              <Text style={[styles.docName, { color: isOwn ? '#FFF' : colors.text }]} numberOfLines={1}>{(msg as any).fileName || 'เอกสารแนบ'}</Text>
-              <Text style={[styles.docHint, { color: isOwn ? 'rgba(255,255,255,0.72)' : colors.textMuted }]}>แตะเพื่อเปิดเอกสาร</Text>
+              <Text style={[styles.docName, { color: isOwn ? '#FFF' : colors.text }]} numberOfLines={1}>{(msg as any).fileName || t('chat.attachedDocument')}</Text>
+              <Text style={[styles.docHint, { color: isOwn ? 'rgba(255,255,255,0.72)' : colors.textMuted }]}>{t('chat.tapToOpenDocument')}</Text>
             </View>
           </TouchableOpacity>
         ) : hasLocation ? (
           <TouchableOpacity
             onPress={() => {
               const location = (msg as any).location;
-              Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`).catch(() => Alert.alert('ข้อผิดพลาด', 'ไม่สามารถเปิดแผนที่ได้'));
+              Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`).catch(() => Alert.alert(t('chat.error'), t('chat.openMapError')));
             }}
             activeOpacity={0.9}
             style={[styles.docBubble, { borderColor: isOwn ? 'rgba(255,255,255,0.25)' : colors.border }]}
@@ -550,8 +547,8 @@ function MessageBubble({
               <Ionicons name="location-outline" size={20} color={isOwn ? '#FFF' : colors.primary} />
             </View>
             <View style={styles.docMeta}>
-              <Text style={[styles.docName, { color: isOwn ? '#FFF' : colors.text }]} numberOfLines={2}>{(msg as any).location.address || 'ตำแหน่งที่ปักหมุด'}</Text>
-              <Text style={[styles.docHint, { color: isOwn ? 'rgba(255,255,255,0.72)' : colors.textMuted }]}>แตะเพื่อเปิดในแผนที่</Text>
+              <Text style={[styles.docName, { color: isOwn ? '#FFF' : colors.text }]} numberOfLines={2}>{(msg as any).location.address || t('chat.pinnedLocation')}</Text>
+              <Text style={[styles.docHint, { color: isOwn ? 'rgba(255,255,255,0.72)' : colors.textMuted }]}>{t('chat.tapToOpenMap')}</Text>
             </View>
           </TouchableOpacity>
         ) : (
@@ -569,8 +566,15 @@ function MessageBubble({
 // CHAT ROOM SCREEN
 // ============================================
 export function ChatRoomScreen({ navigation, route }: any) {
+  const { t, resolvedLanguage } = useI18n();
+  const QUICK_REPLY_TEMPLATES = useMemo(() => [
+    t('chat.quickReplyInterested'),
+    t('chat.quickReplyDocsSent'),
+    t('chat.quickReplyMoreDetails'),
+    t('chat.quickReplyWhenToChat'),
+  ], [t]);
   useScreenPerformance('ChatRoom');
-  const { conversationId, recipientId, recipientName, recipientPhoto, jobTitle } = route.params;
+  const { conversationId, recipientId, recipientName, recipientPhoto, jobTitle, jobId: routeJobId } = route.params;
   const { user } = useAuth();
   const { colors } = useTheme();
   const { setActiveConversationId } = useChatNotification();
@@ -589,6 +593,8 @@ export function ChatRoomScreen({ navigation, route }: any) {
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [savedDocuments, setSavedDocuments] = useState<SavedDocument[]>([]);
   const [isLoadingSavedDocs, setIsLoadingSavedDocs] = useState(false);
+  const [conversationJobId, setConversationJobId] = useState<string | null>(routeJobId || null);
+  const [conversationJobTitle, setConversationJobTitle] = useState<string | null>(jobTitle || null);
   const flatRef = useRef<FlatList>(null);
 
   const baseScale = useRef(new Animated.Value(1)).current;
@@ -639,7 +645,9 @@ export function ChatRoomScreen({ navigation, route }: any) {
     const checkAvailability = async () => {
       const state = await getConversationChatAvailability(conversationId);
       if (!isMounted) return;
-      setChatLockReason(state.isLocked ? (state.reason || 'แชทนี้ถูกปิดแล้ว') : null);
+      setChatLockReason(state.isLocked ? (state.reason || t('chat.chatClosed')) : null);
+      setConversationJobId(state.jobId || routeJobId || null);
+      setConversationJobTitle(state.jobTitle || jobTitle || null);
     };
 
     checkAvailability();
@@ -650,9 +658,17 @@ export function ChatRoomScreen({ navigation, route }: any) {
     };
   }, [conversationId]);
 
+  const shouldLockChatFromError = (message?: string) => {
+    if (!message) return false;
+    return message.includes('แชทนี้ถูกปิด')
+      || message.includes('งานปิดรับ')
+      || message.includes('งานถูกลบ')
+      || message.includes('งานหมดอายุ');
+  };
+
   const sendTextMessage = async (messageText: string) => {
-    const t = messageText.trim();
-    if (!t || isSending || !user?.uid || chatLockReason) return;
+    const trimmed = messageText.trim();
+    if (!trimmed || isSending || !user?.uid || chatLockReason) return false;
     setIsSending(true);
     try {
       await trackEvent({
@@ -664,23 +680,30 @@ export function ChatRoomScreen({ navigation, route }: any) {
         props: {
           source: 'chat_room',
           messageType: 'text',
-          textLength: t.length,
+          textLength: trimmed.length,
         },
       });
 
-      await sendMessage(conversationId, user.uid, user.displayName || 'ผู้ใช้', t);
+      await sendMessage(conversationId, user.uid, user.displayName || t('chat.unknownUser'), trimmed);
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
+      return true;
     } catch (error: any) {
-      setChatLockReason(error?.message || 'แชทนี้ถูกปิดแล้ว');
-      Alert.alert('ส่งข้อความไม่ได้', error?.message || 'แชทนี้ถูกปิดแล้ว');
+      const errorMessage = error?.message || t('chat.chatClosed');
+      if (shouldLockChatFromError(errorMessage)) {
+        setChatLockReason(errorMessage);
+      }
+      Alert.alert(t('chat.sendMessageFailed'), errorMessage);
+      return false;
     } finally { setIsSending(false); }
   };
 
   const handleSend = async () => {
-    const t = text.trim();
-    if (!t || isSending || !user?.uid || chatLockReason) return;
-    setText('');
-    await sendTextMessage(t);
+    const trimmed = text.trim();
+    if (!trimmed || isSending || !user?.uid || chatLockReason) return;
+    const sent = await sendTextMessage(trimmed);
+    if (sent) {
+      setText('');
+    }
   };
 
   const handleQuickReplyPress = async (messageText: string) => {
@@ -708,13 +731,14 @@ export function ChatRoomScreen({ navigation, route }: any) {
           },
         });
 
-        await sendImage(conversationId, user.uid, user.displayName || 'ผู้ใช้', result.assets[0].uri, 'photo.jpg');
-      }
-      catch (error: any) {
-        setChatLockReason(error?.message || 'แชทนี้ถูกปิดแล้ว');
-        Alert.alert('ข้อผิดพลาด', error?.message || 'ส่งรูปภาพไม่สำเร็จ');
-      }
-      finally { setIsSending(false); }
+        await sendImage(conversationId, user.uid, user.displayName || t('chat.unknownUser'), result.assets[0].uri, 'photo.jpg');
+      } catch (error: any) {
+        const errorMessage = error?.message || t('chat.chatClosed');
+        if (shouldLockChatFromError(errorMessage)) {
+          setChatLockReason(errorMessage);
+        }
+        Alert.alert(t('chat.sendImageFailed'), errorMessage);
+      } finally { setIsSending(false); }
     }
   };
 
@@ -724,6 +748,24 @@ export function ChatRoomScreen({ navigation, route }: any) {
       userId: recipientId,
       userName: recipientName,
       userPhoto: recipientPhoto,
+    });
+  };
+
+  const handleOpenConversationJob = () => {
+    const targetJobId = conversationJobId || routeJobId;
+    if (!targetJobId) return;
+
+    if (user?.role === 'hospital') {
+      navigation.navigate('Applicants', {
+        jobId: targetJobId,
+        applicantUserId: recipientId,
+      });
+      return;
+    }
+
+    navigation.navigate('JobDetail', {
+      jobId: targetJobId,
+      source: 'chat_room',
     });
   };
 
@@ -768,7 +810,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
       await sendSavedDocument(
         conversationId,
         user.uid,
-        user.displayName || 'ผู้ใช้',
+        user.displayName || t('chat.unknownUser'),
         document.fileUrl,
         document.fileName || document.name,
         document.type,
@@ -777,7 +819,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
       setShowSavedDocsModal(false);
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (error: any) {
-      Alert.alert('ส่งเอกสารไม่ได้', error?.message || 'กรุณาลองใหม่อีกครั้ง');
+      Alert.alert(t('chat.sendDocFailed'), error?.message || t('chat.pleaseTryAgain'));
     } finally {
       setIsSending(false);
     }
@@ -801,10 +843,14 @@ export function ChatRoomScreen({ navigation, route }: any) {
         },
       });
 
-      await sendLocationMessage(conversationId, user.uid, user.displayName || 'ผู้ใช้', picked);
+      await sendLocationMessage(conversationId, user.uid, user.displayName || t('chat.unknownUser'), picked);
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (error: any) {
-      Alert.alert('ส่งตำแหน่งไม่ได้', error?.message || 'กรุณาลองใหม่อีกครั้ง');
+      const errorMessage = error?.message || t('chat.pleaseTryAgain');
+      if (shouldLockChatFromError(errorMessage)) {
+        setChatLockReason(errorMessage);
+      }
+      Alert.alert(t('chat.sendLocationFailed'), errorMessage);
     } finally {
       setIsSending(false);
     }
@@ -814,7 +860,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
     if (!selectedMsg || !user?.uid) return;
     setShowActions(false);
     try { await deleteMessage(conversationId, selectedMsg.id, user.uid); }
-    catch (e: any) { Alert.alert('ไม่สามารถลบได้', e.message); }
+    catch (e: any) { Alert.alert(t('chat.cannotDelete'), e.message); }
   };
 
   const resetImageViewer = () => {
@@ -883,13 +929,13 @@ export function ChatRoomScreen({ navigation, route }: any) {
     try {
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('บันทึกรูปไม่ได้', 'กรุณาอนุญาตสิทธิ์เข้าถึงรูปภาพก่อน');
+        Alert.alert(t('chat.cannotSaveImage'), t('chat.grantPhotoPermission'));
         return;
       }
 
       const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
       if (!baseDir) {
-        throw new Error('ไม่พบพื้นที่จัดเก็บไฟล์');
+        throw new Error(t('chat.storageNotFound'));
       }
 
       const localPath = `${baseDir}chat_${Date.now()}.jpg`;
@@ -904,9 +950,9 @@ export function ChatRoomScreen({ navigation, route }: any) {
         await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
       }
 
-      Alert.alert('บันทึกสำเร็จ', 'รูปถูกบันทึกไว้ในอัลบั้ม NurseGo แล้ว');
+      Alert.alert(t('chat.savedSuccessfully'), t('chat.imageSavedToAlbum'));
     } catch (error: any) {
-      Alert.alert('บันทึกรูปไม่ได้', error?.message || 'กรุณาลองใหม่อีกครั้ง');
+      Alert.alert(t('chat.cannotSaveImage'), error?.message || t('chat.pleaseTryAgain'));
     } finally {
       setIsDownloadingImage(false);
     }
@@ -924,7 +970,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
           <View style={styles.dateSep}>
             <View style={[styles.dateSepLine, { backgroundColor: colors.border }]} />
             <Text style={[styles.dateSepText, { color: colors.textMuted, backgroundColor: colors.background }]}>
-              {toDate(item.createdAt).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' })}
+              {toDate(item.createdAt).toLocaleDateString(resolvedLanguage === 'th' ? 'th-TH' : 'en-US', { weekday: 'short', day: 'numeric', month: 'short' })}
             </Text>
             <View style={[styles.dateSepLine, { backgroundColor: colors.border }]} />
           </View>
@@ -954,13 +1000,20 @@ export function ChatRoomScreen({ navigation, route }: any) {
           <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.roomHeaderProfileTap} activeOpacity={0.85} onPress={openRecipientProfile} disabled={!recipientId}>
-          <Avatar uri={recipientPhoto} name={recipientName || 'ผู้ใช้'} size={38} />
+          <Avatar uri={recipientPhoto} name={recipientName || t('chat.unknownUser')} size={38} />
           <View style={styles.roomHeaderCenter}>
             <Text style={styles.roomHeaderName} numberOfLines={1}>{recipientName}</Text>
-            {jobTitle && <Text style={styles.roomHeaderSub} numberOfLines={1}>📋 {jobTitle}</Text>}
+            {conversationJobTitle && <Text style={styles.roomHeaderSub} numberOfLines={1}>📋 {conversationJobTitle}</Text>}
           </View>
         </TouchableOpacity>
-        <View style={{ width: 24 }} />
+        {conversationJobId ? (
+          <TouchableOpacity style={styles.roomHeaderActionBtn} onPress={handleOpenConversationJob}>
+            <Ionicons name={user?.role === 'hospital' ? 'checkmark-circle-outline' : 'briefcase-outline'} size={16} color="#FFF" />
+            <Text style={styles.roomHeaderActionText}>{user?.role === 'hospital' ? 'เลือกคนนี้' : 'ดูประกาศ'}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 24 }} />
+        )}
       </View>
 
       <KeyboardAvoidingView
@@ -991,8 +1044,8 @@ export function ChatRoomScreen({ navigation, route }: any) {
               <View style={[styles.quickReplyHeaderIcon, { backgroundColor: colors.primaryBackground || '#E0F2FE' }]}>
                 <Ionicons name="flash-outline" size={14} color={colors.primary} />
               </View>
-              <Text style={[styles.quickReplyHeaderTitle, { color: colors.text }]}>ข้อความลัด</Text>
-              <Text style={[styles.quickReplyHeaderHint, { color: colors.textMuted }]}>แตะเพื่อส่งทันที</Text>
+              <Text style={[styles.quickReplyHeaderTitle, { color: colors.text }]}>{t('chat.quickReplies')}</Text>
+              <Text style={[styles.quickReplyHeaderHint, { color: colors.textMuted }]}>{t('chat.tapToSendInstantly')}</Text>
             </View>
 
             <ScrollView
@@ -1026,7 +1079,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
           </TouchableOpacity>
           <TextInput
             style={[styles.msgInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-            placeholder={chatLockReason ? 'แชทนี้ถูกปิดแล้ว' : 'พิมพ์ข้อความ หรือเลือกข้อความลัดด้านบน'}
+            placeholder={chatLockReason ? t('chat.chatClosed') : t('chat.inputPlaceholder')}
             placeholderTextColor={colors.textMuted}
             value={text}
             onChangeText={setText}
@@ -1048,17 +1101,17 @@ export function ChatRoomScreen({ navigation, route }: any) {
       <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
         <TouchableOpacity style={styles.actionOverlay} onPress={() => setShowActions(false)} activeOpacity={1}>
           <View style={[styles.actionSheet, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>จัดการข้อความ</Text>
+            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>{t('chat.manageMessage')}</Text>
             <TouchableOpacity style={styles.actionItem} onPress={handleDeleteMsg}>
               <Ionicons name="trash-outline" size={20} color="#EF4444" />
-              <Text style={[styles.actionItemText, { color: '#EF4444' }]}>ลบข้อความนี้</Text>
+              <Text style={[styles.actionItemText, { color: '#EF4444' }]}>{t('chat.deleteMessage')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionItem, { borderTopWidth: 1, borderTopColor: colors.border }]}
               onPress={() => setShowActions(false)}
             >
               <Ionicons name="close-outline" size={20} color={colors.textSecondary} />
-              <Text style={[styles.actionItemText, { color: colors.textSecondary }]}>ยกเลิก</Text>
+              <Text style={[styles.actionItemText, { color: colors.textSecondary }]}>{t('chat.cancel')}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -1067,25 +1120,25 @@ export function ChatRoomScreen({ navigation, route }: any) {
       <Modal visible={showAttachmentSheet} transparent animationType="fade" onRequestClose={() => setShowAttachmentSheet(false)}>
         <TouchableOpacity style={styles.actionOverlay} onPress={() => setShowAttachmentSheet(false)} activeOpacity={1}>
           <View style={[styles.actionSheet, { backgroundColor: colors.surface }]}> 
-            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>แนบข้อมูลในแชท</Text>
+            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>{t('chat.attachInChat')}</Text>
             <TouchableOpacity style={styles.actionItem} onPress={handleImagePick}>
               <Ionicons name="image-outline" size={20} color={colors.text} />
-              <Text style={[styles.actionItemText, { color: colors.text }]}>เลือกรูปจากเครื่อง</Text>
+              <Text style={[styles.actionItemText, { color: colors.text }]}>{t('chat.choosePhoto')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionItem} onPress={handleOpenSavedDocuments}>
               <Ionicons name="document-text-outline" size={20} color={colors.text} />
-              <Text style={[styles.actionItemText, { color: colors.text }]}>ส่งเอกสารจากเอกสารของฉัน</Text>
+              <Text style={[styles.actionItemText, { color: colors.text }]}>{t('chat.sendFromMyDocuments')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionItem} onPress={() => { setShowAttachmentSheet(false); setShowMapPicker(true); }}>
               <Ionicons name="location-outline" size={20} color={colors.text} />
-              <Text style={[styles.actionItemText, { color: colors.text }]}>ส่งตำแหน่งแบบปักหมุด</Text>
+              <Text style={[styles.actionItemText, { color: colors.text }]}>{t('chat.sendPinnedLocation')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionItem, { borderTopWidth: 1, borderTopColor: colors.border }]}
               onPress={() => setShowAttachmentSheet(false)}
             >
               <Ionicons name="close-outline" size={20} color={colors.textSecondary} />
-              <Text style={[styles.actionItemText, { color: colors.textSecondary }]}>ยกเลิก</Text>
+              <Text style={[styles.actionItemText, { color: colors.textSecondary }]}>{t('chat.cancel')}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -1094,12 +1147,12 @@ export function ChatRoomScreen({ navigation, route }: any) {
       <Modal visible={showSavedDocsModal} transparent animationType="slide" onRequestClose={() => setShowSavedDocsModal(false)}>
         <TouchableOpacity style={styles.actionOverlay} onPress={() => setShowSavedDocsModal(false)} activeOpacity={1}>
           <TouchableOpacity activeOpacity={1} style={[styles.savedDocsSheet, { backgroundColor: colors.surface }]} onPress={() => {}}>
-            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>เลือกเอกสารที่อัปไว้แล้ว</Text>
+            <Text style={[styles.actionTitle, { color: colors.textSecondary }]}>{t('chat.chooseUploadedDoc')}</Text>
             {isLoadingSavedDocs ? (
               <View style={styles.savedDocsLoading}><ActivityIndicator color={colors.primary} /></View>
             ) : savedDocuments.length === 0 ? (
               <View style={styles.savedDocsEmpty}>
-                <Text style={[styles.savedDocsEmptyText, { color: colors.textSecondary }]}>ยังไม่มีเอกสารในหน้าของฉัน</Text>
+                <Text style={[styles.savedDocsEmptyText, { color: colors.textSecondary }]}>{t('chat.noSavedDocuments')}</Text>
               </View>
             ) : (
               <FlatList
@@ -1173,7 +1226,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
                 <Ionicons name="add" size={20} color="#FFF" />
               </TouchableOpacity>
               <TouchableOpacity style={[styles.imageControlBtn, styles.imageResetBtn]} onPress={resetImageViewer}>
-                <Text style={styles.imageControlText}>รีเซ็ต</Text>
+                <Text style={styles.imageControlText}>{t('chat.reset')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.imageControlBtn, styles.imageDownloadBtn]}
@@ -1185,7 +1238,7 @@ export function ChatRoomScreen({ navigation, route }: any) {
                   : <Ionicons name="download-outline" size={18} color="#FFF" />}
               </TouchableOpacity>
             </View>
-            <Text style={styles.imageViewerHint}>ใช้ 2 นิ้วซูม/ลาก หรือกดปุ่มซูมและดาวน์โหลดด้านบน</Text>
+            <Text style={styles.imageViewerHint}>{t('chat.imageViewerHint')}</Text>
           </View>
         </View>
       </Modal>
@@ -1290,6 +1343,20 @@ const styles = StyleSheet.create({
   roomHeaderCenter: { flex: 1, minWidth: 0 },
   roomHeaderName: { fontSize: 16, fontWeight: '700', color: '#FFF' },
   roomHeaderSub: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 1 },
+  roomHeaderActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  roomHeaderActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFF',
+  },
 
   msgList: { paddingHorizontal: 8, paddingVertical: 12, gap: 2 },
   bubbleWrap: { flexDirection: 'row', marginVertical: 2 },

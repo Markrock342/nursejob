@@ -13,6 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { KittenButton as Button, Input, ErrorModal, TermsConsentModal } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
+import { useI18n } from '../../i18n';
 import { AuthStackParamList, LegalConsentRecord } from '../../types';
 import { sendOTP, isValidThaiPhone } from '../../services/otpService';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,6 +34,7 @@ interface Props {
 // ============================================
 export default function RegisterScreen({ navigation }: Props) {
   const { colors } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // Form State
   const [phone, setPhone] = useState('');
@@ -68,9 +70,9 @@ export default function RegisterScreen({ navigation }: Props) {
     const cleanedPhone = phone.replace(/\D/g, '');
 
     if (!cleanedPhone) {
-      newErrors.phone = 'กรุณากรอกเบอร์โทรศัพท์';
+      newErrors.phone = t('auth.register.phoneRequired');
     } else if (!isValidThaiPhone(cleanedPhone)) {
-      newErrors.phone = 'รูปแบบเบอร์โทรไม่ถูกต้อง (เช่น 08X-XXX-XXXX)';
+      newErrors.phone = t('auth.register.phoneInvalid');
     }
 
     setErrors(newErrors);
@@ -126,11 +128,11 @@ export default function RegisterScreen({ navigation }: Props) {
           },
         });
       } else {
-        setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
+        setErrorMessage(result.error || t('auth.register.otpSendFailedMessage'));
         setShowErrorModal(true);
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
+      setErrorMessage(err.message || t('auth.register.genericError'));
       setShowErrorModal(true);
     } finally {
       setIsLoading(false);
@@ -160,10 +162,10 @@ export default function RegisterScreen({ navigation }: Props) {
               style={styles.backButton}
               onPress={() => navigation.goBack()}
             >
-              <Text style={styles.backButtonText}>← ย้อนกลับ</Text>
+              <Text style={styles.backButtonText}>{`← ${t('auth.register.back')}`}</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>สมัครสมาชิก</Text>
-            <Text style={styles.subtitle}>กรอกเบอร์โทรศัพท์เพื่อรับรหัส OTP</Text>
+            <Text style={styles.title}>{t('auth.register.title')}</Text>
+            <Text style={styles.subtitle}>{t('auth.register.subtitle')}</Text>
           </View>
 
           {/* Illustration */}
@@ -179,19 +181,19 @@ export default function RegisterScreen({ navigation }: Props) {
             <View style={styles.infoBox}>
               <Ionicons name="information-circle-outline" size={20} color={COLORS.black} />
               <Text style={styles.infoText}>
-                เราจะส่งรหัส OTP 6 หลักไปยังเบอร์โทรศัพท์ของคุณเพื่อยืนยันตัวตน
+                {t('auth.register.info')}
               </Text>
             </View>
 
             {/* Phone Input */}
             <Input
-              label="เบอร์โทรศัพท์"
+              label={t('auth.register.phoneLabel')}
               value={phone}
               onChangeText={(text) => {
                 setPhone(formatPhoneInput(text));
                 if (errors.phone) setErrors({ ...errors, phone: '' });
               }}
-              placeholder="08X-XXX-XXXX"
+              placeholder={t('auth.register.phonePlaceholder')}
               keyboardType="phone-pad"
               error={errors.phone}
               icon={<Text style={styles.flagIcon}>🇹🇭</Text>}
@@ -207,7 +209,7 @@ export default function RegisterScreen({ navigation }: Props) {
               style={styles.continueButton}
             >
               <Text style={{color: COLORS.white, fontWeight: '600'}}>
-                {isLoading ? 'กำลังส่ง OTP...' : 'ขอรหัส OTP'}
+                {isLoading ? t('auth.register.requestOtpLoading') : t('auth.register.requestOtp')}
               </Text>
               {!isLoading && (
                 <Ionicons name="arrow-forward" size={20} color={COLORS.white} style={{marginLeft: 8}} />
@@ -216,15 +218,15 @@ export default function RegisterScreen({ navigation }: Props) {
 
             {/* Note */}
             <Text style={styles.noteText} >
-              📱 รองรับเบอร์ไทยที่ขึ้นต้นด้วย 06, 08, 09
+              {`📱 ${t('auth.register.note')}`}
             </Text>
           </View>
 
           {/* Login Link */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>มีบัญชีอยู่แล้ว? </Text>
+            <Text style={styles.footerText}>{t('auth.register.haveAccount')} </Text>
             <TouchableOpacity onPress={handleLogin}>
-              <Text style={styles.loginLink}>เข้าสู่ระบบ</Text>
+              <Text style={styles.loginLink}>{t('auth.register.loginLink')}</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -233,7 +235,7 @@ export default function RegisterScreen({ navigation }: Props) {
       {/* Error Modal */}
       <ErrorModal
         visible={showErrorModal}
-        title="ส่ง OTP ไม่สำเร็จ"
+        title={t('auth.register.otpSendFailedTitle')}
         message={errorMessage}
         onClose={() => setShowErrorModal(false)}
       />

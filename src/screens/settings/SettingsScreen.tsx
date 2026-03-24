@@ -26,7 +26,7 @@ import { useOnboardingSurveyEnabled } from '../../hooks/useOnboardingSurveyEnabl
 import { deleteUserAccount, updateUserPrivacy } from '../../services/authService';
 import { clearPushTokenForUser } from '../../services/notificationService';
 import { AppSettings, defaultAppSettings, loadAppSettings, mergeAppSettings, saveAppSettings } from '../../services/settingsService';
-import { getLaunchQuotaSummary, getUserSubscription, getSubscriptionStatusDisplay, LaunchQuotaSummary, upgradeToPremium } from '../../services/subscriptionService';
+import { getLaunchQuotaSummary, getUserSubscription, getSubscriptionStatusDisplay, LaunchQuotaSummary, subscribeLaunchUsageLimitsConfig, upgradeToPremium } from '../../services/subscriptionService';
 import { Subscription, SUBSCRIPTION_PLANS } from '../../types';
 import {
   CommerceAccessStatus,
@@ -38,11 +38,13 @@ import {
   updateCommerceMonetizationMode,
 } from '../../services/commerceService';
 import { ConfirmModal, SuccessModal, ErrorModal } from '../../components/common';
+import { useI18n, type LanguagePreference } from '../../i18n';
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
   const { user, logout, updateUser } = useAuth();
   const { themeMode, setThemeMode, colors, isDark } = useTheme();
+  const { t, languagePreference, resolvedLanguage, setLanguagePreference } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
   const { registerForNotifications, clearNotifications } = useNotifications();
@@ -66,11 +68,21 @@ export default function SettingsScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
 
   useEffect(() => {
     void loadSettings();
     void loadSubscription();
-  }, [user?.uid, themeMode]);
+  }, [user?.uid, themeMode, languagePreference]);
+
+  const resolvedLanguageLabel = resolvedLanguage === 'th'
+    ? t('common.language.thai')
+    : t('common.language.english');
+  const languageSubtitle = languagePreference === 'system'
+    ? t('common.language.systemWithResolved', { language: resolvedLanguageLabel })
+    : languagePreference === 'th'
+      ? t('common.language.thai')
+      : t('common.language.english');
 
   const loadSubscription = async () => {
     if (!user?.uid) return;
@@ -87,6 +99,18 @@ export default function SettingsScreen() {
     setCommerceAdminSettings(adminSettings);
     setLaunchQuotaSummary(quotaSummary);
   };
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+
+    const unsubscribe = subscribeLaunchUsageLimitsConfig(() => {
+      void getLaunchQuotaSummary(user.uid)
+        .then((summary) => setLaunchQuotaSummary(summary))
+        .catch((error) => console.error('Error refreshing settings launch quota summary', error));
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   const refreshCommerceState = async () => {
     const [commerce, adminSettings] = await Promise.all([
@@ -105,6 +129,7 @@ export default function SettingsScreen() {
         preferences: {
           ...savedSettings.preferences,
           theme: themeMode,
+          language: languagePreference,
         },
         notifications: {
           ...savedSettings.notifications,
@@ -163,7 +188,7 @@ export default function SettingsScreen() {
     } catch (error) {
       console.error('Error saving notification settings:', error);
       await saveSettings(previousSettings);
-      setErrorMessage('บันทึกการตั้งค่าการแจ้งเตือนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      setErrorMessage(t('settings.errors.notificationsSaveFailed'));
       setShowErrorModal(true);
     }
   };
@@ -185,9 +210,36 @@ export default function SettingsScreen() {
       } catch (error) {
         console.error('Error saving privacy to Firestore:', error);
         await saveSettings(previousSettings);
-        setErrorMessage('บันทึกค่าความเป็นส่วนตัวไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        setErrorMessage(t('settings.errors.privacySaveFailed'));
         setShowErrorModal(true);
       }
+    }
+  };
+
+  const handleLanguageSelection = async (nextLanguage: LanguagePreference) => {
+    const previousLanguage = settings.preferences.language;
+    setSettings((current) => mergeAppSettings({
+      ...current,
+      preferences: {
+        ...current.preferences,
+        language: nextLanguage,
+      },
+    }));
+
+    try {
+      await setLanguagePreference(nextLanguage);
+      setShowLanguageModal(false);
+    } catch (error) {
+      console.error('Error saving language preference:', error);
+      setSettings((current) => mergeAppSettings({
+        ...current,
+        preferences: {
+          ...current.preferences,
+          language: previousLanguage,
+        },
+      }));
+      setErrorMessage(t('settings.errors.languageSaveFailed'));
+      setShowErrorModal(true);
     }
   };
 
@@ -215,10 +267,10 @@ export default function SettingsScreen() {
       setIsUpdatingCommerceMode(true);
       await updateCommerceMonetizationMode(user.uid, mode);
       await refreshCommerceState();
-      Alert.alert('อัปเดตแล้ว', 'บันทึกโหมดการเปิดชำระเงินเรียบร้อยแล้ว');
+      Alert.alert(t('settings.commerce.updatedTitle'), t('settings.commerce.updatedMessage'));
     } catch (error) {
       console.error('Error updating commerce mode:', error);
-      Alert.alert('อัปเดตไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
+      Alert.alert(t('settings.errors.commerceUpdateFailedTitle'), t('settings.errors.commerceUpdateFailedMessage'));
     } finally {
       setIsUpdatingCommerceMode(false);
     }
@@ -232,7 +284,7 @@ export default function SettingsScreen() {
       setShowSuccessModal(true);
     } catch (error: any) {
       setShowDeleteModal(false);
-      setErrorMessage(error.message || 'ไม่สามารถลบบัญชีได้ กรุณาลองใหม่');
+      setErrorMessage(error.message || t('settings.errors.deleteAccountFailed'));
       setShowErrorModal(true);
     } finally {
       setIsDeleting(false);
@@ -318,7 +370,7 @@ export default function SettingsScreen() {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>ตั้งค่า</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('settings.title')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -348,19 +400,19 @@ export default function SettingsScreen() {
                       <Text style={styles.subscriptionExpires}>ช่วงเปิดตัวใช้งานได้โดยไม่เสียค่าใช้จ่าย แต่มีโควตารายเดือนตามประเภทบัญชี</Text>
                     ) : null}
                   </View>
-                  {subscription.plan === 'free' ? (
+                  {subscription.plan === 'free' && commerceStatus?.billingProviderReady ? (
                     <TouchableOpacity
                       style={styles.upgradeBtn}
                       onPress={() => (navigation as any).navigate('Shop')}
                     >
                       <Ionicons name="star" size={16} color="#FFD700" />
-                      <Text style={styles.upgradeBtnText}>{commerceStatus?.freeAccessEnabled ? 'ดูสิทธิ์ที่พร้อมใช้' : 'อัปเกรด'}</Text>
+                      <Text style={styles.upgradeBtnText}>{'อัปเกรด'}</Text>
                     </TouchableOpacity>
-                  ) : (
+                  ) : subscription.plan !== 'free' ? (
                     <View style={styles.premiumBadge}>
                       <Ionicons name="checkmark-circle" size={20} color="#4ADE80" />
                     </View>
-                  )}
+                  ) : null}
                 </View>
 
                 <View style={styles.planDetails}>
@@ -396,118 +448,127 @@ export default function SettingsScreen() {
         </View>
 
         {/* Notifications */}
-        <SectionHeader title="การแจ้งเตือน" />
+        <SectionHeader title={t('settings.sections.notifications')} />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
           <SettingRow
             icon="notifications"
-            title="การแจ้งเตือน Push"
-            subtitle="เปิด/ปิดการแจ้งเตือนทั้งหมด"
+            title={t('settings.rows.pushNotificationsTitle')}
+            subtitle={t('settings.rows.pushNotificationsSubtitle')}
             value={settings.notifications.pushEnabled}
             onValueChange={(v) => updateNotification('pushEnabled', v)}
           />
           <SettingRow
             icon="briefcase"
-            title="งานใหม่"
-            subtitle="แจ้งเตือนเมื่อมีงานที่ตรงกับความสนใจ"
+            title={t('settings.rows.newJobsTitle')}
+            subtitle={t('settings.rows.newJobsSubtitle')}
             value={settings.notifications.newJobs}
             onValueChange={(v) => updateNotification('newJobs', v)}
           />
           <SettingRow
             icon="chatbubble"
-            title="ข้อความ"
-            subtitle="แจ้งเตือนเมื่อได้รับข้อความใหม่"
+            title={t('settings.rows.messagesTitle')}
+            subtitle={t('settings.rows.messagesSubtitle')}
             value={settings.notifications.messages}
             onValueChange={(v) => updateNotification('messages', v)}
           />
           <SettingRow
             icon="document-text"
-            title="สถานะการสมัคร"
-            subtitle="แจ้งเตือนเมื่อมีการอัปเดตใบสมัคร"
+            title={t('settings.rows.applicationsTitle')}
+            subtitle={t('settings.rows.applicationsSubtitle')}
             value={settings.notifications.applications}
             onValueChange={(v) => updateNotification('applications', v)}
           />
           <SettingRow
             icon="megaphone"
-            title="โปรโมชั่น"
-            subtitle="รับข่าวสารและโปรโมชัน"
+            title={t('settings.rows.marketingTitle')}
+            subtitle={t('settings.rows.marketingSubtitle')}
             value={settings.notifications.marketing}
             onValueChange={(v) => updateNotification('marketing', v)}
           />
           <SettingRow
             icon="location"
-            title="งานใกล้คุณ"
-            subtitle="รับแจ้งเตือนงานใกล้คุณได้รวดเร็วตามรัศมีที่ตั้งไว้"
+            title={t('settings.rows.nearbyJobsTitle')}
+            subtitle={t('settings.rows.nearbyJobsSubtitle')}
             onPress={() => (navigation as any).navigate('NearbyJobAlert')}
             showArrow
           />
         </View>
 
         {/* Privacy */}
-        <SectionHeader title="ความเป็นส่วนตัว" />
+        <SectionHeader title={t('settings.sections.privacy')} />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SettingRow
             icon="eye"
-            title="โปรไฟล์สาธารณะ"
-            subtitle="อนุญาตให้โรงพยาบาลดูโปรไฟล์ของคุณ"
+            title={t('settings.rows.publicProfileTitle')}
+            subtitle={t('settings.rows.publicProfileSubtitle')}
             value={settings.privacy.profileVisible}
             onValueChange={(v) => updatePrivacy('profileVisible', v)}
           />
           <SettingRow
             icon="radio-button-on"
-            title="แสดงสถานะออนไลน์"
-            subtitle="ให้ผู้อื่นเห็นว่าคุณออนไลน์อยู่"
+            title={t('settings.rows.onlineStatusTitle')}
+            subtitle={t('settings.rows.onlineStatusSubtitle')}
             value={settings.privacy.showOnlineStatus}
             onValueChange={(v) => updatePrivacy('showOnlineStatus', v)}
           />
         </View>
 
         {/* Theme */}
-        <SectionHeader title="ธีมและการแสดงผล" />
+        <SectionHeader title={t('settings.sections.appearance')} />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SettingRow
+            icon="language"
+            title={t('settings.language.title')}
+            subtitle={languageSubtitle}
+            onPress={() => setShowLanguageModal(true)}
+            showArrow
+          />
+          <SettingRow
             icon="color-palette"
-            title="ธีม"
-            subtitle={themeMode === 'light' ? 'สว่าง' : themeMode === 'dark' ? 'มืด' : 'ตามระบบ'}
+            title={t('settings.theme.title')}
+            subtitle={themeMode === 'light' ? t('common.theme.light') : themeMode === 'dark' ? t('common.theme.dark') : t('common.theme.system')}
             onPress={() => setShowThemeModal(true)}
             showArrow
           />
         </View>
 
         {/* Support */}
-        <SectionHeader title="ช่วยเหลือและสนับสนุน" />
+        <SectionHeader title={t('settings.sections.support')} />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <SettingRow
-            icon="sparkles-outline"
-            title={getCommerceEntryTitle(commerceStatus)}
-            subtitle={getCommerceEntrySubtitle(commerceStatus)}
-            onPress={() => (navigation as any).navigate('Shop')}
-            showArrow
-          />
+          {commerceStatus?.billingProviderReady && (
+            <SettingRow
+              icon="sparkles-outline"
+              title={getCommerceEntryTitle(commerceStatus)}
+              subtitle={getCommerceEntrySubtitle(commerceStatus)}
+              onPress={() => (navigation as any).navigate('Shop')}
+              showArrow
+            />
+          )}
           {onboardingSurveyEnabled ? (
             <SettingRow
               icon="sparkles"
-              title="คู่มือใช้งานแบบเร็ว"
-              subtitle="ดูภาพรวมฟีเจอร์สำคัญและขั้นตอนใช้งานที่ช่วยให้ใช้งานได้คล่องขึ้น"
+              title={t('settings.rows.quickGuideTitle')}
+              subtitle={t('settings.rows.quickGuideSubtitle')}
               onPress={() => (navigation as any).navigate('OnboardingSurvey')}
               showArrow
             />
           ) : null}
           <SettingRow
             icon="help-circle"
-            title="คำถามที่พบบ่อย"
+            title={t('settings.rows.faqTitle')}
             onPress={() => (navigation as any).navigate('Help')}
             showArrow
           />
           <SettingRow
             icon="chatbox-ellipses"
-            title="ส่ง Feedback / รีวิว"
-            subtitle="บอกเราว่าคุณคิดอย่างไร"
+            title={t('settings.rows.feedbackTitle')}
+            subtitle={t('settings.rows.feedbackSubtitle')}
             onPress={() => (navigation as any).navigate('Feedback')}
             showArrow
           />
           <SettingRow
             icon="mail"
-            title="ติดต่อเรา"
+            title={t('settings.rows.contactTitle')}
             subtitle="support@nursego.co"
             onPress={() => Linking.openURL('mailto:support@nursego.co')}
             showArrow
@@ -516,40 +577,40 @@ export default function SettingsScreen() {
 
         {user?.role === 'admin' && (
           <>
-            <SectionHeader title="ผู้ดูแลระบบ: การเปิดชำระเงิน" />
+            <SectionHeader title={t('settings.sections.adminCommerce')} />
             <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
               <View style={[styles.row, { backgroundColor: colors.surface, borderBottomColor: colors.borderLight }]}> 
                 <View style={[styles.rowIcon, { backgroundColor: colors.primaryBackground }]}> 
                   <Ionicons name="hardware-chip" size={20} color={colors.primary} />
                 </View>
                 <View style={styles.rowContent}>
-                  <Text style={[styles.rowTitle, { color: colors.text }]}>สถานะปัจจุบัน</Text>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>{t('settings.commerce.currentStatus')}</Text>
                   <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}> 
                     {commerceStatus?.monetizationEnabled
-                      ? 'เปิดระบบชำระเงินจริง'
+                      ? t('settings.commerce.billingEnabled')
                       : commerceStatus?.transitionReviewRequired
-                        ? 'ถึงเกณฑ์ทบทวนและรออนุมัติ'
-                        : 'ช่วงใช้ฟรี'}
-                    {commerceStatus?.overrideMode === 'auto' ? ' • อัตโนมัติ' : commerceStatus?.overrideMode === 'enabled' ? ' • บังคับเปิด' : ' • บังคับปิด'}
-                    {commerceStatus?.billingActivationBlocked ? ' • ระบบชำระเงินยังไม่พร้อม' : ''}
+                        ? t('settings.commerce.billingReviewPending')
+                        : t('settings.commerce.billingFreePhase')}
+                    {commerceStatus?.overrideMode === 'auto' ? ` • ${t('settings.commerce.modeAuto')}` : commerceStatus?.overrideMode === 'enabled' ? ` • ${t('settings.commerce.modeForcedOn')}` : ` • ${t('settings.commerce.modeForcedOff')}`}
+                    {commerceStatus?.billingActivationBlocked ? ` • ${t('settings.commerce.billingUnavailable')}` : ''}
                   </Text>
                 </View>
               </View>
               {([
                 {
                   mode: 'auto',
-                  title: 'อัตโนมัติตามเงื่อนไขระบบ',
-                  subtitle: 'ใช้ฟรีต่อ และให้ระบบเตือนเมื่อถึงเวลาทบทวนการเปิดชำระเงิน',
+                  title: t('settings.commerce.autoTitle'),
+                  subtitle: t('settings.commerce.autoSubtitle'),
                 },
                 {
                   mode: 'disabled',
-                  title: 'บังคับใช้ฟรีต่อ',
-                  subtitle: 'ยังไม่เปิดชำระเงินจริง แม้ระบบจะถึงเงื่อนไขแล้ว',
+                  title: t('settings.commerce.disabledTitle'),
+                  subtitle: t('settings.commerce.disabledSubtitle'),
                 },
                 {
                   mode: 'enabled',
-                  title: 'บังคับเปิดชำระเงิน',
-                  subtitle: 'เปิดใช้ได้ต่อเมื่อระบบชำระเงินพร้อมใช้งานแล้ว',
+                  title: t('settings.commerce.enabledTitle'),
+                  subtitle: t('settings.commerce.enabledSubtitle'),
                 },
               ] as const).map((option) => {
                 const isSelected = commerceAdminSettings.monetizationMode === option.mode;
@@ -571,7 +632,7 @@ export default function SettingsScreen() {
                     <View style={styles.rowContent}>
                       <Text style={[styles.rowTitle, { color: colors.text }]}>{option.title}</Text>
                       <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                        {isDisabled ? 'ยังใช้งานไม่ได้จนกว่าช่องทางชำระเงินจริงจะพร้อมใช้งาน' : option.subtitle}
+                        {isDisabled ? t('settings.commerce.enabledBlocked') : option.subtitle}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -582,17 +643,17 @@ export default function SettingsScreen() {
         )}
 
         {/* Legal */}
-        <SectionHeader title="ข้อมูลทางกฎหมาย" />
+        <SectionHeader title={t('settings.sections.legal')} />
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <SettingRow
             icon="document"
-            title="เงื่อนไขการใช้งาน"
+            title={t('settings.rows.termsTitle')}
             onPress={() => (navigation as any).navigate('Terms')}
             showArrow
           />
           <SettingRow
             icon="shield-checkmark"
-            title="นโยบายความเป็นส่วนตัว"
+            title={t('settings.rows.privacyTitle')}
             onPress={() => (navigation as any).navigate('Privacy')}
             showArrow
           />
@@ -601,18 +662,18 @@ export default function SettingsScreen() {
         {/* Account */}
         {user && (
           <>
-            <SectionHeader title="บัญชี" />
+            <SectionHeader title={t('settings.sections.account')} />
             <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <SettingRow
                 icon="log-out"
-                title="ออกจากระบบ"
+                title={t('settings.rows.logoutTitle')}
                 onPress={handleLogout}
                 destructive
               />
               <SettingRow
                 icon="trash"
-                title="ลบบัญชี"
-                subtitle="ลบข้อมูลทั้งหมดอย่างถาวร"
+                title={t('settings.rows.deleteAccountTitle')}
+                subtitle={t('settings.rows.deleteAccountSubtitle')}
                 onPress={handleDeleteAccount}
                 destructive
               />
@@ -623,16 +684,63 @@ export default function SettingsScreen() {
         {/* App Info */}
         <View style={styles.appInfo}>
           <Text style={[styles.appName, { color: colors.primary }]}>NurseGo</Text>
-          <Text style={[styles.appVersion, { color: colors.textSecondary }]}>เวอร์ชัน 1.0.0</Text>
+          <Text style={[styles.appVersion, { color: colors.textSecondary }]}>{t('settings.appInfo.versionPrefix')} 1.0.0</Text>
           <Text style={[styles.copyright, { color: colors.textMuted }]}>© 2025 NurseGo Thailand</Text>
         </View>
       </ScrollView>
+
+      {/* Language Selection Modal */}
+      {showLanguageModal && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.themeModal, { backgroundColor: colors.surface }]}> 
+            <Text style={[styles.themeModalTitle, { color: colors.text }]}>{t('settings.language.pickerTitle')}</Text>
+
+            {([
+              { key: 'system', icon: 'phone-portrait-outline', label: t('common.language.system') },
+              { key: 'th', icon: 'language-outline', label: t('common.language.thai') },
+              { key: 'en', icon: 'globe-outline', label: t('common.language.english') },
+            ] as const).map((option) => {
+              const isSelected = languagePreference === option.key;
+              return (
+                <TouchableOpacity
+                  key={option.key}
+                  style={[
+                    styles.themeOption,
+                    { backgroundColor: colors.background },
+                    isSelected && [styles.themeOptionSelected, { backgroundColor: colors.primaryBackground, borderColor: colors.primary }],
+                  ]}
+                  onPress={() => handleLanguageSelection(option.key)}
+                >
+                  <Ionicons name={option.icon as any} size={24} color={isSelected ? colors.primary : colors.textSecondary} />
+                  <Text
+                    style={[
+                      styles.themeOptionText,
+                      { color: colors.text },
+                      isSelected && styles.themeOptionTextSelected,
+                    ]}
+                  >
+                    {option.key === 'system' ? `${option.label} (${resolvedLanguageLabel})` : option.label}
+                  </Text>
+                  {isSelected ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              style={styles.themeModalClose}
+              onPress={() => setShowLanguageModal(false)}
+            >
+              <Text style={[styles.themeModalCloseText, { color: colors.textSecondary }]}>{t('settings.modals.close')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Theme Selection Modal */}
       {showThemeModal && (
         <View style={styles.modalOverlay}>
           <View style={[styles.themeModal, { backgroundColor: colors.surface }]}> 
-            <Text style={[styles.themeModalTitle, { color: colors.text }]}>เลือกธีม</Text>
+            <Text style={[styles.themeModalTitle, { color: colors.text }]}>{t('common.theme.title')}</Text>
 
             <TouchableOpacity
               style={[
@@ -653,7 +761,7 @@ export default function SettingsScreen() {
                   themeMode === 'light' && styles.themeOptionTextSelected,
                 ]}
               >
-                สว่าง
+                {t('common.theme.light')}
               </Text>
               {themeMode === 'light' ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
             </TouchableOpacity>
@@ -677,7 +785,7 @@ export default function SettingsScreen() {
                   themeMode === 'dark' && styles.themeOptionTextSelected,
                 ]}
               >
-                มืด
+                {t('common.theme.dark')}
               </Text>
               {themeMode === 'dark' ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
             </TouchableOpacity>
@@ -701,7 +809,7 @@ export default function SettingsScreen() {
                   themeMode === 'system' && styles.themeOptionTextSelected,
                 ]}
               >
-                ตามระบบ
+                {t('common.theme.system')}
               </Text>
               {themeMode === 'system' ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
             </TouchableOpacity>
@@ -710,7 +818,7 @@ export default function SettingsScreen() {
               style={styles.themeModalClose}
               onPress={() => setShowThemeModal(false)}
             >
-              <Text style={[styles.themeModalCloseText, { color: colors.textSecondary }]}>ปิด</Text>
+              <Text style={[styles.themeModalCloseText, { color: colors.textSecondary }]}>{t('settings.modals.close')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -719,10 +827,10 @@ export default function SettingsScreen() {
       {/* Logout Confirm Modal */}
       <ConfirmModal
         visible={showLogoutModal}
-        title="ออกจากระบบ"
-        message="คุณต้องการออกจากระบบหรือไม่?"
-        confirmText="ออกจากระบบ"
-        cancelText="ยกเลิก"
+        title={t('settings.modals.logoutTitle')}
+        message={t('settings.modals.logoutMessage')}
+        confirmText={t('common.actions.logout')}
+        cancelText={t('common.actions.cancel')}
         onConfirm={confirmLogout}
         onCancel={() => setShowLogoutModal(false)}
         type="warning"
@@ -731,10 +839,10 @@ export default function SettingsScreen() {
       {/* Delete Account Confirm Modal */}
       <ConfirmModal
         visible={showDeleteModal}
-        title="ลบบัญชี"
-        message="การดำเนินการนี้ไม่สามารถย้อนกลับได้ ข้อมูลทั้งหมดจะถูกลบอย่างถาวร คุณแน่ใจหรือไม่?"
-        confirmText={isDeleting ? 'กำลังลบ...' : 'ลบบัญชี'}
-        cancelText="ยกเลิก"
+        title={t('settings.modals.deleteAccountTitle')}
+        message={t('settings.modals.deleteAccountMessage')}
+        confirmText={isDeleting ? t('settings.modals.deleteAccountLoading') : t('settings.modals.deleteAccountConfirm')}
+        cancelText={t('common.actions.cancel')}
         onConfirm={confirmDeleteAccount}
         onCancel={() => setShowDeleteModal(false)}
         type="danger"

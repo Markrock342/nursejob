@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
-import { Message, Conversation } from '../types';
+import { Message, Conversation, ConversationRecipientInfo } from '../types';
 import { assertAuthUser, isAuthUser } from './security/authGuards';
 import { getJobById } from './jobService';
 import { beginTrackedSubscription, PerformanceMetricOptions, recordQueryRead } from './performanceMetrics';
@@ -26,13 +26,6 @@ export interface ConversationChatAvailability {
   jobId?: string;
   jobTitle?: string;
   jobStatus?: string;
-}
-
-export interface ConversationRecipientInfo {
-  recipientId?: string;
-  recipientName?: string;
-  recipientPhoto?: string;
-  jobTitle?: string;
 }
 
 const CONVERSATION_WINDOW_SIZE = 100;
@@ -204,6 +197,7 @@ export async function getConversationRecipientInfo(
       recipientName: recipientName || 'ผู้ใช้',
       recipientPhoto: recipientPhoto || undefined,
       jobTitle: data.jobTitle,
+      jobId: data.jobId,
     };
   } catch {
     return null;
@@ -412,10 +406,12 @@ export const subscribeToMessages = (
       const data = doc.data();
       // Handle pending serverTimestamp (null) - use current time
       let createdAt: Date;
-      if (data.createdAt) {
+      if (data.createdAt && typeof (data.createdAt as any).toDate === 'function') {
         createdAt = (data.createdAt as Timestamp).toDate();
+      } else if (data.createdAt instanceof Date) {
+        createdAt = data.createdAt;
       } else {
-        // Pending timestamp - use current time for new messages
+        // Pending timestamp or unexpected type - use current time
         createdAt = new Date();
       }
       

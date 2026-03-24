@@ -23,6 +23,7 @@ import { JobPost, ShiftContact, JobFilters, PostShift, UserAdminTag } from '../t
 import { getQueryGeohashes, getDistanceKm, encodeGeohash } from '../utils/geohash';
 import { detectExternalContactSignals } from '../utils/jobPostIntelligence';
 import { assertAuthUser, isAuthUser } from './security/authGuards';
+import { canUserPostToday, incrementPostCount } from './subscriptionService';
 import { beginTrackedSubscription, PerformanceMetricOptions, recordQueryRead } from './performanceMetrics';
 
 // Re-export types for backward compatibility
@@ -558,6 +559,14 @@ export async function createJob(jobData: Partial<JobPost>): Promise<string> {
       }
     }
 
+    // Daily post limit enforcement
+    if (jobData.posterId) {
+      const postStatus = await canUserPostToday(jobData.posterId);
+      if (!postStatus.canPost) {
+        throw new Error(postStatus.reason || 'คุณโพสต์ครบจำนวนที่กำหนดแล้ววันนี้');
+      }
+    }
+
     // Anti-scam validation
     const validation = validateJobPost(jobData);
     if (validation.blocked) {
@@ -588,6 +597,12 @@ export async function createJob(jobData: Partial<JobPost>): Promise<string> {
       viewsCount: 0,
       status: cleanData.status || 'active',
     });
+
+    // Increment daily post count after successful creation
+    if (jobData.posterId) {
+      await incrementPostCount(jobData.posterId).catch(() => {});
+    }
+
     return docRef.id;
   } catch (error: any) {
     if (error?.code === 'permission-denied') {
@@ -624,7 +639,13 @@ export async function updateJob(jobId: string, updates: Partial<JobPost>): Promi
       }
     }
 
-    await updateDoc(docRef, updates);
+    // Clean undefined values — Firestore rejects undefined fields
+    const cleanUpdates: Record<string, any> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) cleanUpdates[key] = value;
+    }
+
+    await updateDoc(docRef, cleanUpdates);
   } catch (error) {
     console.error('Error updating job:', error);
     throw error;
@@ -738,11 +759,17 @@ export async function updateJobStatus(jobId: string, status: 'active' | 'urgent'
         throw new Error(postingState.reason || 'บัญชีนี้ถูกระงับการโพสต์');
       }
     }
-    await updateDoc(docRef, {
+    const updatePayload: Record<string, any> = {
       status,
       isUrgent: status === 'urgent',
       updatedAt: serverTimestamp(),
-    });
+    };
+    // Ensure contactMode exists so Firestore security rules pass
+    // the contact-policy check for reactivated legacy posts.
+    if ((status === 'active' || status === 'urgent') && !data.contactMode) {
+      updatePayload.contactMode = 'in_app';
+    }
+    await updateDoc(docRef, updatePayload);
   } catch (error) {
     console.error('Error updating job status:', error);
     throw error;
@@ -794,6 +821,11 @@ export async function contactForShift(
     const jobData = jobDoc.data();
     const posterId = jobData.posterId;
     if (!posterId) throw new Error('ประกาศนี้ไม่มีข้อมูลผู้โพสต์');
+
+    // Prevent self-application
+    if (userId === posterId) {
+      throw new Error('ไม่สามารถสมัครงานที่ตัวเองโพสต์ได้');
+    }
 
     // Check if already contacted
     const existingQuery = query(

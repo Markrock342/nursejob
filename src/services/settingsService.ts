@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { LanguagePreference } from '../i18n';
 
 export interface AppSettings {
   notifications: {
@@ -13,7 +14,7 @@ export interface AppSettings {
     showOnlineStatus: boolean;
   };
   preferences: {
-    language: 'th' | 'en';
+    language: LanguagePreference;
     theme: 'light' | 'dark' | 'system';
   };
 }
@@ -33,7 +34,7 @@ export const defaultAppSettings: AppSettings = {
     showOnlineStatus: true,
   },
   preferences: {
-    language: 'th',
+    language: 'system',
     theme: 'light',
   },
 };

@@ -131,6 +131,8 @@ service cloud.firestore {
         && request.resource.data.posterId == request.auth.uid
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 200
+        && (!('description' in request.resource.data) || request.resource.data.description.size() <= 5000)
         && request.resource.data.status in ['active', 'urgent']
         && request.resource.data.shiftRate is number
         && request.resource.data.shiftRate >= 0
@@ -177,7 +179,8 @@ service cloud.firestore {
         isAdmin()
       );
       allow create: if isSignedIn()
-        && request.resource.data.interestedUserId == request.auth.uid;
+        && request.resource.data.interestedUserId == request.auth.uid
+        && request.resource.data.interestedUserId != request.resource.data.posterId;
       allow update: if isSignedIn() && (
         (
           (
@@ -246,10 +249,40 @@ service cloud.firestore {
     }
 
     // ==========================================
+    // NURSE SCHEDULE ENTRIES
+    // Manual planner entries are nurse-owned only.
+    // Entries derived from confirmed jobs are materialized client-side in memory,
+    // so client writes are restricted to source == manual.
+    // ==========================================
+    match /nurse_schedule_entries/{entryId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.source == 'manual'
+        && request.resource.data.kind in ['personal_shift', 'availability', 'time_off']
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0;
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          resource.data.userId == request.auth.uid
+          && resource.data.source == 'manual'
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.source == 'manual'
+          && request.resource.data.kind in ['personal_shift', 'availability', 'time_off']
+        )
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // ==========================================
     // REVIEWS
     // ==========================================
     match /reviews/{reviewId} {
-      allow read: if true;
+      allow read: if isSignedIn();
       allow create: if isSignedIn()
         && request.resource.data.reviewerId == request.auth.uid
         && request.resource.data.rating >= 1
@@ -335,7 +368,10 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         resource.data.reporterId == request.auth.uid || isAdmin()
       );
-      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.reporterId != request.resource.data.targetId
+        && request.resource.data.get('reasonText', '').size() <= 1000;
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
@@ -465,6 +501,32 @@ service cloud.firestore {
     match /app_config/{configId} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // ADMIN AUDIT LOGS
+    // Admins can create & read audit trail entries.
+    // Cloud Functions (Admin SDK) bypass these rules.
+    // ==========================================
+    match /admin_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ==========================================
+    // ADMIN BROADCASTS
+    // Broadcasts are created by Cloud Functions only.
+    // Admin can read for dashboard history.
+    // ==========================================
+    match /admin_broadcasts/{broadcastId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+
+      match /{subDoc=**} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
     }
 
   }

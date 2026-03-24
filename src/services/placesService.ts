@@ -6,6 +6,7 @@
 
 import Constants from 'expo-constants';
 import { Linking, Platform } from 'react-native';
+import { getCurrentGooglePlacesLanguage } from '../i18n';
 
 // API Keys
 const GOOGLE_PLACES_API_KEY = Constants.expoConfig?.extra?.googlePlacesApiKey || 
@@ -84,7 +85,7 @@ export async function searchPlacesGoogle(query: string): Promise<PlaceResult[]> 
     const params = new URLSearchParams({
       input: query,
       key: GOOGLE_PLACES_API_KEY,
-      language: 'th',
+      language: getCurrentGooglePlacesLanguage(),
       components: 'country:th',
       // No 'types' filter — returns all: addresses, house numbers, establishments, landmarks
     });
@@ -141,7 +142,7 @@ export async function getPlaceDetailsGoogle(placeId: string): Promise<{
     const params = new URLSearchParams({
       place_id: placeId,
       key: GOOGLE_PLACES_API_KEY,
-      language: 'th',
+      language: getCurrentGooglePlacesLanguage(),
       fields: 'name,formatted_address,geometry,address_components',
     });
 

@@ -1790,60 +1790,53 @@ exports.onNewApplication = functions.firestore
       }
       
       const poster = posterDoc.data();
-      const fcmToken = poster.fcmToken;
       const allowApplicationsPush = canSendPushForPreference(poster, 'applications');
       
       // Get applicant photo for notification display
       const applicantPhoto = application.interestedUserPhoto || '';
-      
-      if (!fcmToken || !allowApplicationsPush) {
-        console.log('⚠️ No FCM token for poster');
-        // Create in-app notification instead
-        await createInAppNotification(job.posterId, {
-          type: 'new_applicant',
-          title: '📩 มีคนรับงานของคุณ!',
-          body: `${application.interestedUserName || 'ผู้สมัคร'} รับงาน "${job.title}"`,
-          data: {
-            jobId: application.jobId,
-            applicationId: context.params.applicationId,
-            senderName: application.interestedUserName || 'ผู้สมัคร',
-            senderPhotoURL: applicantPhoto,
-          },
-        });
-        return null;
-      }
-      
-      // Send FCM push notification
-      const message = {
-        notification: {
-          title: '📩 มีคนรับงานของคุณ!',
-          body: `${application.interestedUserName || 'ผู้สมัคร'} รับงาน "${job.title}"`,
-        },
-        data: {
-          type: 'new_applicant',
-          jobId: application.jobId,
-          applicationId: context.params.applicationId,
-          senderName: application.interestedUserName || 'ผู้สมัคร',
-          senderPhotoURL: applicantPhoto,
-        },
-        token: fcmToken,
+
+      const notifTitle = '📩 มีคนรับงานของคุณ!';
+      const notifBody = `${application.interestedUserName || 'ผู้สมัคร'} รับงาน "${job.title}"`;
+      const notifData = {
+        type: 'new_applicant',
+        jobId: application.jobId,
+        applicationId: context.params.applicationId,
+        senderName: application.interestedUserName || 'ผู้สมัคร',
+        senderPhotoURL: applicantPhoto,
       };
-      
-      await admin.messaging().send(message);
-      console.log('✅ Push notification sent');
-      
-      // Also create in-app notification
+
+      // Always create in-app notification
       await createInAppNotification(job.posterId, {
         type: 'new_applicant',
-        title: '📩 มีคนรับงานของคุณ!',
-        body: `${application.interestedUserName || 'ผู้สมัคร'} รับงาน "${job.title}"`,
-        data: {
-          jobId: application.jobId,
-          applicationId: context.params.applicationId,
-          senderName: application.interestedUserName || 'ผู้สมัคร',
-          senderPhotoURL: applicantPhoto,
-        },
+        title: notifTitle,
+        body: notifBody,
+        data: notifData,
       });
+
+      // Send Expo push (primary)
+      if (allowApplicationsPush && poster.pushToken) {
+        await sendExpoPush(poster.pushToken, notifTitle, notifBody, notifData, 'applications');
+      }
+
+      // FCM fallback
+      if (allowApplicationsPush && poster.fcmToken && !poster.pushToken) {
+        try {
+          await admin.messaging().send({
+            notification: { title: notifTitle, body: notifBody },
+            data: {
+              type: 'new_applicant',
+              jobId: application.jobId || '',
+              applicationId: context.params.applicationId,
+              senderName: application.interestedUserName || 'ผู้สมัคร',
+              senderPhotoURL: applicantPhoto,
+            },
+            token: poster.fcmToken,
+            android: { channelId: 'applications', priority: 'high' },
+          });
+        } catch (fcmErr) {
+          console.warn('FCM error:', fcmErr.message);
+        }
+      }
       
       return null;
     } catch (error) {
@@ -3882,7 +3875,7 @@ async function sendOperationalNotificationToUser(userId, notification) {
   const userSnap = await db.collection('users').doc(userId).get();
   if (!userSnap.exists) return;
   const userData = userSnap.data() || {};
-  if (userData.pushToken) {
+  if (canSendPushForPreference(userData, null) && userData.pushToken) {
     await sendExpoPush(userData.pushToken, notification.title, notification.body, notification.data || {}, 'default');
   }
 }
@@ -4486,7 +4479,11 @@ exports.completeJobAssignment = functions.https.onCall(async (data, context) => 
 });
 
 exports.completeJobAssignmentHttp = functions.https.onRequest(async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
+  const allowedOrigins = ['https://nursego.co', 'https://www.nursego.co'];
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+  }
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
 
@@ -4743,9 +4740,9 @@ exports.onDocumentReviewUpdated = functions.firestore
 
       const userData = userSnap.data() || {};
 
-      if (userData.pushToken) {
+      if (canSendPushForPreference(userData, null) && userData.pushToken) {
         await sendExpoPush(userData.pushToken, title, body, data, 'default');
-      } else if (userData.fcmToken) {
+      } else if (canSendPushForPreference(userData, null) && userData.fcmToken) {
         try {
           await admin.messaging().send({
             notification: { title, body },
@@ -4817,9 +4814,9 @@ exports.notifyJobExpiringSoon = functions.pubsub
           const body = `"${job.title}" จะหมดอายุใน 6 ชั่วโมง ขยายเวลาหรือปิดรับสมัคร?`;
           const pushData = { type: 'job_expiring', jobId: doc.id };
 
-          if (poster.pushToken) {
+          if (canSendPushForPreference(poster, null) && poster.pushToken) {
             await sendExpoPush(poster.pushToken, title, body, pushData);
-          } else if (poster.fcmToken) {
+          } else if (canSendPushForPreference(poster, null) && poster.fcmToken) {
             try {
               await admin.messaging().send({
                 notification: { title, body },
@@ -4852,7 +4849,12 @@ exports.notifyJobExpiringSoon = functions.pubsub
 // The client sends its Firebase ID token; we verify it and return
 // a custom token so the JS SDK auth state can be synced.
 // ============================================
-exports.exchangeToken = functions.https.onCall(async (data, _context) => {
+exports.exchangeToken = functions.https.onCall(async (data, context) => {
+  // Require the caller to be authenticated first
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Authentication required');
+  }
+
   const { idToken } = data;
   if (!idToken || typeof idToken !== 'string') {
     throw new functions.https.HttpsError('invalid-argument', 'idToken required');
@@ -4863,6 +4865,12 @@ exports.exchangeToken = functions.https.onCall(async (data, _context) => {
   } catch {
     throw new functions.https.HttpsError('unauthenticated', 'Invalid or expired token');
   }
+
+  // Verify the ID token UID matches the authenticated caller
+  if (decoded.uid !== context.auth.uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Token UID mismatch');
+  }
+
   const customToken = await admin.auth().createCustomToken(decoded.uid);
   return { customToken };
 });
@@ -4960,7 +4968,11 @@ exports.verifyCustomOTP = functions.https.onCall(async (data, _context) => {
     throw new functions.https.HttpsError('resource-exhausted', 'ลองรหัสผิดมากเกินไป กรุณาขอ OTP ใหม่');
   }
 
-  if (otpData.code !== String(code)) {
+  const storedCode = String(otpData.code).padStart(6, '0');
+  const inputCode = String(code).padStart(6, '0');
+  const codeMatch = storedCode.length === inputCode.length
+    && crypto.timingSafeEqual(Buffer.from(storedCode), Buffer.from(inputCode));
+  if (!codeMatch) {
     await otpDoc.ref.update({ attempts: admin.firestore.FieldValue.increment(1) });
     const remaining = 4 - otpData.attempts;
     throw new functions.https.HttpsError(
@@ -4989,7 +5001,7 @@ exports.verifyCustomOTP = functions.https.onCall(async (data, _context) => {
   }
 
   const customToken = await admin.auth().createCustomToken(uid);
-  return { success: true, customToken, uid };
+  return { success: true, customToken };
 });
 
 // ==========================================
@@ -5062,6 +5074,24 @@ exports.onJobCompletionCreated = functions.firestore
           });
         }),
       ]);
+
+      // Send push to poster
+      const posterData = posterUser || {};
+      if (canSendPushForPreference(posterData, 'applications') && posterData.pushToken) {
+        await sendExpoPush(posterData.pushToken, 'งานจบแล้ว รีวิวได้ทันที',
+          `รีวิว ${hiredUser?.displayName || hiredUserName || 'ผู้ถูกจ้าง'} สำหรับงาน ${jobTitle || 'งานนี้'} ได้เลย`,
+          { type: 'job_completed_review', jobId, completionId: context.params.completionId },
+          'default');
+      }
+
+      // Send push to hired user
+      const hiredData = hiredUser || {};
+      if (canSendPushForPreference(hiredData, 'applications') && hiredData.pushToken) {
+        await sendExpoPush(hiredData.pushToken, 'งานเสร็จแล้ว รีวิวผู้ว่าจ้างได้เลย',
+          `รีวิว ${posterUser?.displayName || posterName || 'ผู้ว่าจ้าง'} สำหรับงาน ${jobTitle || 'งานนี้'} ได้ทันที`,
+          { type: 'job_completed_review', jobId, completionId: context.params.completionId },
+          'default');
+      }
     } catch (error) {
       console.error('onJobCompletionCreated notification error:', error);
     }

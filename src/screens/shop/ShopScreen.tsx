@@ -31,6 +31,7 @@ import {
   getUserSubscription,
   getSubscriptionStatusDisplay,
   LaunchQuotaSummary,
+  subscribeLaunchUsageLimitsConfig,
 } from '../../services/subscriptionService';
 import { getReferralInfo } from '../../services/referralService';
 import {
@@ -53,6 +54,7 @@ import {
   getCommerceAccessStatus,
 } from '../../services/commerceService';
 import { trackEvent } from '../../services/analyticsService';
+import { useI18n } from '../../i18n';
 
 // ============================================
 // Helpers
@@ -77,23 +79,25 @@ const getPlanTone = (plan: string, colors: ThemeColors) => {
   }
 };
 
-const PLAN_AUDIENCE_COPY: Record<string, string> = {
-  free: 'เหมาะกับคนที่เพิ่งเริ่มใช้งานและยังลงประกาศไม่บ่อย',
-  premium: 'คุ้มกับผู้ใช้ทั่วไปที่ต้องการสิทธิ์ใช้งานมากขึ้นโดยไม่ผูกกับสายงานพยาบาลโดยตรง',
-  nurse_pro: 'คุ้มกับพยาบาลที่ลงเวรหรือหางานต่อเนื่องทุกสัปดาห์',
-  hospital_starter: 'คุ้มกับองค์กรที่ลงประกาศเป็นรอบและยังไม่ต้องดันหลายตำแหน่งพร้อมกัน',
-  hospital_pro: 'คุ้มกับองค์กรที่เปิดรับหลายตำแหน่งต่อเนื่องและต้องการความคล่องตัวมากขึ้น',
-  hospital_enterprise: 'คุ้มกับองค์กรที่ต้องดันประกาศหลายชิ้นพร้อมกันตลอดเดือน',
-};
+const getPlanAudienceCopy = (t: any): Record<string, string> => ({
+  free: t('shop.audienceFree'),
+  premium: t('shop.audiencePremium'),
+  nurse_pro: t('shop.audienceNursePro'),
+  hospital_starter: t('shop.audienceHospitalStarter'),
+  hospital_pro: t('shop.audienceHospitalPro'),
+  hospital_enterprise: t('shop.audienceHospitalEnterprise'),
+});
 
 // ============================================
 // Main Component
 // ============================================
 export default function ShopScreen() {
+  const { t } = useI18n();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, refreshUser } = useAuth();
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const planAudienceCopy = useMemo(() => getPlanAudienceCopy(t), [t]);
 
   const isHospital = user?.role === 'hospital' || user?.role === 'admin';
   const consumerPlan: SubscriptionPlan = user?.role === 'nurse' ? 'nurse_pro' : 'premium';
@@ -130,8 +134,8 @@ export default function ShopScreen() {
   const showBillingUnavailableAlert = (subject: string) => {
     setAlert({
       ...createAlert.info(
-        'ยังอยู่ในช่วงทดลองใช้ฟรี',
-        `${subject} จะเปิดให้ใช้งานแบบชำระเงินจริงได้อีกครั้งเมื่อระบบชำระเงินพร้อมใช้งาน ตอนนี้บัญชีใช้งานแบบโควตารายเดือนโดยไม่มีการตัดเงิน`
+        t('shop.trialTitle'),
+        t('shop.billingUnavailable').replace('{subject}', subject)
       ),
     } as AlertState);
   };
@@ -165,6 +169,18 @@ export default function ShopScreen() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+
+    const unsubscribe = subscribeLaunchUsageLimitsConfig(() => {
+      void getLaunchQuotaSummary(user.uid)
+        .then((summary) => setLaunchQuotaSummary(summary))
+        .catch((error) => console.error('ShopScreen quota refresh:', error));
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
   // ----------------------------------------
   // Purchase plan
   // ----------------------------------------
@@ -172,21 +188,21 @@ export default function ShopScreen() {
     if (isFreeAccessActive) {
       setAlert({
         ...createAlert.info(
-          'ตอนนี้ยังเป็นสิทธิ์ช่วงเปิดตัว',
-          `แพ็กเกจ ${SUBSCRIPTION_PLANS[plan].name} ยังไม่เปิดเก็บเงินจริง ตอนนี้บัญชีใช้ฟีเจอร์ได้ตามโควตารายเดือนของช่วงเปิดตัว`
+          t('shop.launchAccessTitle'),
+          t('shop.packageNotCharged').replace('{name}', SUBSCRIPTION_PLANS[plan].name)
         ),
       } as AlertState);
       return;
     }
     if (!user?.uid) {
-      setAlert({ ...createAlert.warning('กรุณาเข้าสู่ระบบ', '') } as AlertState);
+      setAlert({ ...createAlert.warning(t('shop.loginWarning'), '') } as AlertState);
       return;
     }
     const packageKey = getPlanPackageKey(plan);
     const amount = priceFor(plan);
 
     if (!commerceStatus?.billingProviderReady) {
-      showBillingUnavailableAlert(`แพ็กเกจ ${SUBSCRIPTION_PLANS[plan].name}`);
+      showBillingUnavailableAlert(t('shop.packageNotCharged').replace('{name}', SUBSCRIPTION_PLANS[plan].name));
       return;
     }
 
@@ -204,10 +220,10 @@ export default function ShopScreen() {
         },
       });
 
-      showBillingUnavailableAlert(`แพ็กเกจ ${SUBSCRIPTION_PLANS[plan].name}`);
+      showBillingUnavailableAlert(t('shop.packageNotCharged').replace('{name}', SUBSCRIPTION_PLANS[plan].name));
     } catch (e: any) {
       setAlert({
-        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
+        ...createAlert.error(t('shop.errorTitle'), e.message),
       } as AlertState);
     }
   };
@@ -221,8 +237,8 @@ export default function ShopScreen() {
     if (isFreeAccessActive) {
       setAlert({
         ...createAlert.info(
-          'ตอนนี้ยังเป็นสิทธิ์ช่วงเปิดตัว',
-          'บริการเสริมนี้ยังไม่เปิดเก็บเงินจริง ตอนนี้ใช้งานได้ตามโควตารายเดือนของบัญชี'
+          t('shop.launchAccessTitle'),
+          t('shop.addonNotCharged')
         ),
       } as AlertState);
       return;
@@ -235,9 +251,9 @@ export default function ShopScreen() {
       urgent: PRICING.urgentPost,
     };
     const labels = {
-      extraPost: 'โพสต์เพิ่ม',
-      extendPost: 'ต่ออายุโพสต์',
-      urgent: 'ปุ่มด่วน',
+      extraPost: t('shop.addonExtraPost'),
+      extendPost: t('shop.addonExtendPost'),
+      urgent: t('shop.addonUrgent'),
     };
 
     if (!commerceStatus?.billingProviderReady) {
@@ -261,7 +277,7 @@ export default function ShopScreen() {
       showBillingUnavailableAlert(labels[item]);
     } catch (e: any) {
       setAlert({
-        ...createAlert.error('❌ เกิดข้อผิดพลาด', e.message),
+        ...createAlert.error(t('shop.errorTitle'), e.message),
       } as AlertState);
     }
   };
@@ -271,8 +287,8 @@ export default function ShopScreen() {
       Clipboard.setString(referralInfo.referralCode);
       setAlert({
         ...createAlert.success(
-          '📋 คัดลอกแล้ว!',
-          `โค้ด ${referralInfo.referralCode} ถูกคัดลอกแล้ว`,
+          t('shop.codeCopiedTitle'),
+          t('shop.referralCopied').replace('{code}', referralInfo.referralCode),
         ),
       } as AlertState);
     }
@@ -358,11 +374,11 @@ export default function ShopScreen() {
       await clearPendingCampaignCodeForUser(user.uid);
       await refreshUser();
       setAlert({
-        ...createAlert.success('ลบโค้ดที่รอใช้แล้ว', 'คุณสามารถกลับไปกรอกโค้ดใหม่ที่หน้าโปรไฟล์ได้'),
+        ...createAlert.success(t('shop.clearCodeSuccessTitle'), t('shop.clearCodeSuccessMessage')),
       } as AlertState);
     } catch (error: any) {
       setAlert({
-        ...createAlert.error('ลบโค้ดไม่สำเร็จ', error.message || 'กรุณาลองใหม่'),
+        ...createAlert.error(t('shop.clearCodeErrorTitle'), error.message || t('shop.clearCodeErrorMessage')),
       } as AlertState);
     }
   };
@@ -391,7 +407,7 @@ export default function ShopScreen() {
           onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>{isFreeAccessActive ? 'สิทธิ์และบริการในบัญชี' : 'สิทธิ์และแพ็กเกจ'}</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{isFreeAccessActive ? t('shop.headerTitleFree') : t('shop.headerTitlePaid')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -401,24 +417,24 @@ export default function ShopScreen() {
             styles.pendingCodeCard,
             { backgroundColor: colors.infoLight || '#E8F1FF', borderColor: colors.primary },
           ])}>
-            <Text style={[styles.pendingCodeTitle, { color: colors.text }]}>สิทธิ์เพิ่มเติมที่เปิดใช้ในบัญชีนี้</Text>
+            <Text style={[styles.pendingCodeTitle, { color: colors.text }]}>{t('shop.freeAccessTitle')}</Text>
             <Text style={[styles.pendingCodeDesc, { color: colors.textSecondary }]}> 
-              บัญชีนี้ใช้งานฟีเจอร์หลักและบริการเสริมได้ในช่วงเปิดตัว แต่แต่ละรายการจะมีโควตารายเดือนตามประเภทบัญชี
+              {t('shop.launchNotice1')}
             </Text>
             <Text style={[styles.pendingCodeHint, { color: colors.textMuted }]}> 
-              รายละเอียดที่เห็นอาจแตกต่างกันตามประเภทบัญชีและจำนวนสิทธิ์ที่ใช้ไปแล้วในเดือนนี้
+              {t('shop.launchNotice2')}
             </Text>
             <View style={styles.featureList}>
               {(isHospital
                 ? [
-                    'ลงประกาศและติดตามผู้สนใจได้ภายในโควตารายเดือนขององค์กร',
-                    'ใช้ป้ายด่วน ต่ออายุ และดันโพสต์ได้ตามสิทธิ์ที่เหลือ',
-                    'คุยต่อผ่านแชทและจัดการผู้สมัครได้ภายใต้โควตาการใช้งานของบัญชี',
+                    t('shop.hospitalFeature1'),
+                    t('shop.hospitalFeature2'),
+                    t('shop.hospitalFeature3'),
                   ]
                 : [
-                    'ใช้งานฟีเจอร์หลักได้ทันทีภายในโควตารายเดือนของบัญชี',
-                    'บริการเสริมบางรายการพร้อมใช้ตามสิทธิ์ที่ระบบจัดสรรให้',
-                    'ระบบจะรีเซ็ตโควตาใหม่ทุกเดือนเพื่อให้ใช้งานต่อได้อย่างต่อเนื่อง',
+                    t('shop.defaultFeature1'),
+                    t('shop.defaultFeature2'),
+                    t('shop.defaultFeature3'),
                   ]).map((item) => (
                 <View key={item} style={styles.featureRow}>
                   <Ionicons name="sparkles" size={16} color={colors.primary} />
@@ -461,10 +477,10 @@ export default function ShopScreen() {
           ])}>
           <View style={styles.planBannerRow}>
             <View>
-              <Text style={[styles.planLabel, { color: colors.textSecondary }]}>แพ็กเกจปัจจุบัน</Text>
+              <Text style={[styles.planLabel, { color: colors.textSecondary }]}>{t('shop.currentPlanLabel')}</Text>
               <Text
                 style={[styles.planName, { color: currentPlanTone.accent }]}> 
-                {statusDisplay?.planName || '🆓 ฟรี'}
+                {statusDisplay?.planName || t('shop.freePlan')}
               </Text>
             </View>
             {statusDisplay?.expiresText && (
@@ -484,29 +500,29 @@ export default function ShopScreen() {
           ])}>
             <View style={styles.pendingCodeHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.pendingCodeTitle, { color: colors.text }]}>โค้ดที่รอใช้</Text>
+                <Text style={[styles.pendingCodeTitle, { color: colors.text }]}>{t('shop.pendingCodeTitle')}</Text>
                 <Text style={[styles.pendingCodeCode, { color: colors.warning }]}>{pendingCampaignCode.code}</Text>
               </View>
               <TouchableOpacity onPress={handleClearPendingCode} style={styles.pendingCodeClearBtn}>
                 <Ionicons name="close-circle-outline" size={18} color={colors.warning} />
-                <Text style={[styles.pendingCodeClearText, { color: colors.warning }]}>ล้าง</Text>
+                <Text style={[styles.pendingCodeClearText, { color: colors.warning }]}>{t('shop.clearButton')}</Text>
               </TouchableOpacity>
             </View>
             <Text style={[styles.pendingCodeDesc, { color: colors.textSecondary }]}>
-              ใช้กับ {getCampaignPackageDisplayLabel(pendingCampaignCode.packageKey, user?.role)}
+              {t('shop.usedWith').replace('{label}', getCampaignPackageDisplayLabel(pendingCampaignCode.packageKey, user?.role))}
             </Text>
             <Text style={[styles.pendingCodeDesc, { color: colors.textSecondary }]}> 
               {getCampaignBenefitSummary(pendingCampaignCode.benefitType, pendingCampaignCode.benefitValue)}
               {pendingCampaignCode.discountAmount > 0
-                ? ` • จาก ฿${pendingCampaignCode.originalAmount.toLocaleString()} เหลือ ฿${pendingCampaignCode.finalAmount.toLocaleString()}`
+                ? ` • ${t('shop.fromPrice').replace('{original}', pendingCampaignCode.originalAmount.toLocaleString()).replace('{final}', pendingCampaignCode.finalAmount.toLocaleString())}`
                 : ''}
             </Text>
-            <Text style={[styles.pendingCodeHint, { color: colors.textMuted }]}>ระบบจะใช้โค้ดนี้อัตโนมัติเมื่อซื้อรายการที่ตรงกัน</Text>
+            <Text style={[styles.pendingCodeHint, { color: colors.textMuted }]}>{t('shop.pendingCodeHint')}</Text>
           </Card>
         )}
 
         {isFreeAccessActive && (
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>สิทธิ์ที่เปิดใช้ในบัญชีนี้</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('shop.sectionAccessTitle')}</Text>
         )}
 
         {/* Billing Cycle Toggle */}
@@ -524,9 +540,7 @@ export default function ShopScreen() {
                 { color: colors.textSecondary },
                 billingCycle === 'monthly' && styles.toggleActiveText,
                 billingCycle === 'monthly' && { color: colors.text },
-              ]}>
-              รายเดือน
-            </Text>
+              ]}>{t('shop.monthly')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -541,11 +555,9 @@ export default function ShopScreen() {
                 { color: colors.textSecondary },
                 billingCycle === 'annual' && styles.toggleActiveText,
                 billingCycle === 'annual' && { color: colors.text },
-              ]}>
-              รายปี
-            </Text>
+              ]}>{t('shop.annual')}</Text>
             <View style={[styles.savingsPill, { backgroundColor: colors.successLight }]}>
-              <Text style={[styles.savingsPillText, { color: colors.success }]}>ประหยัด ~17%</Text>
+              <Text style={[styles.savingsPillText, { color: colors.success }]}>{t('shop.savingsHint')}</Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -553,11 +565,11 @@ export default function ShopScreen() {
         {/* ---- NURSE PLANS ---- */}
         {!isHospital && (
           <>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>แพ็กเกจสำหรับพยาบาล</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('shop.nursePlansTitle')}</Text>
             <NursePlanCard
               plan="free"
               isCurrent={currentPlan === 'free'}
-              summary={PLAN_AUDIENCE_COPY.free}
+              summary={planAudienceCopy.free}
               features={SUBSCRIPTION_PLANS.free.features}
               commerceLocked={isFreeAccessActive}
               onBuy={() => {}}
@@ -568,7 +580,7 @@ export default function ShopScreen() {
               price={priceFor(consumerPlan)}
               savings={billingCycle === 'annual' ? savingsPct(consumerPlan) : 0}
               isCurrent={currentPlan === consumerPlan}
-              summary={PLAN_AUDIENCE_COPY[consumerPlan]}
+              summary={planAudienceCopy[consumerPlan]}
               features={SUBSCRIPTION_PLANS[consumerPlan].features}
               commerceLocked={isFreeAccessActive}
               onBuy={() => handleBuyPlan(consumerPlan)}
@@ -580,7 +592,7 @@ export default function ShopScreen() {
         {/* ---- HOSPITAL PLANS ---- */}
         {isHospital && (
           <>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>แพ็กเกจสำหรับโรงพยาบาล</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('shop.hospitalPlansTitle')}</Text>
             {(
               [
                 'hospital_starter',
@@ -596,7 +608,7 @@ export default function ShopScreen() {
                   billingCycle === 'annual' ? savingsPct(plan) : 0
                 }
                 isCurrent={currentPlan === plan}
-                summary={PLAN_AUDIENCE_COPY[plan]}
+                summary={planAudienceCopy[plan]}
                 features={SUBSCRIPTION_PLANS[plan].features}
                 commerceLocked={isFreeAccessActive}
                 onBuy={() => handleBuyPlan(plan)}
@@ -608,7 +620,7 @@ export default function ShopScreen() {
 
         {/* ---- ADD-ONS ---- */}
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          {isFreeAccessActive ? 'บริการเสริมที่พร้อมใช้ในบัญชีนี้' : 'เปิดใช้รายครั้ง'}
+          {isFreeAccessActive ? t('shop.freeAccessAddonsTitle') : t('shop.addonsTitlePaid')}
         </Text>
 
         <Card style={StyleSheet.flatten([styles.itemCard, { backgroundColor: panelBackground, borderColor: subtleBorder, borderWidth: 1 }])}> 
@@ -616,15 +628,15 @@ export default function ShopScreen() {
             <View style={styles.itemInfo}>
               <Text style={styles.itemIcon}>📝</Text>
               <View>
-                <Text style={[styles.itemTitle, { color: colors.text }]}>โพสต์เพิ่ม 1 ครั้ง</Text>
-                <Text style={[styles.itemDesc, { color: colors.textSecondary }]}>ใช้สำหรับเพิ่มความยืดหยุ่นเมื่อโควตาโพสต์ประจำเดือนใกล้เต็ม</Text>
+                <Text style={[styles.itemTitle, { color: colors.text }]}>{t('shop.extraPostTitle')}</Text>
+                <Text style={[styles.itemDesc, { color: colors.textSecondary }]}>{t('shop.extraPostDesc')}</Text>
               </View>
             </View>
             <TouchableOpacity
               style={[styles.buyButton, { backgroundColor: colors.primary }]}
               onPress={() => handleBuyAddon('extraPost')}
               disabled={isFreeAccessActive}>
-              <Text style={[styles.buyButtonText, { color: colors.white }]}>{isFreeAccessActive ? 'ดูโควตาในบัญชี' : `฿${PRICING.extraPost}`}</Text>
+              <Text style={[styles.buyButtonText, { color: colors.white }]}>{isFreeAccessActive ? t('shop.viewQuota') : `฿${PRICING.extraPost}`}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -634,9 +646,9 @@ export default function ShopScreen() {
             <View style={styles.itemInfo}>
               <Text style={styles.itemIcon}>⏰</Text>
               <View>
-                <Text style={[styles.itemTitle, { color: colors.text }]}>ต่ออายุโพสต์ +1 วัน</Text>
+                <Text style={[styles.itemTitle, { color: colors.text }]}>{t('shop.extendPostTitle')}</Text>
                 <Text style={[styles.itemDesc, { color: colors.textSecondary }]}> 
-                  ขยายเวลาให้ประกาศยังมองเห็นต่อได้ภายในโควตาบริการเสริมของเดือนนี้
+                  {t('shop.extendPostDesc')}
                 </Text>
               </View>
             </View>
@@ -644,7 +656,7 @@ export default function ShopScreen() {
               style={[styles.buyButton, { backgroundColor: colors.primary }]}
               onPress={() => handleBuyAddon('extendPost')}
               disabled={isFreeAccessActive}>
-              <Text style={[styles.buyButtonText, { color: colors.white }]}>{isFreeAccessActive ? 'ดูโควตาในบัญชี' : `฿${PRICING.extendPost}`}</Text>
+              <Text style={[styles.buyButtonText, { color: colors.white }]}>{isFreeAccessActive ? t('shop.viewQuota') : `฿${PRICING.extendPost}`}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -654,15 +666,15 @@ export default function ShopScreen() {
             <View style={styles.itemInfo}>
               <Text style={styles.itemIcon}>⚡</Text>
               <View>
-                <Text style={[styles.itemTitle, { color: colors.text }]}>ปุ่มด่วน (Urgent)</Text>
-                <Text style={[styles.itemDesc, { color: colors.textSecondary }]}>ช่วยให้ประกาศสำคัญถูกมองเห็นได้เร็วขึ้นตามโควตาบริการเสริมที่เหลือ</Text>
+                <Text style={[styles.itemTitle, { color: colors.text }]}>{t('shop.urgentTitle')}</Text>
+                <Text style={[styles.itemDesc, { color: colors.textSecondary }]}>{t('shop.urgentPostDesc')}</Text>
               </View>
             </View>
             <TouchableOpacity
               style={[styles.buyButton, { backgroundColor: colors.primary }]}
               onPress={() => handleBuyAddon('urgent')}
               disabled={isFreeAccessActive}>
-              <Text style={[styles.buyButtonText, { color: colors.white }]}>{isFreeAccessActive ? 'ดูโควตาในบัญชี' : `฿${PRICING.urgentPost}`}</Text>
+              <Text style={[styles.buyButtonText, { color: colors.white }]}>{isFreeAccessActive ? t('shop.viewQuota') : `฿${PRICING.urgentPost}`}</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -670,16 +682,14 @@ export default function ShopScreen() {
         {/* ---- REFERRAL ---- */}
         {referralInfo && (
           <>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>แนะนำเพื่อน</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('shop.referralTitle')}</Text>
             <Card style={StyleSheet.flatten([styles.referralCard, { backgroundColor: colors.accentLight, borderColor: colors.accent }])}> 
-              <Text style={[styles.referralTitle, { color: colors.accentDark }]}> 
-                แนะนำเพื่อน → ได้ Pro ฟรี 1 เดือน!
-              </Text>
+              <Text style={[styles.referralTitle, { color: colors.accentDark }]}>{t('shop.referralHeadline')}</Text>
               <Text style={[styles.referralDesc, { color: colors.textSecondary }]}> 
-                เพื่อนสมัครและอัปเกรด คุณและเพื่อนได้รับสิทธิ์พรีเมียมฟรี 1 เดือนตามประเภทบัญชี
+                {t('shop.referralBenefit')}
               </Text>
               <View style={[styles.referralCodeBox, { backgroundColor: panelBackground, borderColor: colors.accent }]}> 
-                <Text style={[styles.referralCodeLabel, { color: colors.textMuted }]}>โค้ดของคุณ</Text>
+                <Text style={[styles.referralCodeLabel, { color: colors.textMuted }]}>{t('shop.referralCodeLabel')}</Text>
                 <View style={styles.referralCodeRow}>
                   <Text style={[styles.referralCode, { color: colors.text }]}> 
                     {referralInfo.referralCode}
@@ -692,7 +702,7 @@ export default function ShopScreen() {
                       size={18}
                       color={colors.primary}
                     />
-                    <Text style={[styles.copyText, { color: colors.primary }]}>คัดลอก</Text>
+                    <Text style={[styles.copyText, { color: colors.primary }]}>{t('shop.copyButton')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -701,7 +711,7 @@ export default function ShopScreen() {
                   <Text style={[styles.statNum, { color: colors.text }]}> 
                     {referralInfo.referredCount}
                   </Text>
-                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>เพื่อนที่แนะนำ</Text>
+                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('shop.statReferred')}</Text>
                 </View>
                 <View
                   style={[
@@ -711,7 +721,7 @@ export default function ShopScreen() {
                   <Text style={[styles.statNum, { color: colors.text }]}> 
                     {referralInfo.rewardMonthsEarned}
                   </Text>
-                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>เดือนฟรีที่ได้</Text>
+                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('shop.statFreeMonths')}</Text>
                 </View>
                 <View
                   style={[
@@ -722,7 +732,7 @@ export default function ShopScreen() {
                     {referralInfo.rewardMonthsEarned -
                       referralInfo.rewardMonthsUsed}
                   </Text>
-                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>เดือนคงเหลือ</Text>
+                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{t('shop.statMonthsLeft')}</Text>
                 </View>
               </View>
             </Card>
@@ -771,6 +781,7 @@ function NursePlanCard({
   onBuy,
   billingCycle,
 }: NursePlanCardProps) {
+  const { t } = useI18n();
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const isFree = plan === 'free';
@@ -789,18 +800,18 @@ function NursePlanCard({
       <View style={styles.planCardHeader}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.planCardName, { color: tone.accent }]}> 
-            {isFree ? '🆓 ฟรี' : plan === 'premium' ? '👑 Premium' : '👑 Nurse Pro'}
+            {isFree ? t('shop.freePlan') : plan === 'premium' ? '👑 Premium' : '👑 Nurse Pro'}
           </Text>
           <Text style={[styles.itemDesc, { color: colors.textSecondary }]}>{summary}</Text>
           {!isFree && price !== undefined && (
             <Text style={[styles.planCardPrice, { color: colors.text }]}> 
               ฿{price}
               <Text style={[styles.planCardPriceUnit, { color: colors.textSecondary }]}> 
-                /{billingCycle === 'annual' ? 'ปี' : 'เดือน'}
+                /{billingCycle === 'annual' ? t('shop.perYear') : t('shop.perMonth')}
               </Text>
               {billingCycle === 'monthly' && (
                 <Text style={[styles.planCardPriceUnit, { color: colors.textSecondary }]}> 
-                  {' '}(฿{PRICING.nursePro}/เดือน)
+                  {' '}(฿{PRICING.nursePro}/{t('shop.perMonth')})
                 </Text>
               )}
             </Text>
@@ -808,12 +819,12 @@ function NursePlanCard({
         </View>
         {savings && savings > 0 ? (
           <View style={[styles.savingsTag, { backgroundColor: colors.successLight }]}>
-            <Text style={[styles.savingsTagText, { color: colors.success }]}>ประหยัด {savings}%</Text>
+            <Text style={[styles.savingsTagText, { color: colors.success }]}>{t('shop.savedPercent').replace('{pct}', String(savings))}</Text>
           </View>
         ) : null}
         {isCurrent && (
           <View style={[styles.currentTag, { backgroundColor: tone.soft }]}>
-            <Text style={[styles.currentTagText, { color: tone.label }]}>ใช้งานอยู่</Text>
+            <Text style={[styles.currentTagText, { color: tone.label }]}>{t('shop.currentTag')}</Text>
           </View>
         )}
       </View>
@@ -829,12 +840,12 @@ function NursePlanCard({
         <TouchableOpacity
           style={[styles.planBuyBtn, { backgroundColor: tone.accent }]}
           onPress={onBuy}>
-          <Text style={[styles.planBuyBtnText, { color: colors.white }]}>อัพเกรด</Text>
+          <Text style={[styles.planBuyBtnText, { color: colors.white }]}>{t('shop.upgradeButton')}</Text>
         </TouchableOpacity>
       )}
       {!isCurrent && !isFree && commerceLocked && (
         <View style={[styles.currentTag, { backgroundColor: tone.soft, alignSelf: 'flex-start', marginTop: 12 }]}> 
-          <Text style={[styles.currentTagText, { color: tone.label }]}>รวมในสิทธิ์บัญชีนี้</Text>
+          <Text style={[styles.currentTagText, { color: tone.label }]}>{t('shop.includedInAccount')}</Text>
         </View>
       )}
     </Card>
@@ -864,6 +875,7 @@ function HospitalPlanCard({
   onBuy,
   billingCycle,
 }: HospitalPlanCardProps) {
+  const { t } = useI18n();
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const planMeta: Record<string, { label: string }> = {
@@ -898,18 +910,18 @@ function HospitalPlanCard({
           <Text style={[styles.planCardPrice, { color: colors.text }]}> 
             ฿{price}
             <Text style={[styles.planCardPriceUnit, { color: colors.textSecondary }]}> 
-              /{billingCycle === 'annual' ? 'ปี' : 'เดือน'}
+              /{billingCycle === 'annual' ? t('shop.perYear') : t('shop.perMonth')}
             </Text>
           </Text>
         </View>
         {savings > 0 && (
           <View style={[styles.savingsTag, { backgroundColor: colors.successLight }]}>
-            <Text style={[styles.savingsTagText, { color: colors.success }]}>ประหยัด {savings}%</Text>
+            <Text style={[styles.savingsTagText, { color: colors.success }]}>{t('shop.savedPercent').replace('{pct}', String(savings))}</Text>
           </View>
         )}
         {isCurrent && (
           <View style={[styles.currentTag, { backgroundColor: tone.soft }]}>
-            <Text style={[styles.currentTagText, { color: tone.label }]}>ใช้งานอยู่</Text>
+            <Text style={[styles.currentTagText, { color: tone.label }]}>{t('shop.currentTag')}</Text>
           </View>
         )}
       </View>
@@ -925,12 +937,12 @@ function HospitalPlanCard({
         <TouchableOpacity
           style={[styles.planBuyBtn, { backgroundColor: tone.accent }]}
           onPress={onBuy}>
-          <Text style={[styles.planBuyBtnText, { color: colors.white }]}>เลือกแผนนี้</Text>
+          <Text style={[styles.planBuyBtnText, { color: colors.white }]}>{t('shop.selectPlan')}</Text>
         </TouchableOpacity>
       )}
       {!isCurrent && commerceLocked && (
         <View style={[styles.currentTag, { backgroundColor: tone.soft, alignSelf: 'flex-start', marginTop: 12 }]}> 
-          <Text style={[styles.currentTagText, { color: tone.label }]}>รวมในสิทธิ์บัญชีนี้</Text>
+          <Text style={[styles.currentTagText, { color: tone.label }]}>{t('shop.includedInAccount')}</Text>
         </View>
       )}
     </Card>

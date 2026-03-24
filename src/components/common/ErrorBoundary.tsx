@@ -132,8 +132,33 @@ class ErrorBoundaryImpl extends React.Component<InnerProps, State> {
   }
 }
 
+const FALLBACK_COLORS: ThemeColors = {
+  background: '#fff5f5',
+  text: '#333333',
+  textSecondary: '#666666',
+  textMuted: '#999999',
+  error: '#dc2626',
+  errorLight: '#fef2f2',
+  warning: '#f59e0b',
+  warningLight: '#fffbeb',
+  success: '#16a34a',
+  successLight: '#f0fdf4',
+  primary: '#2563eb',
+  white: '#ffffff',
+  surface: '#f9fafb',
+  border: '#e5e7eb',
+} as ThemeColors;
+
 export function ErrorBoundary({ children }: Props) {
-  const { colors, isDark } = useTheme();
+  let colors: ThemeColors = FALLBACK_COLORS;
+  let isDark = false;
+  try {
+    const theme = useTheme();
+    colors = theme.colors;
+    isDark = theme.isDark;
+  } catch {
+    // ThemeProvider not available — use fallback colors
+  }
   return <ErrorBoundaryImpl colors={colors} isDark={isDark}>{children}</ErrorBoundaryImpl>;
 }
 

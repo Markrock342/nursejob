@@ -37,6 +37,7 @@ import {
 } from '../../services/documentsService';
 import { readUriAsBlob } from '../../services/storageService';
 import { formatDate } from '../../utils/helpers';
+import { useI18n } from '../../i18n';
 
 const documentTypes: { type: DocumentType; icon: string }[] = [
   { type: 'resume', icon: 'document-text' },
@@ -50,6 +51,7 @@ const documentTypes: { type: DocumentType; icon: string }[] = [
 ];
 
 export default function DocumentsScreen() {
+  const { t } = useI18n();
   const { user, requireAuth } = useAuth();
   const navigation = useNavigation();
   const { colors, isDark } = useTheme();
@@ -72,6 +74,7 @@ export default function DocumentsScreen() {
       setDocuments(data);
     } catch (error) {
       console.error('Error loading documents:', error);
+      Alert.alert(t('common.alerts.loadErrorTitle'), t('common.alerts.loadErrorMessage'));
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -111,7 +114,7 @@ export default function DocumentsScreen() {
       }
     } catch (error) {
       console.error('Error picking document:', error);
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถเลือกเอกสารได้');
+      Alert.alert(t('documents.error'), t('documents.errorSelectDoc'));
     }
   };
 
@@ -119,7 +122,7 @@ export default function DocumentsScreen() {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('ต้องการสิทธิ์', 'กรุณาอนุญาตการเข้าถึงรูปภาพ');
+        Alert.alert(t('documents.permissionTitle'), t('documents.permissionMessage'));
         return;
       }
 
@@ -135,7 +138,7 @@ export default function DocumentsScreen() {
       }
     } catch (error) {
       console.error('Error picking image:', error);
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถเลือกรูปภาพได้');
+      Alert.alert(t('documents.error'), t('documents.errorSelectImage'));
     }
   };
 
@@ -144,7 +147,7 @@ export default function DocumentsScreen() {
 
     // Check file size (max 10MB)
     if (fileSize > 10 * 1024 * 1024) {
-      Alert.alert('ไฟล์ใหญ่เกินไป', 'ขนาดไฟล์สูงสุด 10MB');
+      Alert.alert(t('documents.fileTooLargeTitle'), t('documents.fileTooLargeMessage'));
       return;
     }
 
@@ -163,10 +166,10 @@ export default function DocumentsScreen() {
       );
 
       setDocuments(prev => [doc, ...prev]);
-      Alert.alert('สำเร็จ', 'อัพโหลดเอกสารเรียบร้อยแล้ว');
+      Alert.alert(t('documents.uploadSuccessTitle'), t('documents.uploadSuccessMessage'));
     } catch (error) {
       console.error('Error uploading:', error);
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถอัพโหลดได้ กรุณาลองใหม่');
+      Alert.alert(t('documents.error'), t('documents.uploadErrorMessage'));
     } finally {
       setIsUploading(false);
       setSelectedType(null);
@@ -175,14 +178,14 @@ export default function DocumentsScreen() {
 
   const handleDelete = (doc: Document) => {
     Alert.alert(
-      doc.status === 'pending' ? 'ยกเลิกคำขอ' : 'ลบเอกสาร',
+      doc.status === 'pending' ? t('documents.cancelRequest') : t('documents.deleteDocument'),
       doc.status === 'pending'
-        ? `ต้องการยกเลิกคำขอสำหรับ "${doc.name}" หรือไม่?`
-        : `ต้องการลบ "${doc.name}" หรือไม่?`,
+        ? t('documents.confirmCancelRequest').replace('{name}', doc.name)
+        : t('documents.confirmDelete').replace('{name}', doc.name),
       [
-        { text: 'ยกเลิก', style: 'cancel' },
+        { text: t('documents.cancel'), style: 'cancel' },
         {
-          text: doc.status === 'pending' ? 'ยืนยัน' : 'ลบ',
+          text: doc.status === 'pending' ? t('documents.confirm') : t('documents.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -192,7 +195,7 @@ export default function DocumentsScreen() {
                 setPreviewDocument(null);
               }
             } catch (error) {
-              Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถลบได้');
+              Alert.alert(t('documents.error'), t('documents.deleteError'));
             }
           },
         },
@@ -206,20 +209,20 @@ export default function DocumentsScreen() {
     if (doc.status === 'approved' || doc.isVerified) {
       return {
         icon: 'checkmark-circle' as const,
-        text: 'อนุมัติแล้ว',
+        text: t('documents.statusApproved'),
         color: colors.success,
       };
     }
     if (doc.status === 'rejected') {
       return {
         icon: 'close-circle' as const,
-        text: 'ไม่ผ่านการตรวจสอบ',
+        text: t('documents.statusRejected'),
         color: colors.error,
       };
     }
     return {
       icon: 'time' as const,
-      text: 'รอการตรวจสอบ',
+      text: t('documents.statusPending'),
       color: colors.warning,
     };
   };
@@ -231,9 +234,9 @@ export default function DocumentsScreen() {
         <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <EmptyState
           icon="documents-outline"
-          title="เข้าสู่ระบบเพื่อจัดการเอกสาร"
-          subtitle="อัพโหลด Resume, ใบประกอบวิชาชีพ และเอกสารอื่นๆ"
-          actionLabel="เข้าสู่ระบบ"
+          title={t('documents.loginTitle')}
+          subtitle={t('documents.subtitle')}
+          actionLabel={t('documents.loginButton')}
           onAction={() => requireAuth(() => {})}
         />
       </SafeAreaView>
@@ -241,7 +244,7 @@ export default function DocumentsScreen() {
   }
 
   if (isLoading) {
-    return <Loading message="กำลังโหลด..." />;
+    return <Loading message={t('documents.loading')} />;
   }
 
   const renderDocument = ({ item }: { item: Document }) => {
@@ -270,7 +273,7 @@ export default function DocumentsScreen() {
             <Text style={styles.documentDate}>{formatDate(item.createdAt)}</Text>
           </View>
           {item.rejectionReason ? (
-            <Text style={styles.rejectionText} numberOfLines={2}>เหตุผล: {item.rejectionReason}</Text>
+            <Text style={styles.rejectionText} numberOfLines={2}>{t('documents.rejectionReason').replace('{reason}', item.rejectionReason)}</Text>
           ) : null}
         </View>
         <TouchableOpacity
@@ -290,18 +293,18 @@ export default function DocumentsScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>เอกสารของฉัน</Text>
+        <Text style={styles.headerTitle}>{t('documents.headerTitle')}</Text>
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => setShowTypeModal(true)}
           disabled={Boolean(isUploading)}
         >
           {isUploading ? (
-            <Text style={styles.addButtonText}>กำลังอัพโหลด...</Text>
+            <Text style={styles.addButtonText}>{t('documents.uploading')}</Text>
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Ionicons name="add" size={20} color={colors.white} />
-              <Text style={styles.addButtonText}>เพิ่มเอกสาร</Text>
+              <Text style={styles.addButtonText}>{t('documents.addDocument')}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -322,9 +325,9 @@ export default function DocumentsScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="documents-outline"
-            title="ยังไม่มีเอกสาร"
-            subtitle="เพิ่มเอกสารเพื่อเพิ่มโอกาสในการสมัครงาน"
-            actionLabel="เพิ่มเอกสาร"
+            title={t('documents.emptyTitle')}
+            subtitle={t('documents.emptySubtitle')}
+            actionLabel={t('documents.addDocument')}
             onAction={() => setShowTypeModal(true)}
           />
         }
@@ -340,7 +343,7 @@ export default function DocumentsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>เลือกประเภทเอกสาร</Text>
+              <Text style={styles.modalTitle}>{t('documents.selectDocType')}</Text>
               <TouchableOpacity onPress={() => setShowTypeModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
@@ -367,7 +370,7 @@ export default function DocumentsScreen() {
       <ModalContainer
         visible={Boolean(previewDocument)}
         onClose={() => setPreviewDocument(null)}
-        title={previewDocument?.name || 'ดูเอกสาร'}
+        title={previewDocument?.name || t('documents.viewDocumentFallback')}
         fullScreen
       >
         {previewDocument ? (
@@ -375,9 +378,9 @@ export default function DocumentsScreen() {
             <View style={styles.previewMetaCard}>
               <Text style={styles.previewMetaTitle}>{getDocumentTypeLabel(previewDocument.type)}</Text>
               <Text style={styles.previewMetaText}>{previewDocument.fileName}</Text>
-              <Text style={styles.previewMetaText}>สถานะ: {getStatusMeta(previewDocument).text}</Text>
+              <Text style={styles.previewMetaText}>{t('documents.statusLabel').replace('{status}', getStatusMeta(previewDocument).text)}</Text>
               {previewDocument.rejectionReason ? (
-                <Text style={styles.previewRejectText}>เหตุผลที่ไม่ผ่าน: {previewDocument.rejectionReason}</Text>
+                <Text style={styles.previewRejectText}>{t('documents.rejectionReasonDetail').replace('{reason}', previewDocument.rejectionReason)}</Text>
               ) : null}
             </View>
 
@@ -385,7 +388,13 @@ export default function DocumentsScreen() {
               {isImageDocument(previewDocument) ? (
                 <Image source={{ uri: previewDocument.fileUrl }} style={styles.previewImage} resizeMode="contain" />
               ) : (
-                <WebView source={{ uri: previewDocument.fileUrl }} style={styles.previewWebview} />
+                <WebView
+                  source={{ uri: previewDocument.fileUrl }}
+                  style={styles.previewWebview}
+                  originWhitelist={['https:']}
+                  javaScriptEnabled={false}
+                  allowFileAccess={false}
+                />
               )}
             </View>
 
@@ -397,7 +406,7 @@ export default function DocumentsScreen() {
               onPress={() => handleDelete(previewDocument)}
             >
               <Ionicons name={previewDocument.status === 'pending' ? 'close-circle-outline' : 'trash-outline'} size={18} color="#FFF" />
-              <Text style={styles.previewActionText}>{previewDocument.status === 'pending' ? 'ยกเลิกคำขอ' : 'ลบเอกสาร'}</Text>
+              <Text style={styles.previewActionText}>{previewDocument.status === 'pending' ? t('documents.cancelRequest') : t('documents.deleteDocument')}</Text>
             </TouchableOpacity>
           </View>
         ) : null}

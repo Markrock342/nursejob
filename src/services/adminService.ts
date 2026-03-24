@@ -20,14 +20,29 @@ import {
   getCountFromServer,
   writeBatch,
   QueryDocumentSnapshot,
+  onSnapshot,
+  setDoc,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../config/firebase';
+import { getDefaultLaunchUsageLimitsConfigSnapshot, LaunchUsageLimitsConfig, LaunchUsageRole } from './subscriptionService';
 import { getAuthUid } from './security/authGuards';
 import { BillingCycle, LegalConsentRecord, Subscription, SubscriptionPlan, SubscriptionUsageFeature, UserAdminTag } from '../types';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const ADMIN_AUDIT_LOGS_COLLECTION = 'admin_audit_logs';
+const APP_CONFIG_COLLECTION = 'app_config';
+const LAUNCH_USAGE_LIMITS_CONFIG_ID = 'launch_usage_limits';
+const LAUNCH_USAGE_ROLES: LaunchUsageRole[] = ['user', 'nurse', 'hospital', 'admin'];
+const LAUNCH_USAGE_FEATURES: SubscriptionUsageFeature[] = [
+  'post_create',
+  'job_application',
+  'chat_start',
+  'urgent_post',
+  'extend_post',
+  'boost_post',
+];
 
 async function withPermissionRetry<T>(fn: () => Promise<T>, retries = 1): Promise<T> {
   try {
@@ -177,9 +192,19 @@ function sanitizeMonthlyUsage(
 }
 
 function sanitizeSubscriptionForFirestore(subscription: Subscription): Record<string, any> {
-  return Object.fromEntries(
-    Object.entries(subscription).filter(([, value]) => value !== undefined)
-  );
+  function stripUndefined(obj: Record<string, any>): Record<string, any> {
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => {
+          if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && typeof value.toDate !== 'function') {
+            return [key, stripUndefined(value)];
+          }
+          return [key, value];
+        })
+    );
+  }
+  return stripUndefined(subscription as Record<string, any>);
 }
 
 function mapLegalConsent(raw: any): LegalConsentRecord | undefined {
@@ -215,6 +240,124 @@ function chunkArray<T>(items: T[], size: number): T[][] {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
+}
+
+function getLaunchUsageLimitsAdminDocRef() {
+  return doc(db, APP_CONFIG_COLLECTION, LAUNCH_USAGE_LIMITS_CONFIG_ID);
+}
+
+function sanitizeLaunchUsageLimitsConfig(
+  config?: Partial<LaunchUsageLimitsConfig> | null,
+): LaunchUsageLimitsConfig {
+  const defaults = getDefaultLaunchUsageLimitsConfigSnapshot();
+  const next = getDefaultLaunchUsageLimitsConfigSnapshot();
+
+  LAUNCH_USAGE_ROLES.forEach((role) => {
+    LAUNCH_USAGE_FEATURES.forEach((feature) => {
+      const candidate = config?.roles?.[role]?.[feature];
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+        next.roles[role][feature] = Math.max(0, Math.floor(candidate));
+      }
+    });
+  });
+
+  next.updatedAt = config?.updatedAt ?? defaults.updatedAt ?? null;
+  next.updatedBy = config?.updatedBy ?? defaults.updatedBy ?? null;
+  return next;
+}
+
+function mapLaunchUsageLimitsConfig(rawValue: unknown): LaunchUsageLimitsConfig {
+  const raw = rawValue && typeof rawValue === 'object' ? rawValue as Record<string, any> : {};
+  const updatedAtRaw = raw.updatedAt;
+
+  return sanitizeLaunchUsageLimitsConfig({
+    roles: raw.roles,
+    updatedAt:
+      updatedAtRaw instanceof Timestamp
+        ? updatedAtRaw.toDate()
+        : typeof updatedAtRaw?.toDate === 'function'
+          ? updatedAtRaw.toDate()
+          : updatedAtRaw instanceof Date
+            ? updatedAtRaw
+            : null,
+    updatedBy: typeof raw.updatedBy === 'string' ? raw.updatedBy : null,
+  });
+}
+
+export async function getLaunchUsageLimitsAdminSettings(): Promise<LaunchUsageLimitsConfig> {
+  const snapshot = await withPermissionRetry(() => getDoc(getLaunchUsageLimitsAdminDocRef()), 1);
+  if (!snapshot.exists()) {
+    return getDefaultLaunchUsageLimitsConfigSnapshot();
+  }
+  return mapLaunchUsageLimitsConfig(snapshot.data());
+}
+
+export function subscribeLaunchUsageLimitsAdminSettings(
+  onChange: (config: LaunchUsageLimitsConfig) => void,
+): Unsubscribe {
+  return onSnapshot(
+    getLaunchUsageLimitsAdminDocRef(),
+    (snapshot) => {
+      onChange(
+        snapshot.exists()
+          ? mapLaunchUsageLimitsConfig(snapshot.data())
+          : getDefaultLaunchUsageLimitsConfigSnapshot(),
+      );
+    },
+    (error) => {
+      console.error('Error subscribing launch usage limits admin settings:', error);
+      onChange(getDefaultLaunchUsageLimitsConfigSnapshot());
+    },
+  );
+}
+
+export async function updateLaunchUsageLimits(
+  adminUserId: string,
+  config: LaunchUsageLimitsConfig,
+): Promise<LaunchUsageLimitsConfig> {
+  const sanitized = sanitizeLaunchUsageLimitsConfig(config);
+  await withPermissionRetry(() => setDoc(
+    getLaunchUsageLimitsAdminDocRef(),
+    {
+      roles: sanitized.roles,
+      updatedAt: serverTimestamp(),
+      updatedBy: adminUserId,
+    },
+    { merge: true },
+  ), 1);
+  await logAdminAudit('update_launch_usage_limits', 'app_config', {
+    configId: LAUNCH_USAGE_LIMITS_CONFIG_ID,
+    roles: sanitized.roles,
+    updatedBy: adminUserId,
+  });
+  return {
+    ...sanitized,
+    updatedAt: new Date(),
+    updatedBy: adminUserId,
+  };
+}
+
+export async function resetLaunchUsageLimitsAdminSettings(
+  adminUserId: string,
+): Promise<LaunchUsageLimitsConfig> {
+  const defaults = getDefaultLaunchUsageLimitsConfigSnapshot();
+  await withPermissionRetry(() => setDoc(
+    getLaunchUsageLimitsAdminDocRef(),
+    {
+      roles: defaults.roles,
+      updatedAt: serverTimestamp(),
+      updatedBy: adminUserId,
+    },
+  ), 1);
+  await logAdminAudit('reset_launch_usage_limits', 'app_config', {
+    configId: LAUNCH_USAGE_LIMITS_CONFIG_ID,
+    updatedBy: adminUserId,
+  });
+  return {
+    ...defaults,
+    updatedAt: new Date(),
+    updatedBy: adminUserId,
+  };
 }
 
 export interface AdminJob {

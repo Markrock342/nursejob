@@ -27,6 +27,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import app, { db } from '../config/firebase';
 import { isAuthUser } from './security/authGuards';
 import { isNotificationSettingEnabled } from './settingsService';
+import { NurseScheduleEntry } from '../types';
 
 // Ensure Firebase is initialized (for push notification context)
 if (!app) {
@@ -217,6 +218,137 @@ export async function sendLocalNotification(
     },
     trigger: null, // null = immediate
   });
+}
+
+function toDate(value: any): Date {
+  if (value instanceof Date) return value;
+  if (value?.toDate) return value.toDate();
+  return new Date(value);
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function formatEntryTime(entry: NurseScheduleEntry): string {
+  const startAt = toDate(entry.startAt);
+  return `${pad2(startAt.getHours())}:${pad2(startAt.getMinutes())}`;
+}
+
+function formatOffsetLabel(offsetMinutes: number): string {
+  if (offsetMinutes <= 0) return 'ตรงเวลา';
+  if (offsetMinutes % 60 === 0) return `${offsetMinutes / 60} ชั่วโมง`;
+  return `${offsetMinutes} นาที`;
+}
+
+function combineReminderDateTime(date: Date, timeText?: string | null): Date | null {
+  if (!timeText || !/^\d{2}:\d{2}$/.test(timeText)) return null;
+  const [hours, minutes] = timeText.split(':').map(Number);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), hours, minutes, 0, 0);
+}
+
+export async function syncScheduleReminderNotifications(
+  userId: string,
+  entries: NurseScheduleEntry[],
+): Promise<void> {
+  const N = getNotificationsSync();
+  if (!N || !isAuthUser(userId)) return;
+
+  const permissions = await N.getPermissionsAsync();
+  let finalStatus = permissions.status;
+  if (finalStatus !== 'granted') {
+    const requested = await N.requestPermissionsAsync();
+    finalStatus = requested.status;
+  }
+  if (finalStatus !== 'granted') return;
+  if (!(await isNotificationSettingEnabled('pushEnabled'))) return;
+
+  if (Platform.OS === 'android') {
+    await N.setNotificationChannelAsync('schedule', {
+      name: 'ตารางงาน',
+      description: 'เตือนก่อนถึงเวลาเวรและงานที่ยืนยันแล้ว',
+      importance: N.AndroidImportance?.HIGH ?? 3,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#0EA5E9',
+      sound: 'default',
+    });
+  }
+
+  const scheduled = await N.getAllScheduledNotificationsAsync();
+  const ownedScheduleNotifications = scheduled.filter((item: any) =>
+    item?.content?.data?.type === 'schedule_reminder' && item?.content?.data?.userId === userId,
+  );
+
+  await Promise.all(
+    ownedScheduleNotifications.map((item: any) => N.cancelScheduledNotificationAsync(item.identifier)),
+  );
+
+  const now = Date.now();
+  const reminderOffsets = [720, 120];
+  const upcomingEntries = entries
+    .filter((entry) => !['availability', 'time_off'].includes(entry.kind))
+    .filter((entry) => toDate(entry.startAt).getTime() > now)
+    .sort((left, right) => toDate(left.startAt).getTime() - toDate(right.startAt).getTime())
+    .slice(0, 20);
+
+  for (const entry of upcomingEntries) {
+    const startAt = toDate(entry.startAt);
+    const exactReminderAt = entry.kind !== 'nursego_job' && entry.reminderEnabled
+      ? combineReminderDateTime(startAt, entry.reminderTime)
+      : null;
+
+    if (exactReminderAt) {
+      if (exactReminderAt.getTime() <= now + 60 * 1000) continue;
+      await N.scheduleNotificationAsync({
+        content: {
+          title: 'เตือนตารางงาน',
+          body: `${entry.title} เวลา ${formatEntryTime(entry)}`,
+          data: {
+            type: 'schedule_reminder',
+            userId,
+            scheduleEntryId: entry.id,
+            linkedJobId: entry.linkedJobId,
+          },
+          sound: 'default',
+        },
+        trigger: {
+          type: N.SchedulableTriggerInputTypes?.DATE ?? 'date',
+          date: exactReminderAt,
+          channelId: Platform.OS === 'android' ? 'schedule' : undefined,
+        },
+      });
+      continue;
+    }
+
+    const entryReminderOffsets = entry.kind === 'nursego_job'
+      ? reminderOffsets
+      : (typeof entry.reminderOffsetMinutes === 'number'
+          ? (entry.reminderOffsetMinutes > 0 ? [entry.reminderOffsetMinutes] : [])
+          : []);
+
+    for (const offsetMinutes of entryReminderOffsets) {
+      const reminderAt = new Date(startAt.getTime() - offsetMinutes * 60 * 1000);
+      if (reminderAt.getTime() <= now + 60 * 1000) continue;
+      await N.scheduleNotificationAsync({
+        content: {
+          title: 'เตือนตารางงาน',
+          body: `${entry.title} ในอีก ${formatOffsetLabel(offsetMinutes)} เวลา ${formatEntryTime(entry)}`,
+          data: {
+            type: 'schedule_reminder',
+            userId,
+            scheduleEntryId: entry.id,
+            linkedJobId: entry.linkedJobId,
+          },
+          sound: 'default',
+        },
+        trigger: {
+          type: N.SchedulableTriggerInputTypes?.DATE ?? 'date',
+          date: reminderAt,
+          channelId: Platform.OS === 'android' ? 'schedule' : undefined,
+        },
+      });
+    }
+  }
 }
 
 // ==========================================

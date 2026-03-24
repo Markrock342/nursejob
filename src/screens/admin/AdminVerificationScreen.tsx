@@ -73,6 +73,7 @@ export default function AdminVerificationScreen() {
       setDocuments(documentData);
     } catch (error) {
       console.error('Error loading verifications:', error);
+      Alert.alert('โหลดข้อมูลไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -112,6 +113,7 @@ export default function AdminVerificationScreen() {
       setSelectedDocument(null);
       Alert.alert('✅ อนุมัติสำเร็จ', 'เอกสารถูกอนุมัติเรียบร้อยแล้ว');
     } catch (error: any) {
+      setShowDetailModal(false);
       Alert.alert('ข้อผิดพลาด', error.message || 'ไม่สามารถอนุมัติเอกสารได้');
     } finally {
       setIsProcessing(false);
@@ -130,12 +132,14 @@ export default function AdminVerificationScreen() {
     try {
       await rejectDocument(selectedDocument.id, user.uid, rejectReason.trim());
       setDocuments((prev) => prev.filter((item) => item.id !== selectedDocument.id));
-      setShowRejectModal(false);
-      setShowDetailModal(false);
       setSelectedDocument(null);
       setRejectReason('');
+      setShowRejectModal(false);
+      setShowDetailModal(false);
       Alert.alert('❌ ปฏิเสธแล้ว', 'เอกสารถูกปฏิเสธเรียบร้อย');
     } catch (error: any) {
+      setShowRejectModal(false);
+      setShowDetailModal(false);
       Alert.alert('ข้อผิดพลาด', error.message || 'ไม่สามารถปฏิเสธเอกสารได้');
     } finally {
       setIsProcessing(false);
@@ -154,12 +158,14 @@ export default function AdminVerificationScreen() {
     try {
       await rejectVerificationRequest(selectedRequest.id!, user.uid, rejectReason);
       setRequests(prev => prev.filter(r => r.id !== selectedRequest.id));
-      setShowRejectModal(false);
-      setShowDetailModal(false);
       setSelectedRequest(null);
       setRejectReason('');
+      setShowRejectModal(false);
+      setShowDetailModal(false);
       Alert.alert('❌ ปฏิเสธแล้ว', 'คำขอถูกปฏิเสธเรียบร้อย');
     } catch (error: any) {
+      setShowRejectModal(false);
+      setShowDetailModal(false);
       Alert.alert('ข้อผิดพลาด', error.message);
     } finally {
       setIsProcessing(false);
@@ -540,7 +546,13 @@ export default function AdminVerificationScreen() {
                   {selectedDocumentIsImage ? (
                     <Image source={{ uri: selectedDocument.fileUrl }} style={styles.documentPreviewImage} resizeMode="contain" />
                   ) : (
-                    <WebView source={{ uri: selectedDocument.fileUrl }} style={styles.documentPreviewWebview} />
+                    <WebView
+                      source={{ uri: selectedDocument.fileUrl }}
+                      style={styles.documentPreviewWebview}
+                      originWhitelist={['https:']}
+                      javaScriptEnabled={false}
+                      allowFileAccess={false}
+                    />
                   )}
                 </View>
                 <TouchableOpacity

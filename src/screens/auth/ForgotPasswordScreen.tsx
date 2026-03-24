@@ -17,6 +17,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Button, Input } from '../../components/common';
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useTheme } from '../../context/ThemeContext';
+import { useI18n } from '../../i18n';
 import { resetPassword } from '../../services/authService';
 import { AuthStackParamList } from '../../types';
 
@@ -34,6 +35,7 @@ interface Props {
 // ============================================
 export default function ForgotPasswordScreen({ navigation }: Props) {
   const { colors } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // State
   const [email, setEmail] = useState('');
@@ -44,11 +46,11 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
   // Validate email
   const validateEmail = (): boolean => {
     if (!email.trim()) {
-      setError('กรุณากรอกอีเมล');
+      setError(t('auth.forgotPassword.emailRequired'));
       return false;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('รูปแบบอีเมลไม่ถูกต้อง');
+      setError(t('auth.forgotPassword.emailInvalid'));
       return false;
     }
     setError('');
@@ -65,8 +67,8 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
       setEmailSent(true);
     } catch (err: any) {
       Alert.alert(
-        'ส่งอีเมลไม่สำเร็จ',
-        err.message || 'กรุณาลองใหม่อีกครั้ง'
+        t('auth.forgotPassword.sendFailedTitle'),
+        err.message || t('common.alerts.genericTryAgain')
       );
     } finally {
       setIsLoading(false);
@@ -78,9 +80,9 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
     setIsLoading(true);
     try {
       await resetPassword(email.trim());
-      Alert.alert('สำเร็จ', 'ส่งอีเมลรีเซ็ตรหัสผ่านอีกครั้งแล้ว');
+      Alert.alert(t('auth.forgotPassword.resendSuccessTitle'), t('auth.forgotPassword.resendSuccessMessage'));
     } catch (err: any) {
-      Alert.alert('ส่งอีเมลไม่สำเร็จ', err.message || 'กรุณาลองใหม่อีกครั้ง');
+      Alert.alert(t('auth.forgotPassword.sendFailedTitle'), err.message || t('common.alerts.genericTryAgain'));
     } finally {
       setIsLoading(false);
     }
@@ -92,17 +94,17 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
       <SafeAreaView style={styles.container}>
         <View style={styles.successContainer}>
           <Text style={styles.successIcon}>✉️</Text>
-          <Text style={styles.successTitle}>ส่งอีเมลแล้ว</Text>
+          <Text style={styles.successTitle}>{t('auth.forgotPassword.successTitle')}</Text>
           <Text style={styles.successMessage}>
-            เราได้ส่งลิงก์รีเซ็ตรหัสผ่านไปยัง{'\n'}
+            {t('auth.forgotPassword.successMessage', { email: '' }).split('\n')[0]}{'\n'}
             <Text style={styles.emailHighlight}>{email}</Text>
           </Text>
           <Text style={styles.instructionText}>
-            กรุณาตรวจสอบอีเมลของคุณและคลิกลิงก์เพื่อรีเซ็ตรหัสผ่าน
+            {t('auth.forgotPassword.instruction')}
           </Text>
 
           <Button
-            title="กลับไปหน้าเข้าสู่ระบบ"
+            title={t('auth.forgotPassword.backToLogin')}
             onPress={() => navigation.navigate('Login')}
             fullWidth
             style={{ marginTop: SPACING.xl }}
@@ -114,7 +116,7 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
             disabled={isLoading}
           >
             <Text style={styles.resendText}>
-              {isLoading ? 'กำลังส่ง...' : 'ไม่ได้รับอีเมล? ส่งอีกครั้ง'}
+              {isLoading ? t('auth.forgotPassword.resendLoading') : t('auth.forgotPassword.resendLink')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -134,27 +136,27 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.backButtonText}>← ย้อนกลับ</Text>
+            <Text style={styles.backButtonText}>{`← ${t('auth.forgotPassword.back')}`}</Text>
           </TouchableOpacity>
 
           <View style={styles.header}>
             <Text style={styles.icon}>🔐</Text>
-            <Text style={styles.title}>ลืมรหัสผ่าน?</Text>
+            <Text style={styles.title}>{t('auth.forgotPassword.title')}</Text>
             <Text style={styles.subtitle}>
-              กรอกอีเมลที่ใช้ลงทะเบียน เราจะส่งลิงก์รีเซ็ตรหัสผ่านให้คุณ
+              {t('auth.forgotPassword.subtitle')}
             </Text>
           </View>
 
           {/* Form */}
           <View style={styles.form}>
             <Input
-              label="อีเมล"
+              label={t('auth.forgotPassword.emailLabel')}
               value={email}
               onChangeText={(text) => {
                 setEmail(text);
                 if (error) setError('');
               }}
-              placeholder="example@email.com"
+              placeholder={t('auth.forgotPassword.emailPlaceholder')}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -163,7 +165,7 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
             />
 
             <Button
-              title="ส่งลิงก์รีเซ็ตรหัสผ่าน"
+              title={t('auth.forgotPassword.submit')}
               onPress={handleResetPassword}
               loading={isLoading}
               fullWidth
@@ -173,9 +175,9 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
 
           {/* Footer */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>จำรหัสผ่านได้แล้ว? </Text>
+            <Text style={styles.footerText}>{t('auth.forgotPassword.remembered')} </Text>
             <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-              <Text style={styles.loginLink}>เข้าสู่ระบบ</Text>
+              <Text style={styles.loginLink}>{t('auth.forgotPassword.loginLink')}</Text>
             </TouchableOpacity>
           </View>
         </View>

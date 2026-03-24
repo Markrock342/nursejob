@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { sendOTP, verifyOTP, isValidThaiPhone } from '../../services/otpService';
 import { AuthStackParamList } from '../../types';
+import { useI18n } from '../../i18n';
 
 
 // ============================================
@@ -38,6 +39,7 @@ interface Props {
 // ============================================
 export default function PhoneLoginScreen({ navigation }: Props) {
   const { colors } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   
   // State
@@ -68,11 +70,11 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   // Validate phone number
   const validatePhone = (): boolean => {
     if (!phone.trim()) {
-      setPhoneError('กรุณากรอกเบอร์โทรศัพท์');
+      setPhoneError(t('auth.phoneLogin.phoneRequired'));
       return false;
     }
     if (!isValidThaiPhone(phone)) {
-      setPhoneError('กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง (เช่น 0812345678)');
+      setPhoneError(t('auth.phoneLogin.phoneInvalid'));
       return false;
     }
     setPhoneError('');
@@ -91,11 +93,11 @@ export default function PhoneLoginScreen({ navigation }: Props) {
         setStep('otp');
         setCountdown(60);
       } else {
-        setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
+        setErrorMessage(result.error || t('auth.register.otpSendFailedMessage'));
         setShowErrorModal(true);
       }
     } catch (error: any) {
-      setErrorMessage(error.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
+      setErrorMessage(error.message || t('auth.register.genericError'));
       setShowErrorModal(true);
     } finally {
       setIsLoading(false);
@@ -112,11 +114,11 @@ export default function PhoneLoginScreen({ navigation }: Props) {
         setCountdown(60);
         setOtp(['', '', '', '', '', '']);
       } else {
-        setErrorMessage(result.error || 'ไม่สามารถส่ง OTP ได้');
+        setErrorMessage(result.error || t('auth.register.otpSendFailedMessage'));
         setShowErrorModal(true);
       }
     } catch (error) {
-      setErrorMessage('ไม่สามารถส่ง OTP ได้');
+      setErrorMessage(t('auth.register.otpSendFailedMessage'));
       setShowErrorModal(true);
     } finally {
       setIsResending(false);
@@ -156,12 +158,12 @@ export default function PhoneLoginScreen({ navigation }: Props) {
   const handleVerifyOTP = async (otpCode?: string) => {
     const code = otpCode || otp.join('');
     if (code.length !== 6) {
-      setErrorMessage('กรุณากรอกรหัส OTP 6 หลัก');
+      setErrorMessage(t('auth.phoneLogin.otpRequired'));
       setShowErrorModal(true);
       return;
     }
     if (!verificationId) {
-      setErrorMessage('กรุณาขอรหัส OTP ใหม่');
+      setErrorMessage(t('auth.phoneLogin.otpRequestNew'));
       setShowErrorModal(true);
       return;
     }
@@ -171,7 +173,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
       // Verify OTP with Firebase Phone Auth
       const result = await verifyOTP(verificationId, code);
       if (!result.success) {
-        setErrorMessage(result.error || 'รหัส OTP ไม่ถูกต้องหรือหมดอายุ');
+        setErrorMessage(result.error || t('auth.phoneLogin.otpInvalidOrExpired'));
         setShowErrorModal(true);
         setOtp(['', '', '', '', '', '']);
         inputRefs.current[0]?.focus();
@@ -183,7 +185,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
       await loginWithPhone(phone);
       setShowSuccessModal(true);
     } catch (error: any) {
-      setErrorMessage(error.message || 'เข้าสู่ระบบไม่สำเร็จ');
+      setErrorMessage(error.message || t('auth.phoneLogin.loginFailed'));
       setShowErrorModal(true);
     } finally {
       setIsLoading(false);
@@ -225,12 +227,12 @@ export default function PhoneLoginScreen({ navigation }: Props) {
               <Ionicons name="chatbubble-ellipses-outline" size={34} color="#FFFFFF" />
             </View>
             <Text style={styles.title}>
-              {step === 'phone' ? 'เข้าสู่ระบบด้วยเบอร์โทร' : 'ยืนยัน OTP'}
+              {step === 'phone' ? t('auth.phoneLogin.title') : t('auth.phoneLogin.otpTitle')}
             </Text>
             <Text style={styles.subtitle}>
               {step === 'phone'
-                ? 'กรอกเบอร์โทรที่ลงทะเบียนไว้'
-                : `รหัส OTP ถูกส่งไปที่ ${formatPhoneDisplay(phone)}`}
+                ? t('auth.phoneLogin.subtitlePhone')
+                : t('auth.phoneLogin.subtitleOtp', { phone: formatPhoneDisplay(phone) })}
             </Text>
           </View>
 
@@ -238,20 +240,20 @@ export default function PhoneLoginScreen({ navigation }: Props) {
           {step === 'phone' && (
             <View style={styles.form}>
               <Input
-                label="เบอร์โทรศัพท์"
+                label={t('auth.phoneLogin.phoneLabel')}
                 value={phone}
                 onChangeText={(text) => {
                   setPhone(text);
                   if (phoneError) setPhoneError('');
                 }}
-                placeholder="0812345678"
+                placeholder={t('auth.phoneLogin.phonePlaceholder')}
                 keyboardType="phone-pad"
                 error={phoneError}
                 icon={<Ionicons name="call-outline" size={20} color={COLORS.textMuted} />}
               />
 
               <Button
-                title="ส่งรหัส OTP"
+                title={t('auth.phoneLogin.sendOtp')}
                 onPress={handleSendOTP}
                 loading={isLoading}
                 style={{ marginTop: SPACING.md }}
@@ -262,7 +264,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
                 onPress={() => navigation.navigate('Register')}
               >
                 <Text style={styles.registerText}>
-                  ยังไม่มีบัญชี? <Text style={styles.registerHighlight}>สมัครสมาชิก</Text>
+                  {t('auth.phoneLogin.noAccount')} <Text style={styles.registerHighlight}>{t('auth.phoneLogin.registerLink')}</Text>
                 </Text>
               </TouchableOpacity>
             </View>
@@ -296,7 +298,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
               <View style={styles.resendContainer}>
                 {countdown > 0 ? (
                   <Text style={styles.countdownText}>
-                    ส่งรหัสใหม่ใน {countdown} วินาที
+                    {t('auth.phoneLogin.resendIn', { count: countdown })}
                   </Text>
                 ) : (
                   <TouchableOpacity
@@ -304,7 +306,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
                     disabled={isResending}
                   >
                     <Text style={styles.resendText}>
-                      {isResending ? 'กำลังส่ง...' : 'ส่งรหัส OTP ใหม่'}
+                      {isResending ? t('auth.phoneLogin.resendLoading') : t('auth.phoneLogin.resend')}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -314,7 +316,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
 
               {/* Verify Button */}
               <Button
-                title="ยืนยัน"
+                title={t('auth.phoneLogin.verify')}
                 onPress={() => handleVerifyOTP()}
                 loading={isLoading}
                 disabled={otp.join('').length !== 6}
@@ -330,7 +332,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
                   setCountdown(0);
                 }}
               >
-                <Text style={styles.changePhoneText}>เปลี่ยนเบอร์โทร</Text>
+                <Text style={styles.changePhoneText}>{t('auth.phoneLogin.changePhone')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -340,8 +342,8 @@ export default function PhoneLoginScreen({ navigation }: Props) {
       {/* Success Modal */}
       <SuccessModal
         visible={showSuccessModal}
-        title="เข้าสู่ระบบสำเร็จ"
-        message="ยินดีต้อนรับกลับมา!"
+        title={t('auth.phoneLogin.successTitle')}
+        message={t('auth.phoneLogin.successMessage')}
         icon="✅"
         onClose={() => {
           setShowSuccessModal(false);
@@ -352,7 +354,7 @@ export default function PhoneLoginScreen({ navigation }: Props) {
       {/* Error Modal */}
       <ErrorModal
         visible={showErrorModal}
-        title="เกิดข้อผิดพลาด"
+        title={t('auth.phoneLogin.errorTitle')}
         message={errorMessage}
         onClose={() => setShowErrorModal(false)}
       />

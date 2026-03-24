@@ -72,6 +72,7 @@ export default function AdminFeedbackScreen() {
       setStats(statsData);
     } catch (error) {
       console.error('Error loading feedback:', error);
+      Alert.alert('โหลดข้อมูลไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);

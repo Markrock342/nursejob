@@ -39,19 +39,21 @@ import {
   StaffType,
   LOCATION_TYPES,
   LocationType,
-  ALL_DEPARTMENTS,
-  HOME_CARE_TYPES,
   PAYMENT_TYPES,
   PaymentType,
-  RATE_TYPES,
-  DURATION_OPTIONS,
   QUICK_TAGS,
-  TAGS_BY_POST_TYPE,
-  BENEFIT_GROUPS,
   TagGroup,
+  getBenefitGroups,
+  getDepartmentOptions,
+  getLocationTypeOptions,
+  getPaymentTypeOptions,
+  getRateTypeOptions,
+  getStaffTypeOptions,
+  getTagGroups,
   getStaffTypeLabel,
 } from '../../constants/jobOptions';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
+import { useI18n } from '../../i18n';
 import { trackEvent } from '../../services/analyticsService';
 import {
   buildPostShifts,
@@ -84,31 +86,10 @@ interface Props {
 // ประเภทประกาศ
 type PostType = 'shift' | 'job' | 'homecare';
 
-const POST_TYPES = [
-  {
-    value: 'shift' as PostType,
-    title: 'หาคนแทนเวร',
-    subtitle: 'ระบุวัน เวลา และรายละเอียดเวรที่ต้องการผู้ช่วยดูแลแทน',
-    icon: 'swap-horizontal-outline' as const,
-    color: '#3B82F6',
-    bgColor: '#EFF6FF',
-  },
-  {
-    value: 'job' as PostType,
-    title: 'รับสมัครบุคลากร',
-    subtitle: 'ประกาศรับสมัครงานประจำ พร้อมเงินเดือนและสวัสดิการ',
-    icon: 'briefcase-outline' as const,
-    color: '#10B981',
-    bgColor: '#ECFDF5',
-  },
-  {
-    value: 'homecare' as PostType,
-    title: 'หาคนดูแลผู้ป่วย',
-    subtitle: 'เฝ้าไข้ / ดูแลผู้สูงอายุ / ดูแลที่บ้าน',
-    icon: 'home-outline' as const,
-    color: '#F59E0B',
-    bgColor: '#FFFBEB',
-  },
+const POST_TYPE_META = [
+  { value: 'shift' as PostType, titleKey: 'postJob.postTypes.shift.title' as const, subtitleKey: 'postJob.postTypes.shift.subtitle' as const, icon: 'swap-horizontal-outline' as const, color: '#3B82F6', bgColor: '#EFF6FF' },
+  { value: 'job' as PostType, titleKey: 'postJob.postTypes.job.title' as const, subtitleKey: 'postJob.postTypes.job.subtitle' as const, icon: 'briefcase-outline' as const, color: '#10B981', bgColor: '#ECFDF5' },
+  { value: 'homecare' as PostType, titleKey: 'postJob.postTypes.homecare.title' as const, subtitleKey: 'postJob.postTypes.homecare.subtitle' as const, icon: 'home-outline' as const, color: '#F59E0B', bgColor: '#FFFBEB' },
 ];
 
 const normalizePaymentType = (paymentType?: JobPost['paymentType']): PaymentType => {
@@ -128,11 +109,11 @@ const normalizePaymentType = (paymentType?: JobPost['paymentType']): PaymentType
 
 const toDateKey = (date: Date) => formatLocalDateKey(date);
 
-const CONTACT_MODE_OPTIONS: Array<{ value: JobContactMode; label: string; helper: string }> = [
-  { value: 'in_app', label: 'เริ่มคุยผ่านแอป', helper: 'จัดการแชทและติดตามงานได้สะดวกในที่เดียว' },
-  { value: 'phone', label: 'ให้เบอร์โทร', helper: 'แชร์เบอร์เมื่ออีกฝ่ายสนใจ เพื่อคุยต่อได้รวดเร็ว' },
-  { value: 'line', label: 'ให้ LINE', helper: 'แชร์ LINE เมื่ออีกฝ่ายสนใจ เพื่อคุยต่อได้สะดวก' },
-  { value: 'phone_or_line', label: 'เบอร์ + LINE', helper: 'เลือกช่องทางที่สะดวกที่สุดได้ภายหลัง' },
+const CONTACT_MODE_KEYS: Array<{ value: JobContactMode; labelKey: string; helperKey: string }> = [
+  { value: 'in_app', labelKey: 'postJob.contactModes.inApp.label', helperKey: 'postJob.contactModes.inApp.helper' },
+  { value: 'phone', labelKey: 'postJob.contactModes.phone.label', helperKey: 'postJob.contactModes.phone.helper' },
+  { value: 'line', labelKey: 'postJob.contactModes.line.label', helperKey: 'postJob.contactModes.line.helper' },
+  { value: 'phone_or_line', labelKey: 'postJob.contactModes.phoneLine.label', helperKey: 'postJob.contactModes.phoneLine.helper' },
 ];
 
 interface FormData {
@@ -205,6 +186,7 @@ interface FormData {
 export default function PostJobScreen({ navigation, route }: Props) {
   const { user, isAuthenticated, isInitialized } = useAuth();
   const { colors, isDark } = useTheme();
+  const { t } = useI18n();
   const onboardingSurveyEnabled = useOnboardingSurveyEnabled();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -257,12 +239,12 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const isEditMode = Boolean(editJob);
 
   // กรองประเภทโพสต์ตาม role
-  const visiblePostTypes = POST_TYPES.filter((t) => {
+  const visiblePostTypes = POST_TYPE_META.filter((pt) => {
     if (!user) return true; // ยังไม่ล็อกอิน — แสดงทั้งหมด
     switch (user.role) {
-      case 'nurse':   return t.value === 'shift'; // พยาบาล → หาคนแทนเวรเท่านั้น
-      case 'hospital': return t.value === 'job'; // รพ./คลินิก/เอเจนซี่ → รับสมัครงานเท่านั้น
-      case 'user':    return t.value === 'homecare'; // คนทั่วไป → หาคนดูแลเท่านั้น
+      case 'nurse':   return pt.value === 'shift';
+      case 'hospital': return pt.value === 'job';
+      case 'user':    return pt.value === 'homecare';
       default:        return true;
     }
   });
@@ -352,6 +334,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
   // Subscription
   const [postsRemaining, setPostsRemaining] = useState<number | null>(null);
   const [userPlan, setUserPlan] = useState<SubscriptionPlan>('free');
+  const staffTypeOptions = getStaffTypeOptions();
+  const locationTypeOptions = getLocationTypeOptions();
+  const departmentOptions = getDepartmentOptions(form.postType, form.locationType);
+  const rateTypeOptions = getRateTypeOptions();
+  const paymentTypeOptions = getPaymentTypeOptions();
+  const benefitGroups = getBenefitGroups();
+  const tagGroups = getTagGroups(form.postType);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -442,7 +431,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const applySourceText = () => {
     const rawText = form.sourceText.trim();
     if (!rawText) {
-      setAlert(createAlert.info('ยังไม่มีข้อความ', 'วางข้อความจากโพสต์เดิมก่อน แล้วค่อยให้ระบบช่วยดึงข้อมูล') as AlertState);
+      setAlert(createAlert.info(t('postJob.alerts.noSourceText'), t('postJob.alerts.noSourceTextMessage')) as AlertState);
       return;
     }
 
@@ -485,7 +474,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       sourceText: rawText,
     }));
     setParseWarnings(parsed.parseWarnings);
-    setAlert(createAlert.success('ดึงข้อมูลเบื้องต้นแล้ว', 'ตรวจทานวัน เวลา จังหวัด และค่าตอบแทนก่อนโพสต์จริง') as AlertState);
+    setAlert(createAlert.success(t('postJob.alerts.parsedSuccess'), t('postJob.alerts.parsedSuccessMessage')) as AlertState);
   };
 
   const externalContactSignals = detectExternalContactSignals(`${form.title}\n${form.description}\n${form.sourceText}`);
@@ -531,10 +520,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
   
   // Get departments based on post type
   const getDepartments = () => {
-    if (form.postType === 'homecare' || form.locationType === 'HOME') {
-      return HOME_CARE_TYPES;
-    }
-    return ALL_DEPARTMENTS;
+    return departmentOptions;
   };
   
   // Guest check
@@ -543,14 +529,14 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.centeredView}>
           <Ionicons name="document-text-outline" size={64} color={colors.border} />
-          <Text style={[styles.centeredTitle, { color: colors.text }]}>เข้าสู่ระบบก่อนโพสต์</Text>
+          <Text style={[styles.centeredTitle, { color: colors.text }]}>{t('postJob.guest.title')}</Text>
           <Text style={[styles.centeredSubtitle, { color: colors.textSecondary }]}>
-            กรุณาเข้าสู่ระบบเพื่อลงประกาศ
+            {t('postJob.guest.subtitle')}
           </Text>
           <Button
               onPress={() => navigation.navigate('Auth')}
               style={{ marginTop: SPACING.lg }}
-            >เข้าสู่ระบบ</Button>
+            >{t('postJob.guest.button')}</Button>
         </View>
       </SafeAreaView>
     );
@@ -562,24 +548,24 @@ export default function PostJobScreen({ navigation, route }: Props) {
     
     switch (step) {
       case 1: // ข้อมูลพื้นฐาน
-        if (!form.staffType) newErrors.staffType = 'กรุณาเลือกประเภทบุคลากร';
+        if (!form.staffType) newErrors.staffType = t('postJob.validation.staffType');
         if (form.postType !== 'homecare' && !form.locationType) {
-          newErrors.locationType = 'กรุณาเลือกประเภทสถานที่';
+          newErrors.locationType = t('postJob.validation.locationType');
         }
         if (!form.department) {
-          newErrors.department = 'กรุณาเลือกแผนก';
+          newErrors.department = t('postJob.validation.department');
         }
         break;
       case 2: // วันเวลา
         if (form.postType === 'job') {
-          if (!form.employmentType) newErrors.employmentType = 'กรุณาเลือกรูปแบบการจ้าง';
-          if (!form.workHours.trim()) newErrors.workHours = 'กรุณากรอกวันและเวลาทำงาน';
+          if (!form.employmentType) newErrors.employmentType = t('postJob.validation.employmentType');
+          if (!form.workHours.trim()) newErrors.workHours = t('postJob.validation.workHours');
         } else {
           if (!form.slotsNeeded || form.slotsNeeded < 1) {
-            newErrors.slotsNeeded = 'กรุณาระบุจำนวนคนที่ต้องการอย่างน้อย 1 คน';
+            newErrors.slotsNeeded = t('postJob.validation.slotsNeeded');
           }
           if (form.shiftDates.length === 0) {
-            newErrors.shiftDates = 'กรุณาเลือกอย่างน้อย 1 วัน';
+            newErrors.shiftDates = t('postJob.validation.shiftDates');
           }
           // Check each selected date has both start and end time
           {
@@ -587,41 +573,41 @@ export default function PostJobScreen({ navigation, route }: Props) {
               const s = form.shiftTimeSlots[toDateKey(d)];
               return !s?.start || !s?.end;
             });
-            if (missingTime) newErrors.shiftTimes = 'กรุณาระบุเวลาให้ครบทุกวัน';
+            if (missingTime) newErrors.shiftTimes = t('postJob.validation.shiftTimes');
           }
         }
         break;
       case 3: // สถานที่
-        if (!form.province) newErrors.province = 'กรุณาเลือกจังหวัด';
+        if (!form.province) newErrors.province = t('postJob.validation.province');
         // ผ่านได้ถ้าพิมพ์ชื่อสถานที่ OR ปักหมุดบนแผนที่แล้ว
         if (form.locationType !== 'HOME' && !form.hospital && !(form.locationLat && form.locationLng)) {
-          newErrors.hospital = 'กรุณากรอกชื่อสถานที่ หรือปักหมุดบนแผนที่';
+          newErrors.hospital = t('postJob.validation.hospital');
         }
         if (form.locationType === 'HOME' && !form.address && !(form.locationLat && form.locationLng)) {
-          newErrors.address = 'กรุณากรอกที่อยู่ หรือปักหมุดบนแผนที่';
+          newErrors.address = t('postJob.validation.address');
         }
         break;
       case 4: // ค่าตอบแทน & ติดต่อ
         if (!form.shiftRate && form.postType !== 'job') {
-          newErrors.shiftRate = 'กรุณากรอกค่าตอบแทน';
+          newErrors.shiftRate = t('postJob.validation.shiftRate');
         }
         if (form.postType === 'job' && !form.salaryMin) {
-          newErrors.salaryMin = 'กรุณากรอกเงินเดือน';
+          newErrors.salaryMin = t('postJob.validation.salaryMin');
         }
         if (form.postType === 'job' && !form.description.trim()) {
-          newErrors.description = 'กรุณากรอกรายละเอียดงาน';
+          newErrors.description = t('postJob.validation.description');
         }
         if (form.contactMode === 'phone' && !form.contactPhone.trim()) {
-          newErrors.contact = 'กรุณากรอกเบอร์โทร';
+          newErrors.contact = t('postJob.validation.contactPhone');
         }
         if (form.contactMode === 'line' && !form.contactLine.trim()) {
-          newErrors.contact = 'กรุณากรอก LINE ID';
+          newErrors.contact = t('postJob.validation.contactLine');
         }
         if (form.contactMode === 'phone_or_line' && !form.contactPhone.trim() && !form.contactLine.trim()) {
-          newErrors.contact = 'กรุณากรอกเบอร์โทรหรือ LINE อย่างน้อย 1 ช่อง';
+          newErrors.contact = t('postJob.validation.contactPhoneOrLine');
         }
         if (form.contactMode === 'in_app' && externalContactSignals.hasExternalContact) {
-          newErrors.contact = 'หากต้องการเริ่มคุยผ่านแอปก่อน กรุณาย้ายเบอร์โทร, LINE หรือ link ไปไว้ในช่องติดต่อ';
+          newErrors.contact = t('postJob.validation.contactExternalSignal');
         }
         break;
     }
@@ -678,7 +664,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
 
     try {
       if (!user?.uid || !isInitialized) {
-        setAlert(createAlert.warning('กำลังยืนยันเซสชัน', 'กรุณารอสักครู่แล้วลองโพสต์อีกครั้ง') as AlertState);
+        setAlert(createAlert.warning(t('postJob.alerts.sessionPending'), t('postJob.alerts.sessionPendingMessage')) as AlertState);
         return;
       }
 
@@ -686,7 +672,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       if (!isEditMode) {
         const postStatus = await canUserPostToday(user.uid);
         if (!postStatus.canPost) {
-          setAlert(createAlert.warning('ถึงลิมิตโพสต์แล้ว', postStatus.reason || 'บัญชีนี้ใช้โควตาโพสต์ครบแล้วในเดือนนี้') as AlertState);
+          setAlert(createAlert.warning(t('postJob.alerts.postLimitReached'), postStatus.reason || t('postJob.alerts.postLimitReachedMessage')) as AlertState);
           return;
         }
       }
@@ -714,8 +700,8 @@ export default function PostJobScreen({ navigation, route }: Props) {
 
           setAlert(
             createAlert.info(
-              'โพสต์แรกจะลงให้ก่อนทันที',
-              'ระบบจะลงประกาศแบบปกติก่อน เพื่อไม่ให้การโพสต์ครั้งแรกสะดุด คุณสามารถกดโปรโมตเป็นประกาศด่วนภายหลังได้จากหน้าประกาศของฉัน'
+              t('postJob.alerts.firstPostDeferred'),
+              t('postJob.alerts.firstPostDeferredMessage')
             ) as AlertState
           );
           await createJobPost(false, { ...form, isUrgent: false });
@@ -725,7 +711,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         if (commerceStatus.freeAccessEnabled) {
           const canUseUrgent = await canUseFreeUrgent(user.uid);
           if (!canUseUrgent) {
-            setAlert(createAlert.info('สิทธิ์ประกาศด่วนครบแล้ว', 'บัญชีนี้ใช้สิทธิ์ประกาศด่วนครบตามรอบปัจจุบันแล้ว คุณยังสามารถโพสต์แบบปกติได้') as AlertState);
+            setAlert(createAlert.info(t('postJob.alerts.urgentQuotaReached'), t('postJob.alerts.urgentQuotaReachedMessage')) as AlertState);
             return;
           }
 
@@ -751,8 +737,8 @@ export default function PostJobScreen({ navigation, route }: Props) {
         navigation.navigate('Payment', {
           type: 'urgent_post',
           amount: PRICING.urgentPost,
-          title: 'ประกาศด่วน',
-          description: 'ติดป้าย "ด่วน" แสดงเด่นกว่าประกาศปกติ',
+          title: t('postJob.alerts.paymentTitle'),
+          description: t('postJob.alerts.paymentDescription'),
           // pass only serializable data (no functions)
           formData: serializeForm(form),
           submissionToken: createSubmissionToken(),
@@ -773,7 +759,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
   // Create job post function
   const createJobPost = async (isPaidUrgent: boolean, formArg?: FormData, consumeUrgentEntitlement: boolean = false) => {
     if (!user?.uid || !isInitialized) {
-      setAlert(createAlert.warning('กำลังยืนยันเซสชัน', 'กรุณารอสักครู่แล้วลองโพสต์อีกครั้ง') as AlertState);
+      setAlert(createAlert.warning(t('postJob.alerts.sessionPending'), t('postJob.alerts.sessionPendingMessage')) as AlertState);
       return;
     }
     
@@ -808,11 +794,11 @@ export default function PostJobScreen({ navigation, route }: Props) {
       if (!title) {
         const staffLabel = getStaffTypeLabel(usedForm.staffType);
         if (usedForm.postType === 'shift') {
-          title = `หา${staffLabel}แทนเวร ${usedForm.department || ''}`.trim();
+          title = t('postJob.autoTitle.shift', { staff: staffLabel, dept: usedForm.department || '' } as any).trim();
         } else if (usedForm.postType === 'job') {
-          title = `รับสมัคร${staffLabel} ${usedForm.hospital || ''}`.trim();
+          title = t('postJob.autoTitle.job', { staff: staffLabel, hospital: usedForm.hospital || '' } as any).trim();
         } else {
-          title = `หาคนดูแล${usedForm.department ? ` (${usedForm.department})` : ''}`.trim();
+          title = t('postJob.autoTitle.homecare', { dept: usedForm.department ? ` (${usedForm.department})` : '' } as any).trim();
         }
       }
       
@@ -884,14 +870,14 @@ export default function PostJobScreen({ navigation, route }: Props) {
           },
         });
 
-        setAlert(createAlert.success('แก้ไขสำเร็จ!', 'อัปเดตประกาศเรียบร้อยแล้ว', [
-          { text: 'ตกลง', onPress: () => navigation.goBack() }
+        setAlert(createAlert.success(t('postJob.alerts.editSuccess'), t('postJob.alerts.editSuccessMessage'), [
+          { text: t('postJob.alerts.editSuccessButton'), onPress: () => navigation.goBack() }
         ]) as AlertState);
       } else {
         const createdJobId = await createJob({
           ...jobData,
           posterId: user.uid,
-          posterName: user.displayName || 'ไม่ระบุชื่อ',
+          posterName: user.displayName || t('postJob.alerts.posterNameFallback'),
           posterPhoto: user.photoURL || '',
           posterVerified: user.isVerified || false,
           posterRole: user.role,
@@ -923,12 +909,12 @@ export default function PostJobScreen({ navigation, route }: Props) {
           await markFreeUrgentUsed(user.uid);
         }
         
-        setAlert(createAlert.success('โพสต์สำเร็จ! 🎉', 'ประกาศของคุณถูกโพสต์แล้ว', [
-          { text: 'ดูประกาศของฉัน', onPress: () => navigation.replace('MyPosts') }
+        setAlert(createAlert.success(t('postJob.alerts.postSuccess'), t('postJob.alerts.postSuccessMessage'), [
+          { text: t('postJob.alerts.postSuccessButton'), onPress: () => navigation.replace('MyPosts') }
         ]) as AlertState);
       }
     } catch (error: any) {
-      setAlert(createAlert.error('เกิดข้อผิดพลาด', error.message) as AlertState);
+      setAlert(createAlert.error(t('postJob.alerts.errorGeneric'), error.message) as AlertState);
     } finally {
       setIsLoading(false);
     }
@@ -938,36 +924,20 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const getStepTitle = () => {
     if (currentStep === 0) {
       if (duplicateJob) {
-        return { title: 'สร้างร่างจากประกาศเดิม', subtitle: 'คัดลอกข้อมูลสำคัญไว้ให้แล้ว ปรับเฉพาะส่วนที่ต่างได้เลย' };
+        return { title: t('postJob.steps.duplicateDraft.title'), subtitle: t('postJob.steps.duplicateDraft.subtitle') };
       }
       if (isEditMode) {
-        return { title: 'แก้ไขประกาศ', subtitle: 'อัปเดตรายละเอียดให้ตรงกับงานรอบนี้' };
+        return { title: t('postJob.steps.editPost.title'), subtitle: t('postJob.steps.editPost.subtitle') };
       }
-      return { title: 'เลือกประเภทประกาศ', subtitle: 'คุณต้องการลงประกาศแบบไหน?' };
+      return { title: t('postJob.steps.selectType.title'), subtitle: t('postJob.steps.selectType.subtitle') };
     }
     
-    const titles: Record<PostType, { title: string; subtitle: string }[]> = {
-      shift: [
-        { title: 'ข้อมูลเวร', subtitle: 'ประเภทบุคลากรและแผนก' },
-        { title: 'วันเวลา', subtitle: 'เลือกวันที่และเวลาเวร' },
-        { title: 'สถานที่', subtitle: 'ระบุสถานที่ทำงาน' },
-        { title: 'ค่าตอบแทน', subtitle: 'กรอกค่าเวรและข้อมูลติดต่อ' },
-      ],
-      job: [
-        { title: 'ตำแหน่งงาน', subtitle: 'ประเภทบุคลากรและแผนก' },
-        { title: 'รูปแบบงาน', subtitle: 'ประเภทการจ้าง วันเริ่มงาน และเวลาทำงาน' },
-        { title: 'สถานที่', subtitle: 'ระบุสถานที่ทำงาน' },
-        { title: 'เงินเดือน', subtitle: 'กรอกเงินเดือนจริง รายละเอียดงาน และข้อมูลติดต่อ' },
-      ],
-      homecare: [
-        { title: 'ประเภทการดูแล', subtitle: 'เลือกประเภทผู้ป่วย' },
-        { title: 'ระยะเวลา', subtitle: 'ระยะเวลาที่ต้องการ' },
-        { title: 'สถานที่', subtitle: 'ระบุที่อยู่ผู้ป่วย' },
-        { title: 'ค่าจ้าง', subtitle: 'กรอกค่าจ้างและข้อมูลติดต่อ' },
-      ],
+    const stepsKey = `postJob.steps.${form.postType}`;
+    const idx = currentStep - 1;
+    return {
+      title: t(`${stepsKey}.${idx}.title` as any) || '',
+      subtitle: t(`${stepsKey}.${idx}.subtitle` as any) || '',
     };
-    
-    return titles[form.postType][currentStep - 1] || { title: '', subtitle: '' };
   };
   
   // ============================================
@@ -976,7 +946,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const renderStep0 = () => (
     <View style={styles.stepContent}>
       <Text style={[styles.typeSelectTitle, { color: colors.text }]}>
-        คุณต้องการลงประกาศแบบไหน?
+        {t('postJob.steps.selectType.subtitle')}
       </Text>
 
       {/* แสดงหมายเหตุแต่ละ role */}
@@ -984,7 +954,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={[styles.infoBox, { backgroundColor: roleTones.user.background, marginBottom: 12 }]}> 
           <Ionicons name="person-circle-outline" size={20} color={roleTones.user.icon} />
           <Text style={[styles.infoText, { color: roleTones.user.text }]}> 
-            ในฐานะ“คนทั่วไป” คุณสามารถลงประกาศ“หาคนดูแลผู้ป่วย” ได้เลย
+            {t('postJob.roleHints.user')}
           </Text>
         </View>
       )}
@@ -992,7 +962,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={[styles.infoBox, { backgroundColor: roleTones.nurse.background, marginBottom: 12 }]}> 
           <Ionicons name="medical-outline" size={20} color={roleTones.nurse.icon} />
           <Text style={[styles.infoText, { color: roleTones.nurse.text }]}> 
-            สำหรับ“พยาบาล” ใช้ประกาศนี้เพื่อหาคนช่วยรับเวรต่อได้รวดเร็วและคุยรายละเอียดกันง่ายขึ้น
+            {t('postJob.roleHints.nurse')}
           </Text>
         </View>
       )}
@@ -1000,7 +970,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={[styles.infoBox, { backgroundColor: roleTones.hospital.background, marginBottom: 12 }]}> 
           <Ionicons name="business-outline" size={20} color={roleTones.hospital.icon} />
           <Text style={[styles.infoText, { color: roleTones.hospital.text }]}> 
-            บัญชีองค์กรลงได้เฉพาะประกาศรับสมัครงาน พร้อมระบุเงินเดือนและรายละเอียดการจ้างแบบงานจริง
+            {t('postJob.roleHints.hospital')}
           </Text>
         </View>
       )}
@@ -1037,13 +1007,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
                   color: isSelected ? type.color : colors.text,
                   fontSize: 16,
                   fontWeight: '700',
-                }]}>{type.title}</Text>
+                }]}>{t(type.titleKey)}</Text>
                 <Text style={[styles.typeSubtitle, {
                   color: colors.textSecondary,
                   fontSize: 12,
                   marginTop: 2,
                   lineHeight: 17,
-                }]}>{type.subtitle}</Text>
+                }]}>{t(type.subtitleKey)}</Text>
               </View>
             </View>
             <View style={[
@@ -1070,10 +1040,10 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <Ionicons name="information-circle" size={20} color={colors.primary} />
         <Text style={[styles.infoText, { color: colors.primaryDark }]}>
           {form.postType === 'shift'
-            ? 'สำหรับเปิดประกาศหาผู้ช่วยขึ้นเวรแทนเฉพาะวัน พร้อมระบุเวลาและรายละเอียดงานให้ชัดเจน'
+            ? t('postJob.infoBoxes.shift')
             : form.postType === 'job'
-            ? 'สำหรับโรงพยาบาล/คลินิก รับสมัครพยาบาลประจำ'
-            : 'สำหรับหาคนดูแลผู้ป่วยที่บ้าน เฝ้าไข้ทั่วไป'}
+            ? t('postJob.infoBoxes.job')
+            : t('postJob.infoBoxes.homecare')}
         </Text>
       </View>
     </View>
@@ -1084,12 +1054,12 @@ export default function PostJobScreen({ navigation, route }: Props) {
   // ============================================
   const renderStep1 = () => (
     <View style={styles.stepContent}>
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>วางข้อความจากโพสต์เดิม</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('postJob.sections.pasteSource')}</Text>
       <TextInput
         style={[styles.textInput, styles.textArea, { borderColor: colors.border, color: colors.text, backgroundColor: inputSurface }]}
         value={form.sourceText}
         onChangeText={(value) => setForm({ ...form, sourceText: value })}
-        placeholder="วางข้อความจากกลุ่ม LINE, OpenChat หรือโพสต์เดิม แล้วให้ระบบช่วยดึง วัน เวลา จังหวัด เรท และจำนวนคน"
+        placeholder={t('postJob.placeholders.sourceText')}
         placeholderTextColor={colors.textMuted}
         multiline
         numberOfLines={5}
@@ -1101,7 +1071,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
           activeOpacity={0.85}
         >
           <Ionicons name="sparkles-outline" size={18} color={colors.white} />
-          <Text style={styles.parserButtonText}>ดึงข้อมูลอัตโนมัติ</Text>
+          <Text style={styles.parserButtonText}>{t('postJob.buttons.extractAuto')}</Text>
         </TouchableOpacity>
       </View>
       {parseWarnings.length > 0 && (
@@ -1123,10 +1093,10 @@ export default function PostJobScreen({ navigation, route }: Props) {
 
       {/* Staff Type */}
       <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}> 
-        {form.postType === 'homecare' ? 'ต้องการบุคลากรประเภทใด?' : 'ประเภทบุคลากรที่ต้องการ'}
+        {form.postType === 'homecare' ? t('postJob.sections.staffTypeQuestion') : t('postJob.sections.staffTypeLabel')}
       </Text>
       <View style={styles.optionGrid}>
-        {STAFF_TYPES.map((type) => (
+        {staffTypeOptions.map((type) => (
           <TouchableOpacity
             key={type.code}
             style={[
@@ -1137,11 +1107,11 @@ export default function PostJobScreen({ navigation, route }: Props) {
             ]}
             onPress={() => setForm({ ...form, staffType: type.code })}
           >
-            <Text style={[styles.optionTitle, { color: colors.text }]}>{type.shortName}</Text>
-            <Text style={[styles.optionSubtitle, { color: colors.textSecondary }]}>{type.nameTH}</Text>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>{type.shortDisplayName}</Text>
+            <Text style={[styles.optionSubtitle, { color: colors.textSecondary }]}>{type.displayName}</Text>
             {type.requiresLicense && (
               <View style={[styles.licenseBadge, { backgroundColor: colors.warning }]}> 
-                <Text style={[styles.licenseBadgeText, { color: colors.white }]}>ใบประกอบ</Text>
+                <Text style={[styles.licenseBadgeText, { color: colors.white }]}>{t('postJob.buttons.licenseBadge')}</Text>
               </View>
             )}
           </TouchableOpacity>
@@ -1153,10 +1123,10 @@ export default function PostJobScreen({ navigation, route }: Props) {
       {form.postType !== 'homecare' && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-            สถานที่ทำงาน
+            {t('postJob.sections.workplaceLabel')}
           </Text>
           <View style={styles.optionGrid}>
-            {LOCATION_TYPES.map((type) => (
+            {locationTypeOptions.map((type) => (
               <TouchableOpacity
                 key={type.code}
                 style={[
@@ -1172,7 +1142,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
                   size={24}
                   color={form.locationType === type.code ? colors.primary : colors.textMuted}
                 />
-                <Text style={[styles.optionTitle, { color: colors.text }]}>{type.nameTH}</Text>
+                <Text style={[styles.optionTitle, { color: colors.text }]}>{type.displayName}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -1182,7 +1152,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       
       {/* Department / Care Type */}
       <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}> 
-        {form.postType === 'homecare' ? 'ประเภทการดูแล' : 'แผนก'} <Text style={{ color: colors.error }}>*</Text>
+        {form.postType === 'homecare' ? t('postJob.sections.careTypeLabel') : t('postJob.sections.departmentRequired')} <Text style={{ color: colors.error }}>*</Text>
       </Text>
       <TouchableOpacity
         style={[styles.inputButton, { borderColor: errors.department ? colors.error : colors.border, backgroundColor: inputSurface }]}
@@ -1190,7 +1160,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       >
         <Ionicons name="medical-outline" size={20} color={errors.department ? colors.error : colors.primary} />
         <Text style={[styles.inputButtonText, { color: form.department ? colors.text : colors.textMuted }]}> 
-          {form.department || (form.postType === 'homecare' ? 'เลือกประเภทการดูแล' : 'เลือกแผนก')}
+          {form.department || (form.postType === 'homecare' ? t('postJob.sections.selectCareType') : t('postJob.sections.selectDepartment'))}
         </Text>
         <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
       </TouchableOpacity>
@@ -1204,15 +1174,15 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const renderStep2 = () => {
     if (form.postType === 'job') {
       const employmentOptions = [
-        { value: 'full_time', label: 'ประจำ' },
-        { value: 'part_time', label: 'พาร์ตไทม์' },
-        { value: 'contract', label: 'สัญญาจ้าง' },
-        { value: 'temporary', label: 'ชั่วคราว' },
+        { value: 'full_time', label: t('postJob.employment.fullTime') },
+        { value: 'part_time', label: t('postJob.employment.partTime') },
+        { value: 'contract', label: t('postJob.employment.contract') },
+        { value: 'temporary', label: t('postJob.employment.temporary') },
       ];
 
       return (
         <View style={styles.stepContent}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>รูปแบบการจ้าง</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('postJob.sections.employmentFormat')}</Text>
           <View style={styles.chipRow}>
             {employmentOptions.map((option) => (
               <Chip
@@ -1225,31 +1195,31 @@ export default function PostJobScreen({ navigation, route }: Props) {
           </View>
           {errors.employmentType && <Text style={[styles.errorText, { color: errorTextColor }]}>{errors.employmentType}</Text>}
 
-          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>วันและเวลาทำงาน</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>{t('postJob.sections.workSchedule')}</Text>
           <TextInput
             style={[styles.textInput, styles.textArea, { borderColor: errors.workHours ? colors.error : colors.border, color: colors.text, backgroundColor: inputSurface }]}
             value={form.workHours}
             onChangeText={(v) => setForm({ ...form, workHours: v })}
-            placeholder="เช่น จ.-ศ. 08:00-17:00 / หมุนเวรตามตาราง / 12 ชม. 15 วันต่อเดือน"
+            placeholder={t('postJob.placeholders.workHours')}
             placeholderTextColor={colors.textMuted}
             multiline
             numberOfLines={3}
           />
           {errors.workHours && <Text style={[styles.errorText, { color: errorTextColor }]}>{errors.workHours}</Text>}
 
-          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>วันเริ่มงาน</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>{t('postJob.sections.startDate')}</Text>
           <TextInput
             style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
             value={form.startDateNote}
             onChangeText={(v) => setForm({ ...form, startDateNote: v })}
-            placeholder="เช่น เริ่มงานทันที / ภายในเดือนเมษายน / ตามตกลง"
+            placeholder={t('postJob.placeholders.startDateNote')}
             placeholderTextColor={colors.textMuted}
           />
 
           <View style={[styles.infoBox, { backgroundColor: colors.primaryBackground, marginTop: SPACING.lg }]}> 
             <Ionicons name="bulb-outline" size={18} color={colors.primary} />
             <Text style={[styles.infoText, { color: colors.primaryDark }]}> 
-              ระบบจะไม่บังคับเลือกวันเดียวหรือ preset เวลา สำหรับประกาศรับสมัครงานขององค์กร
+              {t('postJob.infoBoxes.systemNote')}
             </Text>
           </View>
         </View>
@@ -1267,7 +1237,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
 
     return (
       <View style={styles.stepContent}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>วันที่ต้องการ (เลือกได้หลายวัน)</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('postJob.sections.datesNeeded')}</Text>
         <MultiDateCalendar
           selectedDates={form.shiftDates}
           onChange={(dates) => {
@@ -1284,7 +1254,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         {form.shiftDates.length > 0 && (
           <>
             <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-              เวลาแต่ละวัน
+              {t('postJob.sections.timePerDate')}
             </Text>
             {errors.shiftTimes && (
               <Text style={[styles.errorText, { color: errorTextColor, marginBottom: SPACING.sm }]}>{errors.shiftTimes}</Text>
@@ -1319,7 +1289,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
                         onPress={() => openSlotTime(key, 'start')}
                       >
                         <Text style={[styles.slotTimeTxt, { color: slot.start ? colors.primary : colors.textMuted }]}>
-                          {slot.start || 'เริ่ม'}
+                          {slot.start || t('postJob.buttons.start_time')}
                         </Text>
                       </TouchableOpacity>
                       <Ionicons name="arrow-forward" size={14} color={colors.textMuted} />
@@ -1331,7 +1301,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
                         onPress={() => openSlotTime(key, 'end')}
                       >
                         <Text style={[styles.slotTimeTxt, { color: slot.end ? colors.primary : colors.textMuted }]}>
-                          {slot.end || 'สิ้นสุด'}
+                          {slot.end || t('postJob.buttons.end_time')}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -1353,11 +1323,11 @@ export default function PostJobScreen({ navigation, route }: Props) {
       {form.postType !== 'homecare' && form.locationType !== 'HOME' ? (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            {form.locationType === 'HOSPITAL' ? 'ค้นหาโรงพยาบาล' : 'ค้นหาสถานที่'}
+            {form.locationType === 'HOSPITAL' ? t('postJob.sections.searchHospital') : t('postJob.sections.searchPlace')}
           </Text>
           <PlaceAutocomplete
             value={form.hospital}
-            placeholder={form.locationType === 'HOSPITAL' ? 'พิมพ์ เช่น รามาธิบดี, ศิริราช...' : 'พิมพ์ชื่อสถานที่...'}
+            placeholder={form.locationType === 'HOSPITAL' ? t('postJob.placeholders.hospitalSearch') : t('postJob.placeholders.placeSearch')}
             onSelect={(place) => {
               setForm({
                 ...form,
@@ -1374,13 +1344,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
       ) : (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            ที่อยู่ผู้ป่วย
+            {t('postJob.sections.patientAddress')}
           </Text>
           <TextInput
             style={[styles.textInput, styles.textArea, { borderColor: colors.border, color: colors.text }]}
             value={form.address}
             onChangeText={(v) => setForm({ ...form, address: v })}
-            placeholder="ที่อยู่หรือจุดสังเกต เช่น ซอยลาดพร้าว 101 ใกล้ห้างบิ๊กซี"
+            placeholder={t('postJob.placeholders.patientAddress')}
             placeholderTextColor={colors.textMuted}
             multiline
             numberOfLines={3}
@@ -1390,14 +1360,14 @@ export default function PostJobScreen({ navigation, route }: Props) {
       )}
       
       {/* Province - can be auto-filled or manual */}
-      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>จังหวัด</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>{t('postJob.sections.provinceLabel')}</Text>
       <TouchableOpacity
         style={[styles.inputButton, { borderColor: colors.border }]}
         onPress={() => setShowProvinceModal(true)}
       >
         <Ionicons name="location-outline" size={20} color={colors.primary} />
         <Text style={[styles.inputButtonText, { color: form.province ? colors.text : colors.textMuted }]}>
-          {form.province || 'เลือกจังหวัด'}
+          {form.province || t('postJob.sections.selectProvince')}
         </Text>
         <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
       </TouchableOpacity>
@@ -1407,7 +1377,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       {form.province && getDistrictsForProvince(form.province).length > 0 && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.md }]}>
-            {form.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'}
+            {form.province === 'กรุงเทพมหานคร' ? t('postJob.khetLabel') : t('postJob.amphoeLabel')}
           </Text>
           <TouchableOpacity
             style={[styles.selectButton, { borderColor: colors.border, backgroundColor: colors.background }]}
@@ -1417,7 +1387,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
               styles.selectButtonText,
               { color: form.district ? colors.text : colors.textMuted }
             ]}>
-              {form.district || `เลือก${form.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'}...`}
+              {form.district || (form.province === 'กรุงเทพมหานคร' ? t('postJob.selectKhetPlaceholder') : t('postJob.selectAmphoePlaceholder'))}
             </Text>
             <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
           </TouchableOpacity>
@@ -1441,14 +1411,14 @@ export default function PostJobScreen({ navigation, route }: Props) {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.mapPickerBtnTitle, { color: colors.text }]}>
-            {form.locationLat && form.locationLng ? 'พิกัดที่ปักหมุดแล้ว' : 'ปักหมุดบนแผนที่'}
+            {form.locationLat && form.locationLng ? t('postJob.sections.pinnedCoordinates') : t('postJob.sections.pinOnMap')}
           </Text>
           {form.locationLat && form.locationLng ? (
             <Text style={[styles.mapPickerBtnSub, { color: mapSelectedTone.text }]} numberOfLines={1}>
               {form.locationLat.toFixed(5)}, {form.locationLng.toFixed(5)}
             </Text>
           ) : (
-            <Text style={[styles.mapPickerBtnSub, { color: colors.textMuted }]}>แตะเพื่อระบุพิกัด / ใช้ GPS ของฉัน</Text>
+            <Text style={[styles.mapPickerBtnSub, { color: colors.textMuted }]}>{t('postJob.sections.tapToPin')}</Text>
           )}
         </View>
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
@@ -1458,7 +1428,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <View style={[styles.infoBox, { backgroundColor: colors.primaryBackground, marginTop: SPACING.md }]}> 
         <Ionicons name="bulb-outline" size={18} color={colors.primary} />
         <Text style={[styles.infoText, { color: colors.primaryDark }]}> 
-          พิมพ์ชื่อโรงพยาบาลด้านบน จะเติมจังหวัด/เขตให้อัตโนมัติ
+          {t('postJob.infoBoxes.autoFillHint')}
         </Text>
       </View>
     </View>
@@ -1470,15 +1440,15 @@ export default function PostJobScreen({ navigation, route }: Props) {
   const renderStep4 = () => (
     <View style={styles.stepContent}>
       {/* Title (optional) */}
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>หัวข้อประกาศ (ไม่บังคับ)</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('postJob.sections.postTitle')}</Text>
       <TextInput
         style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
         value={form.title}
         onChangeText={(v) => setForm({ ...form, title: v })}
         placeholder={
-          form.postType === 'shift' ? `หา ${getStaffTypeLabel(form.staffType)} แทนเวร ${form.department || ''}` :
-          form.postType === 'job' ? `รับสมัคร ${getStaffTypeLabel(form.staffType)}` :
-          `หาคนดูแล ${form.department || ''}`
+          form.postType === 'shift' ? t('postJob.titlePlaceholder.shift', { staff: getStaffTypeLabel(form.staffType), dept: form.department || '' }) :
+          form.postType === 'job' ? t('postJob.titlePlaceholder.job', { staff: getStaffTypeLabel(form.staffType) }) :
+          t('postJob.titlePlaceholder.homecare', { dept: form.department || '' })
         }
         placeholderTextColor={colors.textMuted}
       />
@@ -1486,36 +1456,36 @@ export default function PostJobScreen({ navigation, route }: Props) {
       {/* Description + Benefits - for job posting only */}
       {form.postType === 'job' && (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>รายละเอียดงาน</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>{t('postJob.sections.jobDescription')}</Text>
           <TextInput
             style={[styles.textInput, styles.textArea, { borderColor: colors.border, color: colors.text }]}
             value={form.description}
             onChangeText={(v) => setForm({ ...form, description: v })}
-            placeholder="อธิบายลักษณะงาน คุณสมบัติที่ต้องการ ประสบการณ์ ฯลฯ"
+            placeholder={t('postJob.placeholders.jobDescription')}
             placeholderTextColor={colors.textMuted}
             multiline
             numberOfLines={5}
           />
           <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-            สวัสดิการ (เลือกได้หลายอัน)
+            {t('postJob.sections.benefits')}
           </Text>
-          {BENEFIT_GROUPS.map((group) => (
+          {benefitGroups.map((group) => (
             <View key={group.title} style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
                 <Ionicons name={group.icon as any} size={16} color={colors.primary} />
                 <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>{group.title}</Text>
               </View>
               <View style={styles.chipRow}>
-                {group.benefits.map((benefit) => (
+                {group.items.map((benefit) => (
                   <Chip
-                    key={benefit}
-                    label={benefit}
-                    selected={form.benefits.includes(benefit)}
+                    key={benefit.value}
+                    label={benefit.label}
+                    selected={form.benefits.includes(benefit.value)}
                     onPress={() => {
-                      if (form.benefits.includes(benefit)) {
-                        setForm({ ...form, benefits: form.benefits.filter(b => b !== benefit) });
+                      if (form.benefits.includes(benefit.value)) {
+                        setForm({ ...form, benefits: form.benefits.filter((item) => item !== benefit.value) });
                       } else {
-                        setForm({ ...form, benefits: [...form.benefits, benefit] });
+                        setForm({ ...form, benefits: [...form.benefits, benefit.value] });
                       }
                     }}
                   />
@@ -1525,14 +1495,14 @@ export default function PostJobScreen({ navigation, route }: Props) {
           ))}
           {/* Custom added benefits (not in presets) */}
           {(() => {
-            const presetBenefits = BENEFIT_GROUPS.flatMap(g => g.benefits);
-            const customBenefits = form.benefits.filter(b => !presetBenefits.includes(b));
+            const presetBenefits = benefitGroups.flatMap((group) => group.items.map((item) => item.value));
+            const customBenefits = form.benefits.filter((benefit) => !presetBenefits.includes(benefit));
             if (customBenefits.length === 0) return null;
             return (
               <View style={{ marginBottom: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
                   <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>สวัสดิการที่เพิ่มเอง</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>{t('postJob.sections.customBenefits')}</Text>
                 </View>
                 <View style={styles.chipRow}>
                   {customBenefits.map((benefit) => (
@@ -1553,7 +1523,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
               style={[styles.textInput, { flex: 1, borderColor: colors.border, color: colors.text, marginBottom: 0 }]}
               value={customBenefitInput}
               onChangeText={setCustomBenefitInput}
-              placeholder="เพิ่มสวัสดิการอื่นๆ..."
+              placeholder={t('postJob.sections.addBenefitPlaceholder')}
               placeholderTextColor={colors.textMuted}
               onSubmitEditing={() => {
                 const val = customBenefitInput.trim();
@@ -1586,7 +1556,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
 
       {/* Rate/Salary */}
       <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-        {form.postType === 'job' ? 'เงินเดือน' : 'ค่าตอบแทน'}
+        {form.postType === 'job' ? t('postJob.sections.salary') : t('postJob.sections.compensation')}
       </Text>
       
       {form.postType === 'job' ? (
@@ -1595,11 +1565,11 @@ export default function PostJobScreen({ navigation, route }: Props) {
             style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
             value={form.salaryMin}
             onChangeText={(v) => setForm({ ...form, salaryMin: v.replace(/[^0-9]/g, '') })}
-            placeholder="เช่น 25000"
+            placeholder={t('postJob.placeholders.salaryMin')}
             placeholderTextColor={colors.textMuted}
             keyboardType="numeric"
           />
-          <Text style={[styles.helperText, { color: colors.textSecondary }]}>กรอกเงินเดือนจริงเป็นตัวเลขเดียว ไม่ใช้ช่วงราคา</Text>
+          <Text style={[styles.helperText, { color: colors.textSecondary }]}>{t('postJob.sections.salaryHelper')}</Text>
         </>
       ) : (
         <View style={styles.row}>
@@ -1607,12 +1577,12 @@ export default function PostJobScreen({ navigation, route }: Props) {
             style={[styles.textInput, { flex: 1, borderColor: colors.border, color: colors.text }]}
             value={form.shiftRate}
             onChangeText={(v) => setForm({ ...form, shiftRate: v.replace(/[^0-9]/g, '') })}
-            placeholder="เช่น 1500"
+            placeholder={t('postJob.placeholders.shiftRate')}
             placeholderTextColor={colors.textMuted}
             keyboardType="numeric"
           />
           <View style={styles.rateTypeContainer}>
-            {RATE_TYPES.map((rt) => (
+            {rateTypeOptions.map((rt) => (
               <TouchableOpacity
                 key={rt.value}
                 style={[
@@ -1638,13 +1608,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
       {form.postType !== 'job' && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.md }]}>
-            รูปแบบค่าตอบแทน
+            {t('postJob.sections.paymentFormat')}
           </Text>
           <View style={styles.chipRow}>
-            {PAYMENT_TYPES.map((pt) => (
+            {paymentTypeOptions.map((pt) => (
               <Chip
                 key={pt.code}
-                label={pt.nameTH}
+                label={pt.label}
                 selected={form.paymentType === pt.code}
                 onPress={() => setForm({ ...form, paymentType: pt.code })}
               />
@@ -1654,7 +1624,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
           {/* Deduct Percent - แสดงเฉพาะถ้าเลือก DEDUCT_PERCENT */}
           {form.paymentType === 'DEDUCT_PERCENT' && (
             <View style={[styles.deductContainer, { backgroundColor: warningTone.background }]}> 
-              <Text style={[styles.deductLabel, { color: warningTone.text }]}>หักกี่เปอร์เซ็นต์?</Text>
+              <Text style={[styles.deductLabel, { color: warningTone.text }]}>{t('postJob.sections.deductQuestion')}</Text>
               <View style={styles.deductInputRow}>
                 <TextInput
                   style={[styles.deductInput, { borderColor: warningTone.border, color: colors.text, backgroundColor: inputSurface }]}
@@ -1663,7 +1633,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
                     const num = parseInt(v.replace(/[^0-9]/g, '')) || 0;
                     setForm({ ...form, deductPercent: Math.min(num, 50) });
                   }}
-                  placeholder="เช่น 5"
+                  placeholder={t('postJob.placeholders.deductPercent')}
                   placeholderTextColor={colors.textMuted}
                   keyboardType="numeric"
                   maxLength={2}
@@ -1672,7 +1642,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
               </View>
               {form.shiftRate && form.deductPercent > 0 && (
                 <Text style={[styles.deductResult, { color: colors.success }]}> 
-                  {'💰 พยาบาลได้รับ: '}฿{Math.round(parseInt(form.shiftRate) * (1 - form.deductPercent / 100)).toLocaleString()}
+                  {t('postJob.sections.nurseReceives')}฿{Math.round(parseInt(form.shiftRate) * (1 - form.deductPercent / 100)).toLocaleString()}
                 </Text>
               )}
             </View>
@@ -1684,13 +1654,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
       {form.postType !== 'job' && (
         <>
           <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>
-            รายละเอียดเพิ่มเติม
+            {t('postJob.sections.additionalDetails')}
           </Text>
           <TextInput
             style={[styles.textInput, styles.textArea, { borderColor: colors.border, color: colors.text }]}
             value={form.description}
             onChangeText={(v) => setForm({ ...form, description: v })}
-            placeholder="รายละเอียดงาน ความต้องการพิเศษ ฯลฯ"
+            placeholder={t('postJob.placeholders.additionalDetails')}
             placeholderTextColor={colors.textMuted}
             multiline
             numberOfLines={3}
@@ -1700,25 +1670,25 @@ export default function PostJobScreen({ navigation, route }: Props) {
       
       {/* Tags */}
       <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.md }]}>
-        แท็ก (เลือกได้หลายอัน)
+        {t('postJob.sections.tags')}
       </Text>
-      {(TAGS_BY_POST_TYPE[form.postType] || []).map((group: TagGroup) => (
+      {tagGroups.map((group) => (
         <View key={group.title} style={{ marginBottom: 10 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
             <Ionicons name={group.icon as any} size={16} color={colors.primary} />
             <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>{group.title}</Text>
           </View>
           <View style={styles.chipRow}>
-            {group.tags.map((tag) => (
+            {group.items.map((tag) => (
               <Chip
-                key={tag}
-                label={tag}
-                selected={form.tags.includes(tag)}
+                key={tag.value}
+                label={tag.label}
+                selected={form.tags.includes(tag.value)}
                 onPress={() => {
-                  if (form.tags.includes(tag)) {
-                    setForm({ ...form, tags: form.tags.filter(t => t !== tag) });
+                  if (form.tags.includes(tag.value)) {
+                    setForm({ ...form, tags: form.tags.filter((item) => item !== tag.value) });
                   } else {
-                    setForm({ ...form, tags: [...form.tags, tag] });
+                    setForm({ ...form, tags: [...form.tags, tag.value] });
                   }
                 }}
               />
@@ -1728,14 +1698,14 @@ export default function PostJobScreen({ navigation, route }: Props) {
       ))}
       {/* Custom added tags (not in presets) */}
       {(() => {
-        const presetTags = (TAGS_BY_POST_TYPE[form.postType] || []).flatMap((g: TagGroup) => g.tags);
-        const customTags = form.tags.filter(t => !presetTags.includes(t));
+        const presetTags = tagGroups.flatMap((group) => group.items.map((item) => item.value));
+        const customTags = form.tags.filter((tag) => !presetTags.includes(tag));
         if (customTags.length === 0) return null;
         return (
           <View style={{ marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}>
               <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>แท็กที่เพิ่มเอง</Text>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textSecondary }}>{t('postJob.sections.customTags')}</Text>
             </View>
             <View style={styles.chipRow}>
               {customTags.map((tag) => (
@@ -1756,7 +1726,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
           style={[styles.textInput, { flex: 1, borderColor: colors.border, color: colors.text, marginBottom: 0 }]}
           value={customTagInput}
           onChangeText={setCustomTagInput}
-          placeholder="พิมพ์แท็กเพิ่มเอง..."
+          placeholder={t('postJob.sections.addTagPlaceholder')}
           placeholderTextColor={colors.textMuted}
           onSubmitEditing={() => {
             const val = customTagInput.trim();
@@ -1786,9 +1756,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
       </View>
       
       {/* Contact */}
-      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>ช่องทางพูดคุย</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text, marginTop: SPACING.lg }]}>{t('postJob.sections.contactChannel')}</Text>
       <View style={styles.contactModeGrid}>
-        {CONTACT_MODE_OPTIONS.map((option) => (
+        {CONTACT_MODE_KEYS.map((option) => (
           <TouchableOpacity
             key={option.value}
             style={[
@@ -1801,8 +1771,8 @@ export default function PostJobScreen({ navigation, route }: Props) {
             onPress={() => setForm({ ...form, contactMode: option.value })}
             activeOpacity={0.85}
           >
-            <Text style={[styles.contactModeTitle, { color: form.contactMode === option.value ? colors.primary : colors.text }]}>{option.label}</Text>
-            <Text style={[styles.contactModeHelper, { color: colors.textSecondary }]}>{option.helper}</Text>
+            <Text style={[styles.contactModeTitle, { color: form.contactMode === option.value ? colors.primary : colors.text }]}>{t(option.labelKey as any)}</Text>
+            <Text style={[styles.contactModeHelper, { color: colors.textSecondary }]}>{t(option.helperKey as any)}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -1811,7 +1781,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={styles.row}>
           {(form.contactMode === 'phone' || form.contactMode === 'phone_or_line') && (
             <View style={{ flex: 1, marginRight: form.contactMode === 'phone_or_line' ? SPACING.sm : 0 }}>
-              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>เบอร์โทร</Text>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{t('postJob.sections.phoneLabel')}</Text>
               <TextInput
                 style={[styles.textInput, { borderColor: colors.border, color: colors.text }]}
                 value={form.contactPhone}
@@ -1840,11 +1810,11 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <View style={[styles.infoBox, { backgroundColor: colors.primaryBackground, marginTop: SPACING.sm }]}> 
         <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
         <Text style={[styles.infoText, { color: colors.primaryDark }]}> 
-          เริ่มคุยผ่านแอปก่อนจะช่วยดูแลความเป็นส่วนตัว ติดตามรายละเอียดงานได้ง่าย และตอบกลับกันได้เร็วในที่เดียว
+          {t('postJob.infoBoxes.contactPrivacy')}
         </Text>
       </View>
       {externalContactSignals.hasExternalContact && form.contactMode === 'in_app' && (
-        <Text style={[styles.errorText, { color: errorTextColor }]}>พบเบอร์โทร, LINE หรือ link ในรายละเอียดโพสต์ หากต้องการเริ่มคุยผ่านแอปก่อน แนะนำย้ายข้อมูลนี้ไปไว้ในช่องติดต่อ</Text>
+        <Text style={[styles.errorText, { color: errorTextColor }]}>{t('postJob.externalContactWarning')}</Text>
       )}
       {errors.contact && <Text style={[styles.errorText, { color: errorTextColor }]}>{errors.contact}</Text>}
       
@@ -1860,9 +1830,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
       >
         <Text style={styles.urgentIcon}>🔥</Text>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.urgentTitle, { color: colors.text }]}>ประกาศด่วน</Text>
+          <Text style={[styles.urgentTitle, { color: colors.text }]}>{t('postJob.sections.urgentPost')}</Text>
           <Text style={[styles.urgentSubtitle, { color: colors.textMuted }]}>
-            ขึ้นในโซนงานด่วนบนหน้าแรก ติดป้าย "ด่วน" และมีทางลัดให้คนกดดูรวมได้ทันที
+            {t('postJob.sections.urgentSubtitle')}
           </Text>
           <View style={[styles.urgentPriceTag, { backgroundColor: urgentPriceTone.background }]}>
             <Text style={[styles.urgentPriceText, { color: urgentPriceTone.text }]}>฿{PRICING.urgentPost}</Text>
@@ -1878,7 +1848,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <View style={[styles.urgentNote, { backgroundColor: warningTone.background }]}> 
           <Ionicons name="information-circle" size={16} color={warningTone.text} />
           <Text style={[styles.urgentNoteText, { color: warningTone.text }]}> 
-            ป้ายด่วนจะเปิดให้ใช้งานตามสิทธิ์ของบัญชี เพื่อช่วยให้ประกาศสำคัญถูกมองเห็นได้เร็วขึ้น
+            {t('postJob.infoBoxes.urgentNote')}
           </Text>
         </View>
       )}
@@ -1910,8 +1880,8 @@ export default function PostJobScreen({ navigation, route }: Props) {
         <Ionicons name="copy-outline" size={20} color={colors.warning} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.duplicateBannerTitle, { color: colors.text }]}>ร่างนี้เริ่มจากประกาศเดิม</Text>
-        <Text style={[styles.duplicateBannerText, { color: colors.textSecondary }]}>ระบบคัดลอกข้อมูลสำคัญไว้ให้แล้ว และรีเซ็ตวัน เวลา กับสถานะด่วนเพื่อให้เริ่มรอบใหม่ได้ไวขึ้น</Text>
+        <Text style={[styles.duplicateBannerTitle, { color: colors.text }]}>{t('postJob.duplicateBanner.title')}</Text>
+        <Text style={[styles.duplicateBannerText, { color: colors.textSecondary }]}>{t('postJob.duplicateBanner.text')}</Text>
       </View>
     </View>
   ) : null;
@@ -1968,9 +1938,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
               <FirstVisitTip
                 storageKey={`first_tip_post_job_${user.uid}`}
                 icon="create-outline"
-                title="โพสต์งานได้ไว พร้อมขั้นตอนที่ชัดเจน"
-                description="เลือกประเภทประกาศให้ตรงกับการใช้งาน แล้วกรอกข้อมูลสำคัญทีละขั้น ระบบจะช่วยจัดขั้นตอนที่ปลอดภัยและใช้งานง่ายให้คุณ"
-                actionLabel={onboardingSurveyEnabled ? 'ดูคู่มือ' : undefined}
+                title={t('postJob.firstVisitTip.title')}
+                description={t('postJob.firstVisitTip.description')}
+                actionLabel={onboardingSurveyEnabled ? t('postJob.firstVisitTip.actionLabel') : undefined}
                 onAction={onboardingSurveyEnabled ? () => navigation.navigate('OnboardingSurvey') : undefined}
               />
             )}
@@ -1988,9 +1958,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
               <FirstVisitTip
                 storageKey={`first_tip_post_job_${user.uid}`}
                 icon="create-outline"
-                title="โพสต์งานได้ไว พร้อมขั้นตอนที่ชัดเจน"
-                description="เลือกประเภทประกาศให้ตรงกับการใช้งาน แล้วกรอกข้อมูลสำคัญทีละขั้น ระบบจะช่วยจัดขั้นตอนที่ปลอดภัยและใช้งานง่ายให้คุณ"
-                actionLabel={onboardingSurveyEnabled ? 'ดูคู่มือ' : undefined}
+                title={t('postJob.firstVisitTip.title')}
+                description={t('postJob.firstVisitTip.description')}
+                actionLabel={onboardingSurveyEnabled ? t('postJob.firstVisitTip.actionLabel') : undefined}
                 onAction={onboardingSurveyEnabled ? () => navigation.navigate('OnboardingSurvey') : undefined}
               />
             )}
@@ -2018,7 +1988,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
             }}
             activeOpacity={0.7}
           >
-            <Text style={{ color: colors.primary, fontWeight: 'bold', fontSize: 16 }}>ย้อนกลับ</Text>
+            <Text style={{ color: colors.primary, fontWeight: 'bold', fontSize: 16 }}>{t('postJob.buttons.back')}</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
@@ -2036,9 +2006,9 @@ export default function PostJobScreen({ navigation, route }: Props) {
           activeOpacity={0.7}
         >
           <Text style={{ color: colors.white, fontWeight: 'bold', fontSize: 16 }}>
-            {currentStep === 0 ? 'เริ่มต้น' :
-              currentStep === getTotalSteps() ? ((isLoading || isSubmitting) ? 'กำลังดำเนินการ...' : (duplicateJob ? '🚀 สร้างจากร่างนี้' : '🚀 โพสต์เลย')) : 
-              'ถัดไป'}
+            {currentStep === 0 ? t('postJob.buttons.start') :
+              currentStep === getTotalSteps() ? ((isLoading || isSubmitting) ? t('postJob.buttons.posting') : (duplicateJob ? t('postJob.buttons.createFromDraft') : t('postJob.buttons.postNow'))) :
+              t('postJob.buttons.next')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -2047,20 +2017,20 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showProvinceModal}
         onClose={() => setShowProvinceModal(false)}
-        title="เลือกจังหวัด"
+        title={t('postJob.modals.provinceTitle')}
       >
         <TextInput
           style={[styles.searchInput, { borderColor: colors.border, color: colors.text }]}
           value={provinceSearch}
           onChangeText={setProvinceSearch}
-          placeholder="ค้นหาจังหวัด..."
+          placeholder={t('postJob.modals.provinceSearch')}
           placeholderTextColor={colors.textMuted}
         />
         
         {/* Popular */}
         {!provinceSearch && !showAllProvinces && (
           <>
-            <Text style={[styles.modalSectionTitle, { color: colors.textMuted }]}>ยอดนิยม</Text>
+            <Text style={[styles.modalSectionTitle, { color: colors.textMuted }]}>{t('postJob.modals.popular')}</Text>
             <View style={styles.chipRow}>
               {POPULAR_PROVINCES.map((p: string) => (
                 <Chip
@@ -2083,7 +2053,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
             style={styles.showMoreButton}
             onPress={() => setShowAllProvinces(true)}
           >
-            <Text style={[styles.showMoreText, { color: colors.primary }]}>ดูทั้งหมด 77 จังหวัด</Text>
+            <Text style={[styles.showMoreText, { color: colors.primary }]}>{t('postJob.modals.showAll77')}</Text>
             <Ionicons name="chevron-down" size={16} color={colors.primary} />
           </TouchableOpacity>
         )}
@@ -2116,23 +2086,23 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showDepartmentModal}
         onClose={() => setShowDepartmentModal(false)}
-        title={form.postType === 'homecare' ? 'ประเภทการดูแล' : 'เลือกแผนก'}
+        title={form.postType === 'homecare' ? t('postJob.modals.careTypeTitle') : t('postJob.modals.departmentTitle')}
       >
         <ScrollView style={{ maxHeight: 400 }}>
           {getDepartments().map((dept) => (
             <TouchableOpacity
-              key={dept}
+              key={dept.value}
               style={[
                 styles.listItem,
-                form.department === dept && { backgroundColor: colors.primaryLight },
+                form.department === dept.value && { backgroundColor: colors.primaryLight },
               ]}
               onPress={() => {
-                setForm({ ...form, department: dept });
+                setForm({ ...form, department: dept.value });
                 setShowDepartmentModal(false);
               }}
             >
-              <Text style={[styles.listItemText, { color: colors.text }]}>{dept}</Text>
-              {form.department === dept && (
+              <Text style={[styles.listItemText, { color: colors.text }]}>{dept.label}</Text>
+              {form.department === dept.value && (
                 <Ionicons name="checkmark" size={20} color={colors.primary} />
               )}
             </TouchableOpacity>
@@ -2147,13 +2117,13 @@ export default function PostJobScreen({ navigation, route }: Props) {
           setShowDistrictModal(false);
           setDistrictSearch('');
         }}
-        title={`เลือก${form.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'}`}
+        title={form.province === 'กรุงเทพมหานคร' ? t('postJob.modals.districtTitleKhet') : t('postJob.modals.districtTitleAmphoe')}
       >
         <TextInput
           style={[styles.searchInput, { borderColor: colors.border, color: colors.text }]}
           value={districtSearch}
           onChangeText={setDistrictSearch}
-          placeholder={`ค้นหา${form.province === 'กรุงเทพมหานคร' ? 'เขต' : 'อำเภอ'}...`}
+          placeholder={form.province === 'กรุงเทพมหานคร' ? t('postJob.modals.districtSearchKhet') : t('postJob.modals.districtSearchAmphoe')}
           placeholderTextColor={colors.textMuted}
         />
         <ScrollView style={{ maxHeight: 400 }}>
@@ -2185,7 +2155,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showDateModal}
         onClose={() => setShowDateModal(false)}
-        title="เลือกวันที่"
+        title={t('postJob.modals.dateTitle')}
       >
         <CalendarPicker
           value={form.shiftDate}
@@ -2201,7 +2171,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showStartTimeModal}
         onClose={() => { setShowStartTimeModal(false); setEditingSlotKey(null); }}
-        title="เลือกเวลาเริ่ม"
+        title={t('postJob.modals.startTimeTitle')}
       >
         <ScrollView style={{ maxHeight: 400 }}>
           {TIME_OPTIONS.map((time) => {
@@ -2250,7 +2220,7 @@ export default function PostJobScreen({ navigation, route }: Props) {
       <ModalContainer
         visible={showEndTimeModal}
         onClose={() => { setShowEndTimeModal(false); setEditingSlotKey(null); }}
-        title="เลือกเวลาสิ้นสุด"
+        title={t('postJob.modals.endTimeTitle')}
       >
         <ScrollView style={{ maxHeight: 400 }}>
           {TIME_OPTIONS.map((time) => {

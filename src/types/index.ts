@@ -525,6 +525,50 @@ export interface JobCompletion {
   completedBy: string;
 }
 
+export type NurseScheduleEntryKind =
+  | 'personal_shift'
+  | 'availability'
+  | 'time_off'
+  | 'nursego_job';
+
+export type NurseScheduleEntrySource = 'manual' | 'job_confirmed';
+
+export interface NurseScheduleEntry {
+  id: string;
+  userId: string;
+  title: string;
+  kind: NurseScheduleEntryKind;
+  source: NurseScheduleEntrySource;
+  startAt: Date | Timestamp;
+  endAt: Date | Timestamp;
+  note?: string;
+  tagColor?: string;
+  reminderEnabled?: boolean;
+  reminderTime?: string | null;
+  reminderOffsetMinutes?: number | null;
+  locationName?: string;
+  status: 'planned' | 'confirmed' | 'cancelled' | 'completed';
+  linkedJobId?: string;
+  linkedContactId?: string;
+  linkedConversationId?: string;
+  isEditable?: boolean;
+  createdAt: Date | Timestamp;
+  updatedAt?: Date | Timestamp;
+}
+
+export interface NurseScheduleEntryDraft {
+  title: string;
+  kind: Exclude<NurseScheduleEntryKind, 'nursego_job'>;
+  dateKey: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  note?: string;
+  tagColor?: string;
+  reminderEnabled?: boolean;
+  reminderTime?: string | null;
+  reminderOffsetMinutes?: number | null;
+}
+
 // Chat Types
 export interface Conversation {
   id: string;
@@ -547,6 +591,14 @@ export interface Conversation {
   isArchived?: boolean;
   isPinned?: boolean;
   hiddenBy?: string[]; // รายการ userId ที่ซ่อนแชทนี้
+}
+
+export interface ConversationRecipientInfo {
+  recipientId?: string;
+  recipientName?: string;
+  recipientPhoto?: string;
+  jobTitle?: string;
+  jobId?: string;
 }
 
 export interface Message {
@@ -721,6 +773,7 @@ export type MainTabParamList = {
   Search?: undefined;
   PostJob: undefined;
   Chat: undefined;
+  Schedule: undefined;
   Profile: undefined;
 };
 

@@ -36,6 +36,7 @@ import {
   VerificationRequest,
 } from '../../services/verificationService';
 import { getSurveySelectionTags } from '../../utils/verificationTag';
+import { useI18n } from '../../i18n';
 
 interface Props {
   navigation: any;
@@ -43,7 +44,9 @@ interface Props {
 
 type DocumentKey = 'license' | 'employeeCard' | 'idCard' | 'declaration';
 
-export default function VerificationScreen({ navigation }: Props) {
+export default function VerificationScreen({
+  navigation }: Props) {
+  const { t } = useI18n();
   const { user, isInitialized } = useAuth();
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -125,7 +128,7 @@ export default function VerificationScreen({ navigation }: Props) {
     try {
       assignDocumentUri(await pickImage());
     } catch (error: any) {
-      setAlert(createAlert.error('ข้อผิดพลาด', error.message) as AlertState);
+      setAlert(createAlert.error(t('verification.error'), error.message) as AlertState);
     }
   };
 
@@ -134,22 +137,22 @@ export default function VerificationScreen({ navigation }: Props) {
     try {
       assignDocumentUri(await takePhoto());
     } catch (error: any) {
-      setAlert(createAlert.error('ข้อผิดพลาด', error.message) as AlertState);
+      setAlert(createAlert.error(t('verification.error'), error.message) as AlertState);
     }
   };
 
   const validateForm = () => {
-    if (!firstName.trim()) return 'กรุณากรอกชื่อจริง';
-    if (!lastName.trim()) return 'กรุณากรอกนามสกุล';
+    if (!firstName.trim()) return t('verification.firstNameRequired');
+    if (!lastName.trim()) return t('verification.lastNameRequired');
     if (flow.requiresLicenseInfo) {
-      if (!licenseNumber.trim()) return 'กรุณากรอกเลขที่ใบอนุญาต';
+      if (!licenseNumber.trim()) return t('verification.licenseNumberRequired');
       const licenseValidation = validateLicenseNumber(licenseNumber, licenseType);
-      if (!licenseValidation.valid) return licenseValidation.error || 'รูปแบบเลขใบอนุญาตไม่ถูกต้อง';
-      if (!documentUris.license) return 'กรุณาอัปโหลดใบประกอบวิชาชีพ';
+      if (!licenseValidation.valid) return licenseValidation.error || t('verification.licenseInvalidFormat');
+      if (!documentUris.license) return t('verification.licenseDocRequired');
     }
-    if (flow.requiresEmployeeCard && !documentUris.employeeCard) return 'กรุณาอัปโหลดบัตรพนักงาน';
-    if (flow.requiresIdCard && !documentUris.idCard) return 'กรุณาอัปโหลดบัตรประชาชน';
-    if (flow.requiresDeclaration && !documentUris.declaration) return 'กรุณาอัปโหลดเอกสารเซ็นกำกับว่าใช้กับ NurseGo';
+    if (flow.requiresEmployeeCard && !documentUris.employeeCard) return t('verification.employeeCardRequired');
+    if (flow.requiresIdCard && !documentUris.idCard) return t('verification.idCardRequired');
+    if (flow.requiresDeclaration && !documentUris.declaration) return t('verification.declarationRequired');
     return null;
   };
 
@@ -177,7 +180,7 @@ export default function VerificationScreen({ navigation }: Props) {
 
     const validationError = validateForm();
     if (validationError) {
-      setAlert(createAlert.warning('ข้อมูลไม่ครบ', validationError) as AlertState);
+      setAlert(createAlert.warning(t('verification.incompleteTitle'), validationError) as AlertState);
       return;
     }
 
@@ -189,7 +192,7 @@ export default function VerificationScreen({ navigation }: Props) {
         : undefined;
       const payload: Parameters<typeof submitVerificationRequest>[0] = {
         userId: user.uid,
-        userName: user.displayName || 'ไม่ระบุชื่อ',
+        userName: user.displayName || t('verification.noNameFallback'),
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         userEmail: user.email || '',
@@ -211,14 +214,14 @@ export default function VerificationScreen({ navigation }: Props) {
 
       await submitVerificationRequest(payload);
       setAlert({
-        ...createAlert.success('ส่งคำขอสำเร็จ', 'คำขอยืนยันตัวตนของคุณถูกส่งแล้ว ทีมงานจะตรวจสอบภายใน 1-3 วันทำการ'),
+        ...createAlert.success(t('verification.submitSuccessTitle'), t('verification.submitSuccessMessage')),
         onConfirm: () => {
           closeAlert();
           navigation.goBack();
         },
       } as AlertState);
     } catch (error: any) {
-      setAlert(createAlert.error('ข้อผิดพลาด', error.message || 'ไม่สามารถส่งคำขอยืนยันตัวตนได้') as AlertState);
+      setAlert(createAlert.error(t('verification.error'), error.message || t('verification.submitErrorFallback')) as AlertState);
     } finally {
       setIsSubmitting(false);
     }
@@ -236,7 +239,7 @@ export default function VerificationScreen({ navigation }: Props) {
           ) : (
             <View style={styles.uploadPlaceholder}>
               <Ionicons name="document-outline" size={32} color={colors.textMuted} />
-              <Text style={styles.uploadText}>แตะเพื่ออัปโหลด</Text>
+              <Text style={styles.uploadText}>{t('verification.tapToUpload')}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -250,7 +253,7 @@ export default function VerificationScreen({ navigation }: Props) {
         <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>กำลังโหลด...</Text>
+          <Text style={styles.loadingText}>{t('verification.loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -275,18 +278,18 @@ export default function VerificationScreen({ navigation }: Props) {
 
           <Card style={styles.summaryCard}>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>ประเภทการยืนยัน</Text>
+              <Text style={styles.summaryLabel}>{t('verification.verificationType')}</Text>
               <Text style={styles.summaryValue}>{flow.menuLabel}</Text>
             </View>
             {verificationStatus.licenseType ? (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>ประเภทใบอนุญาต</Text>
+                <Text style={styles.summaryLabel}>{t('verification.licenseType')}</Text>
                 <Text style={styles.summaryValue}>{getLicenseTypeLabel(verificationStatus.licenseType)}</Text>
               </View>
             ) : null}
             {verificationStatus.licenseNumber ? (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>เลขที่เอกสาร</Text>
+                <Text style={styles.summaryLabel}>{t('verification.documentNumber')}</Text>
                 <Text style={styles.summaryValue}>{verificationStatus.licenseNumber}</Text>
               </View>
             ) : null}
@@ -310,21 +313,21 @@ export default function VerificationScreen({ navigation }: Props) {
 
         <View style={styles.stateContainer}>
           <Ionicons name="time-outline" size={84} color={colors.warning} />
-          <Text style={styles.stateTitle}>รอการตรวจสอบ</Text>
-          <Text style={styles.stateSubtitle}>คำขอยืนยันตัวตนของคุณอยู่ระหว่างการตรวจสอบ ทีมงานจะตรวจสอบภายใน 1-3 วันทำการ</Text>
+          <Text style={styles.stateTitle}>{t('verification.pendingTitle')}</Text>
+          <Text style={styles.stateSubtitle}>{t('verification.pendingReviewText')}</Text>
 
           <Card style={styles.summaryCard}>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>ประเภทการยืนยัน</Text>
+              <Text style={styles.summaryLabel}>{t('verification.verificationType')}</Text>
               <Text style={styles.summaryValue}>{flow.menuLabel}</Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>ชื่อผู้ยื่น</Text>
+              <Text style={styles.summaryLabel}>{t('verification.applicantName')}</Text>
               <Text style={styles.summaryValue}>{pendingRequest.firstName} {pendingRequest.lastName}</Text>
             </View>
             {pendingRequest.licenseNumber ? (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>เลขที่เอกสาร</Text>
+                <Text style={styles.summaryLabel}>{t('verification.documentNumber')}</Text>
                 <Text style={styles.summaryValue}>{pendingRequest.licenseNumber}</Text>
               </View>
             ) : null}
@@ -359,7 +362,7 @@ export default function VerificationScreen({ navigation }: Props) {
 
         {surveyTags.length > 0 ? (
           <Card style={styles.tagsCard}>
-            <Text style={styles.sectionTitle}>Tag จาก role / survey</Text>
+            <Text style={styles.sectionTitle}>{t('verification.tagFromRoleSurvey')}</Text>
             <View style={styles.tagWrap}>
               {surveyTags.map((tag) => (
                 <View key={tag} style={styles.tagChip}>
@@ -371,43 +374,43 @@ export default function VerificationScreen({ navigation }: Props) {
         ) : null}
 
         <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>ข้อมูลผู้ยื่นคำขอ</Text>
-          <Input label="ชื่อจริง" value={firstName} onChangeText={setFirstName} placeholder="กรอกชื่อจริง" required />
-          <Input label="นามสกุล" value={lastName} onChangeText={setLastName} placeholder="กรอกนามสกุล" required />
+          <Text style={styles.sectionTitle}>{t('verification.applicantInfoTitle')}</Text>
+          <Input label={t('verification.firstName')} value={firstName} onChangeText={setFirstName} placeholder={t('verification.firstNamePlaceholder')} required />
+          <Input label={t('verification.lastName')} value={lastName} onChangeText={setLastName} placeholder={t('verification.lastNamePlaceholder')} required />
         </Card>
 
         {flow.requiresLicenseInfo ? (
           <Card style={styles.section}>
-            <Text style={styles.sectionTitle}>ข้อมูลใบอนุญาต</Text>
-            <Input label="เลขที่ใบอนุญาต" value={licenseNumber} onChangeText={setLicenseNumber} placeholder="เช่น ว.12345" required />
-            <Text style={styles.inputLabel}>ประเภทใบอนุญาต</Text>
+            <Text style={styles.sectionTitle}>{t('verification.licenseInfoTitle')}</Text>
+            <Input label={t('verification.licenseNumber')} value={licenseNumber} onChangeText={setLicenseNumber} placeholder={t('verification.licenseNumberPlaceholder')} required />
+            <Text style={styles.inputLabel}>{t('verification.licenseType')}</Text>
             <TouchableOpacity style={styles.selectButton} onPress={() => setShowLicenseTypeModal(true)}>
-              <Text style={styles.selectButtonText}>{LICENSE_TYPES.find((item) => item.value === licenseType)?.label || 'เลือกประเภท'}</Text>
+              <Text style={styles.selectButtonText}>{LICENSE_TYPES.find((item) => item.value === licenseType)?.label || t('verification.selectType')}</Text>
               <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
             </TouchableOpacity>
-            <CalendarPicker label="วันหมดอายุใบอนุญาต" value={licenseExpiry} onChange={setLicenseExpiry} minDate={new Date()} />
+            <CalendarPicker label={t('verification.licenseExpiry')} value={licenseExpiry} onChange={setLicenseExpiry} minDate={new Date()} />
           </Card>
         ) : null}
 
         <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>เอกสารประกอบ</Text>
-          {flow.requiresLicenseInfo ? renderDocumentPicker('license', 'ใบประกอบวิชาชีพ', 'อัปโหลดรูปใบประกอบวิชาชีพที่ใช้ตรวจสอบ') : null}
-          {flow.requiresEmployeeCard ? renderDocumentPicker('employeeCard', 'บัตรพนักงาน / เอกสารสังกัด', 'ใช้ยืนยันว่าคุณเป็นผู้แทนของหน่วยงานนี้จริง') : null}
-          {flow.requiresIdCard ? renderDocumentPicker('idCard', 'บัตรประชาชน', 'อัปโหลดเฉพาะข้อมูลที่ใช้ยืนยันตัวตนได้ชัดเจน') : null}
-          {flow.requiresDeclaration ? renderDocumentPicker('declaration', 'เอกสารเซ็นกำกับว่าใช้กับ NurseGo', 'เช่น เขียนกำกับบนเอกสารว่า ใช้ยืนยันตัวตนกับ NurseGo พร้อมลายเซ็น') : null}
+          <Text style={styles.sectionTitle}>{t('verification.documentsTitle')}</Text>
+          {flow.requiresLicenseInfo ? renderDocumentPicker('license', t('verification.licenseDocLabel'), t('verification.licenseDocDesc')) : null}
+          {flow.requiresEmployeeCard ? renderDocumentPicker('employeeCard', t('verification.employeeCardLabel'), t('verification.employeeCardDesc')) : null}
+          {flow.requiresIdCard ? renderDocumentPicker('idCard', t('verification.idCardLabel'), t('verification.idCardDesc')) : null}
+          {flow.requiresDeclaration ? renderDocumentPicker('declaration', t('verification.declarationLabel'), t('verification.declarationHint')) : null}
         </Card>
 
         <Card style={styles.privacyCard}>
           <View style={styles.privacyContent}>
             <Ionicons name="lock-closed-outline" size={24} color={colors.primary} />
-            <Text style={styles.privacyText}>เอกสารทั้งหมดใช้เพื่อการตรวจสอบตัวตนและความน่าเชื่อถือของผู้โพสต์งานเท่านั้น</Text>
+            <Text style={styles.privacyText}>{t('verification.privacyNotice')}</Text>
           </View>
         </Card>
 
-        <Button title={isSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอยืนยัน'} onPress={handleSubmit} loading={isSubmitting} style={styles.submitButton} />
+        <Button title={isSubmitting ? t('verification.submitting') : t('verification.submitButton')} onPress={handleSubmit} loading={isSubmitting} style={styles.submitButton} />
       </ScrollView>
 
-      <ModalContainer visible={showLicenseTypeModal} onClose={() => setShowLicenseTypeModal(false)} title="เลือกประเภทใบอนุญาต">
+      <ModalContainer visible={showLicenseTypeModal} onClose={() => setShowLicenseTypeModal(false)} title={t('verification.selectLicenseTypeTitle')}>
         {LICENSE_TYPES.map((type) => (
           <TouchableOpacity
             key={type.value}
@@ -423,14 +426,14 @@ export default function VerificationScreen({ navigation }: Props) {
         ))}
       </ModalContainer>
 
-      <ModalContainer visible={showImagePickerModal} onClose={() => setShowImagePickerModal(false)} title="เลือกรูปเอกสาร">
+      <ModalContainer visible={showImagePickerModal} onClose={() => setShowImagePickerModal(false)} title={t('verification.selectImageTitle')}>
         <TouchableOpacity style={styles.modalItem} onPress={selectFromGallery}>
           <Ionicons name="images-outline" size={24} color={colors.primary} />
-          <Text style={styles.modalItemText}>เลือกจากคลังรูปภาพ</Text>
+          <Text style={styles.modalItemText}>{t('verification.pickFromGallery')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.modalItem} onPress={takePhotoCamera}>
           <Ionicons name="camera-outline" size={24} color={colors.primary} />
-          <Text style={styles.modalItemText}>ถ่ายรูป</Text>
+          <Text style={styles.modalItemText}>{t('verification.takePhoto')}</Text>
         </TouchableOpacity>
       </ModalContainer>
     </SafeAreaView>

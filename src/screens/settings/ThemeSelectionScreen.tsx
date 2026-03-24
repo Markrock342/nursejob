@@ -4,18 +4,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../../src/context/ThemeContext'; // Adjusted path
 import { ThemePicker, BackButton } from '../../components/common';
 import { SPACING, FONT_SIZES } from '../../theme';
+import { useI18n } from '../../i18n';
 
 const ThemeSelectionScreen: React.FC = () => {
   const { colors } = useTheme();
+  const { t } = useI18n();
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <BackButton />
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.container}>
-          <Text style={[styles.header, { color: colors.text }]}>เลือกธีมและโทนสี</Text>
+          <Text style={[styles.header, { color: colors.text }]}>{t('settings.theme.selectionTitle')}</Text>
           <Text style={[styles.description, { color: colors.textSecondary }]}>
-            ลองเปลี่ยนสีหลักของแอพ เพื่อดูว่าโทนสีไหนที่คุณชอบที่สุด
+            {t('settings.theme.selectionDescription')}
           </Text>
           <ThemePicker />
         </View>

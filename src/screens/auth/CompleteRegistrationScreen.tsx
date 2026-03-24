@@ -23,6 +23,7 @@ import { useAuth } from '../../context/AuthContext';
 import { AuthStackParamList } from '../../types';
 import { getErrorMessage } from '../../utils/helpers';
 import { trackEvent } from '../../services/analyticsService';
+import { useI18n } from '../../i18n';
 
 // ============================================
 // Types
@@ -40,6 +41,7 @@ interface Props {
 // ============================================
 export default function CompleteRegistrationScreen({ navigation, route }: Props) {
   const { colors } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { phone, phoneVerified, role, staffType, orgType, registrationData } = route.params;
   
@@ -74,27 +76,27 @@ const { register, isLoading, clearError, user } = useAuth();
     const newErrors: Record<string, string> = {};
 
     if (!displayName.trim()) {
-      newErrors.displayName = 'กรุณากรอกชื่อ-นามสกุล';
+      newErrors.displayName = t('auth.completeRegistration.displayNameRequired');
     } else if (displayName.trim().length < 2) {
-      newErrors.displayName = 'ชื่อต้องมีอย่างน้อย 2 ตัวอักษร';
+      newErrors.displayName = t('auth.completeRegistration.displayNameTooShort');
     }
 
     if (!email.trim()) {
-      newErrors.email = 'กรุณากรอกอีเมล';
+      newErrors.email = t('auth.completeRegistration.emailRequired');
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'รูปแบบอีเมลไม่ถูกต้อง';
+      newErrors.email = t('auth.completeRegistration.emailInvalid');
     }
 
     if (!password) {
-      newErrors.password = 'กรุณากรอกรหัสผ่าน';
+      newErrors.password = t('auth.completeRegistration.passwordRequired');
     } else if (password.length < 8) {
-      newErrors.password = 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
+      newErrors.password = t('auth.completeRegistration.passwordTooShort');
     }
 
     if (!confirmPassword) {
-      newErrors.confirmPassword = 'กรุณายืนยันรหัสผ่าน';
+      newErrors.confirmPassword = t('auth.completeRegistration.confirmPasswordRequired');
     } else if (password !== confirmPassword) {
-      newErrors.confirmPassword = 'รหัสผ่านไม่ตรงกัน';
+      newErrors.confirmPassword = t('auth.completeRegistration.confirmPasswordMismatch');
     }
 
     setErrors(newErrors);
@@ -140,7 +142,7 @@ const { register, isLoading, clearError, user } = useAuth();
         return;
       }
 
-      let message = err.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
+      let message = err.message || t('auth.completeRegistration.genericError');
       if (!message.includes('อีเมล') && !message.includes('รหัสผ่าน') && !message.includes('บัญชี')) {
         message = getErrorMessage(err);
       }
@@ -175,17 +177,17 @@ const { register, isLoading, clearError, user } = useAuth();
               style={styles.backButton}
               onPress={() => navigation.goBack()}
             >
-              <Text style={styles.backButtonText}>← ย้อนกลับ</Text>
+              <Text style={styles.backButtonText}>{`← ${t('auth.completeRegistration.back')}`}</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>สร้างบัญชี</Text>
-            <Text style={styles.subtitle}>กรอกข้อมูลเพิ่มเติมเพื่อสมัครสมาชิก</Text>
+            <Text style={styles.title}>{t('auth.completeRegistration.title')}</Text>
+            <Text style={styles.subtitle}>{t('auth.completeRegistration.subtitle')}</Text>
           </View>
 
           {/* Verified Phone Badge */}
           <View style={styles.verifiedPhoneContainer}>
             <View style={styles.verifiedBadge}>
               <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
-              <Text style={styles.verifiedText}>เบอร์ที่ยืนยันแล้ว</Text>
+              <Text style={styles.verifiedText}>{t('auth.completeRegistration.verifiedPhone')}</Text>
             </View>
             <Text style={styles.phoneNumber}>{formatPhoneDisplay(phone)}</Text>
           </View>
@@ -193,20 +195,20 @@ const { register, isLoading, clearError, user } = useAuth();
           {/* Form */}
           <View style={styles.form}>
             <Input
-              label="ชื่อ-นามสกุล"
+              label={t('auth.completeRegistration.displayNameLabel')}
               value={displayName}
               onChangeText={(text) => {
                 setDisplayName(text);
                 if (errors.displayName) setErrors({ ...errors, displayName: '' });
               }}
-              placeholder="ชื่อจริง นามสกุล"
+              placeholder={t('auth.completeRegistration.displayNamePlaceholder')}
               error={errors.displayName}
               icon={<Text>👤</Text>}
               required
             />
 
             <Input
-              label="อีเมล"
+              label={t('auth.completeRegistration.emailLabel')}
               value={email}
               onChangeText={(text) => {
                 setEmail(text);
@@ -222,13 +224,13 @@ const { register, isLoading, clearError, user } = useAuth();
 
             <View>
               <Input
-                label="รหัสผ่าน"
+                label={t('auth.completeRegistration.passwordLabel')}
                 value={password}
                 onChangeText={(text) => {
                   setPassword(text);
                   if (errors.password) setErrors({ ...errors, password: '' });
                 }}
-                placeholder="อย่างน้อย 8 ตัวอักษร"
+                placeholder={t('auth.completeRegistration.passwordPlaceholder')}
                 secureTextEntry={!showPassword}
                 error={errors.password}
                 icon={
@@ -246,13 +248,13 @@ const { register, isLoading, clearError, user } = useAuth();
             </View>
 
             <Input
-              label="ยืนยันรหัสผ่าน"
+              label={t('auth.completeRegistration.confirmPasswordLabel')}
               value={confirmPassword}
               onChangeText={(text) => {
                 setConfirmPassword(text);
                 if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: '' });
               }}
-              placeholder="กรอกรหัสผ่านอีกครั้ง"
+              placeholder={t('auth.completeRegistration.confirmPasswordPlaceholder')}
               secureTextEntry={!showPassword}
               error={errors.confirmPassword}
               icon={<Text>🔒</Text>}
@@ -261,7 +263,7 @@ const { register, isLoading, clearError, user } = useAuth();
 
             {/* Register Button */}
             <Button
-              title="สมัครสมาชิก"
+              title={t('auth.completeRegistration.submit')}
               onPress={handleRegister}
               loading={isLoading}
               style={styles.registerButton}
@@ -273,9 +275,9 @@ const { register, isLoading, clearError, user } = useAuth();
       {/* Success Modal */}
       <SuccessModal
         visible={showSuccessModal}
-        title="สมัครสมาชิกสำเร็จ!"
-        message="มาตั้งค่าเบื้องต้นก่อนเริ่มใช้งานกันเลย"
-        buttonText="เริ่มเลย"
+        title={t('auth.completeRegistration.successTitle')}
+        message={t('auth.completeRegistration.successMessage')}
+        buttonText={t('auth.completeRegistration.successButton')}
         onClose={() => {
           setShowSuccessModal(false);
           // Navigate to onboarding survey in RootStack
@@ -289,9 +291,9 @@ const { register, isLoading, clearError, user } = useAuth();
       {/* Error Modal */}
       <ErrorModal
         visible={showErrorModal}
-        title="เกิดข้อผิดพลาด"
+        title={t('auth.completeRegistration.errorTitle')}
         message={errorMessage}
-        buttonText="ลองใหม่"
+        buttonText={t('auth.completeRegistration.retry')}
         onClose={() => setShowErrorModal(false)}
       />
     </SafeAreaView>

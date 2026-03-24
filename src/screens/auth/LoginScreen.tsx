@@ -21,6 +21,7 @@ import { Button, Input, Divider, SuccessModal, ErrorModal } from '../../componen
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useI18n } from '../../i18n';
 import { AuthStackParamList } from '../../types';
 import { getGoogleSigninModule, getGoogleSigninUnavailableMessage } from '../../utils/googleSignin';
 
@@ -31,7 +32,6 @@ const extra = Constants.expoConfig?.extra || {};
 const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId || '427547114323-87ibkaeo6kun7cfhc20919c9gn7ntp24.apps.googleusercontent.com';
 const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || '427547114323-o1qs4cq0kdbcao0mpvcti88la81p2nre.apps.googleusercontent.com';
 const GOOGLE_IOS_CLIENT_ID = extra.googleIosClientId || '';
-const HAS_GOOGLE_IOS_CLIENT_ID = Boolean(GOOGLE_IOS_CLIENT_ID);
 
 // ============================================
 // Types
@@ -60,17 +60,19 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
   // Auth context
   const { login, loginWithGoogle, isLoading, error, clearError } = useAuth();
   const { colors, isDark } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const googleSigninModule = useMemo(() => getGoogleSigninModule(), []);
+  const isGoogleSignInAvailable = Boolean(googleSigninModule);
 
   useEffect(() => {
-    const googleSigninModule = getGoogleSigninModule();
     googleSigninModule?.GoogleSignin.configure({
       webClientId: GOOGLE_WEB_CLIENT_ID,
       iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
       offlineAccess: false,
       profileImageSize: 120,
     });
-  }, []);
+  }, [googleSigninModule]);
 
   // Handle Google Login
   const handleGoogleLogin = async (idToken: string) => {
@@ -94,15 +96,8 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 
   // Trigger Google Sign-In
   const handleGoogleSignIn = async () => {
-    const googleSigninModule = getGoogleSigninModule();
     if (!googleSigninModule) {
       setErrorMessage(getGoogleSigninUnavailableMessage());
-      setShowErrorModal(true);
-      return;
-    }
-
-    if (Platform.OS === 'ios' && !HAS_GOOGLE_IOS_CLIENT_ID) {
-      setErrorMessage('ยังไม่ได้ตั้งค่า Google Sign-In สำหรับ iOS ให้เพิ่ม GoogleService-Info.plist หรือ googleIosClientId ของ bundle com.nursego.app ก่อน');
       setShowErrorModal(true);
       return;
     }
@@ -122,7 +117,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 
       const idToken = response.data.idToken;
       if (!idToken) {
-        throw new Error('Google Sign-In สำเร็จไม่ครบขั้นตอน: ไม่ได้รับ idToken จาก Google');
+        throw new Error(t('auth.login.googleMissingToken'));
       }
 
       await handleGoogleLogin(idToken);
@@ -133,14 +128,14 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
           return;
         }
         if (err.code === googleSigninModule.statusCodes.IN_PROGRESS) {
-          setErrorMessage('Google Sign-In กำลังทำงานอยู่ กรุณารอสักครู่');
+          setErrorMessage(t('auth.login.googleInProgress'));
         } else if (err.code === googleSigninModule.statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-          setErrorMessage('อุปกรณ์นี้ยังไม่พร้อมสำหรับ Google Sign-In');
+          setErrorMessage(t('auth.login.googleDeviceNotReady'));
         } else {
-          setErrorMessage(err.message || 'Google Sign-In ล้มเหลว');
+          setErrorMessage(err.message || t('auth.login.googleFailed'));
         }
       } else {
-        setErrorMessage(err?.message || 'ไม่สามารถเปิด Google Sign-In ได้');
+        setErrorMessage(err?.message || t('auth.login.googleCannotOpen'));
       }
       setShowErrorModal(true);
       setGoogleLoading(false);
@@ -152,11 +147,11 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
     const newErrors: { email?: string; password?: string } = {};
 
     if (!email.trim()) {
-      newErrors.email = 'กรุณากรอกอีเมล หรือ Username';
+      newErrors.email = t('auth.login.emailRequired');
     }
 
     if (!password) {
-      newErrors.password = 'กรุณากรอกรหัสผ่าน';
+      newErrors.password = t('auth.login.passwordRequired');
     }
 
     setErrors(newErrors);
@@ -183,7 +178,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
         navigation.navigate('EmailVerification', { email: err.email || trimmedInput });
         return;
       }
-      setErrorMessage(err.message || 'กรุณาลองใหม่อีกครั้ง');
+      setErrorMessage(err.message || t('common.alerts.genericTryAgain'));
       setShowErrorModal(true);
     }
   };
@@ -214,20 +209,20 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
             <View style={styles.logoContainer}>
               <Ionicons name="medical" size={40} color="#FFFFFF" />
             </View>
-            <Text style={styles.title}>NurseGo</Text>
-            <Text style={styles.subtitle}>แพลตฟอร์มหางานพยาบาล</Text>
+            <Text style={styles.title}>{t('auth.login.title')}</Text>
+            <Text style={styles.subtitle}>{t('auth.login.subtitle')}</Text>
           </View>
 
           {/* Login Form */}
           <View style={styles.form}>
             <Input
-              label="อีเมล หรือ Username"
+              label={t('auth.login.emailLabel')}
               value={email}
               onChangeText={(text) => {
                 setEmail(text);
                 if (errors.email) setErrors({ ...errors, email: undefined });
               }}
-              placeholder="อีเมล หรือ Username"
+              placeholder={t('auth.login.emailPlaceholder')}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -236,13 +231,13 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
             />
 
             <Input
-              label="รหัสผ่าน"
+              label={t('auth.login.passwordLabel')}
               value={password}
               onChangeText={(text) => {
                 setPassword(text);
                 if (errors.password) setErrors({ ...errors, password: undefined });
               }}
-              placeholder="กรอกรหัสผ่าน"
+              placeholder={t('auth.login.passwordPlaceholder')}
               secureTextEntry={!showPassword}
               error={errors.password}
               icon={
@@ -262,7 +257,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
               style={styles.forgotPassword}
               onPress={handleForgotPassword}
             >
-              <Text style={styles.forgotPasswordText}>ลืมรหัสผ่าน?</Text>
+              <Text style={styles.forgotPasswordText}>{t('auth.login.forgotPassword')}</Text>
             </TouchableOpacity>
 
             {/* Error Message */}
@@ -274,14 +269,14 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 
             {/* Login Button */}
             <Button
-              title="เข้าสู่ระบบ"
+              title={t('auth.login.submit')}
               onPress={handleLogin}
               loading={isLoading}
               fullWidth
               size="large"
             />
 
-            <Divider text="หรือ" />
+            <Divider text={t('auth.login.or')} />
 
             {/* Phone Login Button */}
             <TouchableOpacity
@@ -290,7 +285,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
             >
               <Ionicons name="call-outline" size={20} color={COLORS.primary} style={styles.phoneLoginIcon} />
               <Text style={styles.phoneLoginText}>
-                เข้าสู่ระบบด้วยเบอร์โทร (OTP)
+                {t('auth.login.phoneLogin')}
               </Text>
             </TouchableOpacity>
 
@@ -298,10 +293,10 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
             <TouchableOpacity
               style={[
                 styles.googleButton,
-                googleLoading && styles.googleButtonDisabled,
+                (!isGoogleSignInAvailable || googleLoading) && styles.googleButtonDisabled,
               ]}
               onPress={handleGoogleSignIn}
-              disabled={googleLoading}
+              disabled={!isGoogleSignInAvailable || googleLoading}
             >
               {googleLoading ? (
                 <ActivityIndicator color={colors.text} />
@@ -309,7 +304,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
                 <>
                   <Text style={styles.googleIcon}>G</Text>
                   <Text style={styles.googleButtonText}>
-                    เข้าสู่ระบบด้วย Google
+                    {t('auth.login.googleLogin')}
                   </Text>
                 </>
               )}
@@ -318,7 +313,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
             {/* Guest Mode */}
             {onGuestLogin && (
               <Button
-                title="เข้าชมโดยไม่ต้องเข้าสู่ระบบ"
+                title={t('auth.login.guestBrowse')}
                 onPress={onGuestLogin}
                 variant="outline"
                 fullWidth
@@ -328,9 +323,20 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
 
           {/* Register Link */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>ยังไม่มีบัญชี? </Text>
+            <Text style={styles.footerText}>{t('auth.login.noAccount')} </Text>
             <TouchableOpacity onPress={handleRegister}>
-              <Text style={styles.registerLink}>สมัครสมาชิก</Text>
+              <Text style={styles.registerLink}>{t('auth.login.registerLink')}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Legal Links */}
+          <View style={styles.legalLinks}>
+            <TouchableOpacity onPress={() => navigation.navigate('Privacy')}>
+              <Text style={styles.legalLinkText}>{t('help.privacyLink')}</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalSeparator}>|</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Terms')}>
+              <Text style={styles.legalLinkText}>{t('help.termsLink')}</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -339,10 +345,10 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
       {/* Success Modal */}
       <SuccessModal
         visible={showSuccessModal}
-        title="เข้าสู่ระบบสำเร็จ"
-        message="ยินดีต้อนรับกลับมา!"
+        title={t('auth.login.successTitle')}
+        message={t('auth.login.successMessage')}
         icon="✅"
-        buttonText="ตกลง"
+        buttonText={t('common.actions.ok')}
         onClose={() => {
           setShowSuccessModal(false);
           navigation.getParent()?.goBack();
@@ -352,7 +358,7 @@ export default function LoginScreen({ navigation, onGuestLogin }: Props) {
       {/* Error Modal */}
       <ErrorModal
         visible={showErrorModal}
-        title="เข้าสู่ระบบไม่สำเร็จ"
+        title={t('auth.login.errorTitle')}
         message={errorMessage}
         onClose={() => setShowErrorModal(false)}
       />
@@ -502,6 +508,22 @@ const createStyles = (COLORS: any) => StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
     fontSize: FONT_SIZES.md,
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: SPACING.lg,
+  },
+  legalLinkText: {
+    color: COLORS.textSecondary,
+    fontSize: FONT_SIZES.sm,
+    textDecorationLine: 'underline',
+  },
+  legalSeparator: {
+    color: COLORS.textSecondary,
+    fontSize: FONT_SIZES.sm,
+    marginHorizontal: SPACING.sm,
   },
 });
 

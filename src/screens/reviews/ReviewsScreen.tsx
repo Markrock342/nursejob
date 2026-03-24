@@ -38,6 +38,7 @@ import {
   ReviewEligibility,
 } from '../../services/reviewsService';
 import { formatRelativeTime } from '../../utils/helpers';
+import { useI18n } from '../../i18n';
 
 type ReviewsRouteParams = {
   hospitalId?: string;
@@ -100,6 +101,7 @@ const RatingBar = ({ label, count, total }: { label: string; count: number; tota
 };
 
 export default function ReviewsScreen() {
+  const { t } = useI18n();
   const route = useRoute<RouteProp<Record<string, ReviewsRouteParams>, string>>();
   const navigation = useNavigation();
   const { user, requireAuth } = useAuth();
@@ -111,7 +113,7 @@ export default function ReviewsScreen() {
   const { hospitalId, hospitalName, targetUserId, targetName, targetRole, completionId } = route.params || {};
   const targetType = targetUserId ? 'user' : 'hospital';
   const targetId = targetUserId || hospitalId;
-  const screenName = targetUserId ? (targetName || 'ผู้ใช้งาน') : (hospitalName || 'สถานที่ทำงาน');
+  const screenName = targetUserId ? (targetName || t('reviews.userFallback')) : (hospitalName || t('reviews.workplaceFallback'));
   
   const [reviews, setReviews] = useState<Review[]>([]);
   const [ratingData, setRatingData] = useState<HospitalRating | null>(null);
@@ -202,11 +204,11 @@ export default function ReviewsScreen() {
   const handleWriteReview = () => {
     requireAuth(() => {
       if (userReview) {
-        setAlert({ ...createAlert.info('แจ้งเตือน', targetType === 'user' ? 'คุณได้รีวิวงานนี้แล้ว' : 'คุณได้รีวิวสถานที่นี้แล้ว') } as AlertState);
+        setAlert({ ...createAlert.info(t('reviews.alertNotice'), targetType === 'user' ? t('reviews.alreadyReviewedJob') : t('reviews.alreadyReviewedPlace')) } as AlertState);
         return;
       }
       if (!reviewEligibility?.canReview) {
-        setAlert({ ...createAlert.warning('ยังรีวิวไม่ได้', 'จะรีวิวได้เมื่อมีงานที่ยืนยันแล้วและจบงานเรียบร้อย') } as AlertState);
+        setAlert({ ...createAlert.warning(t('reviews.cannotReviewTitle'), t('reviews.cannotReviewMessage')) } as AlertState);
         return;
       }
       setShowWriteModal(true);
@@ -217,11 +219,11 @@ export default function ReviewsScreen() {
     if (!user?.uid || !targetId) return;
     
     if (!newTitle.trim()) {
-      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณาใส่หัวข้อรีวิว') } as AlertState);
+      setAlert({ ...createAlert.warning(t('reviews.validationTitle'), t('reviews.validationTitleRequired')) } as AlertState);
       return;
     }
     if (!newContent.trim()) {
-      setAlert({ ...createAlert.warning('กรุณากรอกข้อมูล', 'กรุณาใส่เนื้อหารีวิว') } as AlertState);
+      setAlert({ ...createAlert.warning(t('reviews.validationTitle'), t('reviews.validationContentRequired')) } as AlertState);
       return;
     }
 
@@ -231,7 +233,7 @@ export default function ReviewsScreen() {
       await createReview(
         targetId,
         user.uid,
-        user.displayName || 'ผู้ใช้',
+        user.displayName || t('reviews.userFallback'),
         newRating,
         newTitle.trim(),
         newContent.trim(),
@@ -251,9 +253,10 @@ export default function ReviewsScreen() {
       setShowWriteModal(false);
       resetForm();
       loadData();
-      setAlert({ ...createAlert.success('สำเร็จ', 'ขอบคุณสำหรับรีวิวของคุณ') } as AlertState);
+      setAlert({ ...createAlert.success(t('reviews.successTitle'), t('reviews.successMessage')) } as AlertState);
     } catch (error: any) {
-      setAlert({ ...createAlert.error('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถส่งรีวิวได้') } as AlertState);
+      setShowWriteModal(false);
+      setAlert({ ...createAlert.error(t('reviews.errorTitle'), error.message || t('reviews.errorSubmitFallback')) } as AlertState);
     } finally {
       setIsSubmitting(false);
     }
@@ -270,19 +273,19 @@ export default function ReviewsScreen() {
 
   const handleHelpful = async (review: Review) => {
     if (!user?.uid) {
-      setAlert({ ...createAlert.info('กรุณาเข้าสู่ระบบ', 'เข้าสู่ระบบก่อนกดว่ารีวิวนี้มีประโยชน์') } as AlertState);
+      setAlert({ ...createAlert.info(t('reviews.loginTitle'), t('reviews.loginHelpfulMessage')) } as AlertState);
       return;
     }
 
     if (helpfulReviewIds.includes(review.id) || review.helpfulVoterIds?.includes(user.uid)) {
-      setAlert({ ...createAlert.info('กดแล้ว', 'คุณกดว่ารีวิวนี้มีประโยชน์ไปแล้ว') } as AlertState);
+      setAlert({ ...createAlert.info(t('reviews.alreadyHelpfulTitle'), t('reviews.alreadyHelpfulMessage')) } as AlertState);
       return;
     }
 
     try {
       const updated = await markReviewHelpful(review.id, user.uid);
       if (!updated) {
-        setAlert({ ...createAlert.info('กดแล้ว', 'คุณกดว่ารีวิวนี้มีประโยชน์ไปแล้ว') } as AlertState);
+        setAlert({ ...createAlert.info(t('reviews.alreadyHelpfulTitle'), t('reviews.alreadyHelpfulMessage')) } as AlertState);
         setHelpfulReviewIds((prev) => [...prev, review.id]);
         return;
       }
@@ -298,7 +301,7 @@ export default function ReviewsScreen() {
           : r)
       );
     } catch (error: any) {
-      setAlert({ ...createAlert.error('กดไม่ได้', error?.message || 'ไม่สามารถบันทึกคะแนนประโยชน์ได้') } as AlertState);
+      setAlert({ ...createAlert.error(t('reviews.helpfulErrorTitle'), error?.message || t('reviews.helpfulErrorFallback')) } as AlertState);
     }
   };
 
@@ -314,8 +317,8 @@ export default function ReviewsScreen() {
         <StatusBar barStyle={statusBarStyle} backgroundColor={headerBackground} translucent={false} />
         <EmptyState
           icon="alert-circle-outline"
-          title={targetType === 'user' ? 'ไม่พบข้อมูลผู้ใช้งาน' : 'ไม่พบข้อมูลสถานที่ทำงาน'}
-          actionLabel="กลับ"
+          title={targetType === 'user' ? t('reviews.noUserData') : t('reviews.noWorkplaceData')}
+          actionLabel={t('reviews.goBack')}
           onAction={() => navigation.goBack()}
         />
       </SafeAreaView>
@@ -323,7 +326,7 @@ export default function ReviewsScreen() {
   }
 
   if (isLoading) {
-    return <Loading message="กำลังโหลดรีวิว..." />;
+    return <Loading message={t('reviews.loading')} />;
   }
 
   const renderReview = ({ item }: { item: Review }) => {
@@ -347,7 +350,7 @@ export default function ReviewsScreen() {
         {item.isVerified && (
           <View style={styles.verifiedBadge}>
             <Ionicons name="checkmark-circle" size={14} color={colors.success} />
-            <Text style={styles.verifiedText}>ยืนยันแล้ว</Text>
+            <Text style={styles.verifiedText}>{t('reviews.verified')}</Text>
           </View>
         )}
       </View>
@@ -380,25 +383,25 @@ export default function ReviewsScreen() {
             color={item.wouldRecommend ? colors.error : colors.textMuted}
           />
           <Text style={[styles.recommendText, item.wouldRecommend && styles.recommendActive]}>
-            {item.wouldRecommend ? 'แนะนำ' : 'ไม่แนะนำ'}
+            {item.wouldRecommend ? t('reviews.recommend') : t('reviews.notRecommend')}
           </Text>
         </View>
         <TouchableOpacity style={[styles.helpfulButton, hasMarkedHelpful && styles.helpfulButtonActive]} onPress={() => handleHelpful(item)}>
           <Ionicons name={hasMarkedHelpful ? 'thumbs-up' : 'thumbs-up-outline'} size={16} color={hasMarkedHelpful ? colors.primary : colors.textSecondary} />
           <Text style={[styles.helpfulText, hasMarkedHelpful && styles.helpfulTextActive]}>
-            {hasMarkedHelpful ? 'มีประโยชน์แล้ว' : 'มีประโยชน์'} ({item.helpful})
+            {hasMarkedHelpful ? t('reviews.helpfulDone') : t('reviews.helpful')} ({item.helpful})
           </Text>
         </TouchableOpacity>
       </View>
 
       <TouchableOpacity style={styles.reportButton} onPress={() => handleReportReview(item)}>
         <Ionicons name="flag-outline" size={15} color={colors.textMuted} />
-        <Text style={styles.reportButtonText}>รายงานรีวิว</Text>
+        <Text style={styles.reportButtonText}>{t('reviews.report')}</Text>
       </TouchableOpacity>
 
       {item.response && (
         <View style={styles.responseContainer}>
-          <Text style={styles.responseLabel}>{targetType === 'user' ? 'คำตอบจากผู้ใช้งาน' : 'คำตอบจากสถานที่ทำงาน'}</Text>
+          <Text style={styles.responseLabel}>{targetType === 'user' ? t('reviews.responseFromUser') : t('reviews.responseFromWorkplace')}</Text>
           <Text style={styles.responseContent}>{item.response.content}</Text>
         </View>
       )}
@@ -418,7 +421,7 @@ export default function ReviewsScreen() {
         targetName={reportingReview ? `${reportingReview.userName}: ${reportingReview.title}` : undefined}
         targetDescription={reportingReview?.content}
         reporterId={user?.uid || ''}
-        reporterName={user?.displayName || 'ผู้ใช้'}
+        reporterName={user?.displayName || t('reviews.userFallback')}
         reporterEmail={user?.email || ''}
       />
       <View style={styles.header}>
@@ -427,7 +430,7 @@ export default function ReviewsScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>{screenName}</Text>
-          <Text style={styles.headerSubtitle}>รีวิว</Text>
+          <Text style={styles.headerSubtitle}>{t('reviews.headerSubtitle')}</Text>
         </View>
         <View style={{ width: 24 }} />
       </View>
@@ -438,7 +441,7 @@ export default function ReviewsScreen() {
           <View style={styles.ratingOverview}>
             <Text style={styles.ratingNumber}>{ratingData.averageRating.toFixed(1)}</Text>
             <StarRating rating={Math.round(ratingData.averageRating)} size={16} />
-            <Text style={styles.ratingCount}>{ratingData.totalReviews} รีวิว</Text>
+            <Text style={styles.ratingCount}>{t('reviews.reviewCount').replace('{count}', String(ratingData.totalReviews))}</Text>
           </View>
           <View style={styles.ratingBreakdown}>
             {[5, 4, 3, 2, 1].map((star) => (
@@ -457,14 +460,14 @@ export default function ReviewsScreen() {
       {!userReview && reviewEligibility?.canReview && (
         <TouchableOpacity style={styles.writeButton} onPress={handleWriteReview}>
           <Ionicons name="create-outline" size={20} color={colors.white} />
-          <Text style={styles.writeButtonText}>เขียนรีวิว</Text>
+          <Text style={styles.writeButtonText}>{t('reviews.writeReview')}</Text>
         </TouchableOpacity>
       )}
 
       {!userReview && !reviewEligibility?.canReview ? (
         <View style={styles.reviewHintBox}>
           <Ionicons name="information-circle-outline" size={18} color={colors.warning} />
-          <Text style={styles.reviewHintText}>รีวิวได้เมื่อคุณมีงานที่ยืนยันแล้วและจบงานกับโปรไฟล์นี้</Text>
+          <Text style={styles.reviewHintText}>{t('reviews.reviewHint')}</Text>
         </View>
       ) : null}
 
@@ -475,11 +478,11 @@ export default function ReviewsScreen() {
         style={styles.sortScroll}
       >
         {[
-          { key: 'latest', label: 'ล่าสุด' },
-          { key: 'highest', label: 'คะแนนมากสุด' },
-          { key: 'lowest', label: 'คะแนนน้อยสุด' },
-          { key: 'mostHelpful', label: 'มีประโยชน์มากสุด' },
-          { key: 'leastHelpful', label: 'มีประโยชน์น้อยสุด' },
+          { key: 'latest', label: t('reviews.sortLatest') },
+          { key: 'highest', label: t('reviews.sortHighest') },
+          { key: 'lowest', label: t('reviews.sortLowest') },
+          { key: 'mostHelpful', label: t('reviews.sortMostHelpful') },
+          { key: 'leastHelpful', label: t('reviews.sortLeastHelpful') },
         ].map((option) => {
           const selected = reviewSort === option.key;
           return (
@@ -510,9 +513,9 @@ export default function ReviewsScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="chatbubbles-outline"
-            title="ยังไม่มีรีวิว"
-            subtitle={targetType === 'user' ? 'เป็นคนแรกที่รีวิวผู้ใช้งานนี้' : 'เป็นคนแรกที่รีวิวสถานที่นี้'}
-            actionLabel="เขียนรีวิว"
+            title={t('reviews.emptyTitle')}
+            subtitle={targetType === 'user' ? t('reviews.emptySubtitleUser') : t('reviews.emptySubtitlePlace')}
+            actionLabel={t('reviews.writeReview')}
             onAction={handleWriteReview}
           />
         }
@@ -533,10 +536,10 @@ export default function ReviewsScreen() {
               <TouchableOpacity onPress={() => setShowWriteModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>เขียนรีวิว</Text>
+              <Text style={styles.modalTitle}>{t('reviews.writeReview')}</Text>
               <TouchableOpacity onPress={handleSubmitReview} disabled={isSubmitting}>
                 <Text style={[styles.submitText, isSubmitting && styles.submitTextDisabled]}>
-                  {isSubmitting ? 'กำลังส่ง...' : 'ส่ง'}
+                  {isSubmitting ? t('reviews.submitting') : t('reviews.submit')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -547,16 +550,16 @@ export default function ReviewsScreen() {
 
               {/* Rating */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>ให้คะแนน</Text>
+                <Text style={styles.formLabel}>{t('reviews.rateLabel')}</Text>
                 <StarRating rating={newRating} size={32} onRate={setNewRating} editable={true} />
               </View>
 
               {/* Title */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>หัวข้อ *</Text>
+                <Text style={styles.formLabel}>{t('reviews.titleLabel')}</Text>
                 <TextInput
                   style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                  placeholder="เช่น ประสบการณ์ทำงานที่ดี"
+                  placeholder={t('reviews.titlePlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={newTitle}
                   onChangeText={setNewTitle}
@@ -566,10 +569,10 @@ export default function ReviewsScreen() {
 
               {/* Content */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>รายละเอียด *</Text>
+                <Text style={styles.formLabel}>{t('reviews.detailsLabel')}</Text>
                 <TextInput
                   style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border }]}
-                  placeholder="บอกเล่าประสบการณ์ของคุณ..."
+                  placeholder={t('reviews.detailsPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={newContent}
                   onChangeText={setNewContent}
@@ -583,11 +586,10 @@ export default function ReviewsScreen() {
               {/* Pros */}
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>
-                  <Ionicons name="thumbs-up" size={14} color={colors.success} /> ข้อดี
-                </Text>
+                  <Ionicons name="thumbs-up" size={14} color={colors.success} />{t('reviews.prosLabel')}</Text>
                 <TextInput
                   style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                  placeholder="สิ่งที่ชอบ..."
+                  placeholder={t('reviews.prosPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={newPros}
                   onChangeText={setNewPros}
@@ -598,11 +600,10 @@ export default function ReviewsScreen() {
               {/* Cons */}
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>
-                  <Ionicons name="thumbs-down" size={14} color={colors.error} /> ข้อเสีย
-                </Text>
+                  <Ionicons name="thumbs-down" size={14} color={colors.error} />{t('reviews.consLabel')}</Text>
                 <TextInput
                   style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                  placeholder="สิ่งที่ควรปรับปรุง..."
+                  placeholder={t('reviews.consPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   value={newCons}
                   onChangeText={setNewCons}
@@ -612,25 +613,21 @@ export default function ReviewsScreen() {
 
               {/* Recommend */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>คุณจะแนะนำให้ผู้อื่นหรือไม่?</Text>
+                <Text style={styles.formLabel}>{t('reviews.wouldRecommend')}</Text>
                 <View style={styles.recommendOptions}>
                   <TouchableOpacity
                     style={[styles.recommendOption, wouldRecommend && styles.recommendOptionActive]}
                     onPress={() => setWouldRecommend(true)}
                   >
                     <Ionicons name="heart" size={20} color={wouldRecommend ? colors.white : colors.error} />
-                    <Text style={[styles.recommendOptionText, wouldRecommend && styles.recommendOptionTextActive]}>
-                      แนะนำ
-                    </Text>
+                    <Text style={[styles.recommendOptionText, wouldRecommend && styles.recommendOptionTextActive]}>{t('reviews.recommend')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.recommendOption, !wouldRecommend && styles.recommendOptionInactive]}
                     onPress={() => setWouldRecommend(false)}
                   >
                     <Ionicons name="heart-outline" size={20} color={!wouldRecommend ? colors.white : colors.textMuted} />
-                    <Text style={[styles.recommendOptionText, !wouldRecommend && styles.recommendOptionTextActive]}>
-                      ไม่แนะนำ
-                    </Text>
+                    <Text style={[styles.recommendOptionText, !wouldRecommend && styles.recommendOptionTextActive]}>{t('reviews.notRecommend')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>

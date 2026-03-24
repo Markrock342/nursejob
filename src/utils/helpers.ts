@@ -3,6 +3,13 @@
 // ============================================
 
 import { Alert, Linking, Platform } from 'react-native';
+import {
+  formatDateValue,
+  formatRelativeTimeValue,
+  formatSalaryRangeValue,
+  formatTimeValue,
+  getCurrentResolvedLanguage,
+} from '../i18n';
 import { ERROR_MESSAGES } from '../theme';
 
 // Format salary display
@@ -11,17 +18,12 @@ export const formatSalary = (
   max: number,
   unit: 'hour' | 'day' | 'month' = 'month'
 ): string => {
-  const unitText = unit === 'hour' ? 'ชม.' : unit === 'day' ? 'วัน' : 'เดือน';
-  if (min === max) {
-    return `${min.toLocaleString()} บาท/${unitText}`;
-  }
-  return `${min.toLocaleString()}-${max.toLocaleString()} บาท/${unitText}`;
+  return formatSalaryRangeValue(min, max, unit);
 };
 
 // Format date (Thai)
 export const formatDate = (date: Date | string): string => {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('th-TH', {
+  return formatDateValue(date, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -30,8 +32,7 @@ export const formatDate = (date: Date | string): string => {
 
 // Format time
 export const formatTime = (date: Date | string): string => {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleTimeString('th-TH', {
+  return formatTimeValue(date, {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -63,18 +64,8 @@ export const formatRelativeTime = (date: Date | string | any): string => {
   if (isNaN(d.getTime())) {
     return 'ไม่ระบุ';
   }
-  
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
 
-  if (diffMins < 1) return 'เมื่อสักครู่';
-  if (diffMins < 60) return `${diffMins} นาทีที่แล้ว`;
-  if (diffHours < 24) return `${diffHours} ชั่วโมงที่แล้ว`;
-  if (diffDays < 7) return `${diffDays} วันที่แล้ว`;
-  return formatDate(d);
+  return formatRelativeTimeValue(d);
 };
 
 // Get Firebase error message in Thai
@@ -135,7 +126,10 @@ export const formatPhone = (phone: string): string => {
 export const callPhone = (phone: string): void => {
   const phoneNumber = phone.replace(/[-\s]/g, '');
   Linking.openURL(`tel:${phoneNumber}`).catch(() => {
-    Alert.alert('ไม่สามารถโทรได้', 'กรุณาลองใหม่อีกครั้ง');
+    Alert.alert(
+      getCurrentResolvedLanguage() === 'th' ? 'ไม่สามารถโทรได้' : 'Unable to place the call',
+      getCurrentResolvedLanguage() === 'th' ? 'กรุณาลองใหม่อีกครั้ง' : 'Please try again.'
+    );
   });
 };
 
@@ -157,7 +151,7 @@ export const openMaps = (address: string): void => {
   });
   
   Linking.openURL(url as string).catch(() => {
-    Alert.alert('ไม่สามารถเปิดแผนที่ได้');
+    Alert.alert(getCurrentResolvedLanguage() === 'th' ? 'ไม่สามารถเปิดแผนที่ได้' : 'Unable to open maps');
   });
 };
 
@@ -183,7 +177,7 @@ export const openMapsWithCoords = (lat: number, lng: number, label?: string): vo
   });
   
   Linking.openURL(url as string).catch(() => {
-    Alert.alert('ไม่สามารถเปิดแผนที่ได้');
+    Alert.alert(getCurrentResolvedLanguage() === 'th' ? 'ไม่สามารถเปิดแผนที่ได้' : 'Unable to open maps');
   });
 };
 
@@ -192,7 +186,7 @@ export const openMapsDirectionsWithCoords = (lat: number, lng: number): void => 
   const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
   
   Linking.openURL(googleMapsUrl).catch(() => {
-    Alert.alert('ไม่สามารถเปิดแผนที่ได้');
+    Alert.alert(getCurrentResolvedLanguage() === 'th' ? 'ไม่สามารถเปิดแผนที่ได้' : 'Unable to open maps');
   });
 };
 

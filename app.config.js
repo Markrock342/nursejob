@@ -98,9 +98,9 @@ module.exports = {
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSLocationWhenInUseUsageDescription: 'NurseGo ต้องการตำแหน่งเพื่อหางานใกล้คุณ',
-        NSLocationAlwaysUsageDescription: 'NurseGo ต้องการตำแหน่งเพื่อหางานใกล้คุณ',
         NSPhotoLibraryUsageDescription: 'เพื่ออัปโหลดรูปโปรไฟล์และเอกสาร',
         NSCameraUsageDescription: 'เพื่อถ่ายภาพโปรไฟล์และเอกสาร',
+        NSUserTrackingUsageDescription: 'NurseGo ใช้ข้อมูลนี้เพื่อปรับปรุงประสบการณ์ใช้งานและแสดงงานที่ตรงกับความต้องการของคุณ',
         ...(GOOGLE_IOS_REVERSED_CLIENT_ID
           ? {
               CFBundleURLTypes: [
@@ -153,10 +153,10 @@ module.exports = {
         'ACCESS_FINE_LOCATION',
         'ACCESS_COARSE_LOCATION',
         'CAMERA',
-        'READ_EXTERNAL_STORAGE',
-        'WRITE_EXTERNAL_STORAGE',
+        'READ_MEDIA_IMAGES',
         'RECEIVE_BOOT_COMPLETED',
         'VIBRATE',
+        'POST_NOTIFICATIONS',
       ],
     },
     web: {
@@ -182,7 +182,7 @@ module.exports = {
       [
         'expo-location',
         {
-          locationAlwaysAndWhenInUsePermission:
+          locationWhenInUsePermission:
             'NurseGo ต้องการตำแหน่งเพื่อหางานใกล้คุณ',
         },
       ],

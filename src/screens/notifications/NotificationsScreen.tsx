@@ -31,6 +31,7 @@ import { recordBroadcastOpen } from '../../services/adminService';
 import { navigateFromNotification } from '../../services/notificationNavigation';
 import { StickyInboxItem, subscribeStickyInboxItems } from '../../services/communicationsService';
 import { useScreenPerformance } from '../../hooks/useScreenPerformance';
+import { useI18n } from '../../i18n';
 
 // ============================================
 // Helper Functions
@@ -85,7 +86,7 @@ const getNotificationColor = (type: NotificationType): string => {
 };
 
 // Group notifications by date
-const groupNotificationsByDate = (notifications: Notification[]) => {
+const groupNotificationsByDate = (notifications: Notification[], t: any, resolvedLanguage: string) => {
   const groups: { [key: string]: Notification[] } = {};
   const today = new Date();
   const yesterday = new Date(today);
@@ -98,13 +99,13 @@ const groupNotificationsByDate = (notifications: Notification[]) => {
     
     let dateKey: string;
     if (isSameDay(date, today)) {
-      dateKey = 'วันนี้';
+      dateKey = t('notifications.today');
     } else if (isSameDay(date, yesterday)) {
-      dateKey = 'เมื่อวาน';
+      dateKey = t('notifications.yesterday');
     } else if (isThisWeek(date)) {
-      dateKey = 'สัปดาห์นี้';
+      dateKey = t('notifications.thisWeek');
     } else {
-      dateKey = date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+      dateKey = date.toLocaleDateString(resolvedLanguage === 'th' ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' });
     }
     
     if (!groups[dateKey]) {
@@ -134,6 +135,7 @@ const isThisWeek = (date: Date) => {
 };
 
 export default function NotificationsScreen() {
+  const { t, resolvedLanguage } = useI18n();
   useScreenPerformance('Notifications');
   // ============================================
   // 1. ALL HOOKS MUST BE AT THE TOP - ALWAYS CALLED UNCONDITIONALLY
@@ -167,6 +169,7 @@ export default function NotificationsScreen() {
       setNotifications(data);
     } catch (error) {
       console.error('Error loading notifications:', error);
+      Alert.alert(t('common.alerts.loadErrorTitle'), t('common.alerts.loadErrorMessage'));
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -237,25 +240,25 @@ export default function NotificationsScreen() {
       await markAllAsRead(user.uid);
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     } catch (error) {
-      Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถอ่านทั้งหมดได้');
+      Alert.alert(t('notifications.error'), t('notifications.markAllReadError'));
     }
   }, [unreadCount, user?.uid]);
 
   const handleDelete = useCallback((notification: Notification) => {
     Alert.alert(
-      'ลบการแจ้งเตือน',
-      'ต้องการลบการแจ้งเตือนนี้หรือไม่?',
+      t('notifications.deleteNotificationTitle'),
+      t('notifications.deleteNotificationMessage'),
       [
-        { text: 'ยกเลิก', style: 'cancel' },
+        { text: t('notifications.cancel'), style: 'cancel' },
         {
-          text: 'ลบ',
+          text: t('notifications.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteNotification(notification.id);
               setNotifications(prev => prev.filter(n => n.id !== notification.id));
             } catch (error) {
-              Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถลบได้');
+              Alert.alert(t('notifications.error'), t('notifications.deleteError'));
             }
           },
         },
@@ -287,7 +290,7 @@ export default function NotificationsScreen() {
 
   // Memo hooks - MUST be before any conditional returns
   const groupedNotifications = useMemo(() => {
-    return groupNotificationsByDate(notifications);
+    return groupNotificationsByDate(notifications, t, resolvedLanguage);
   }, [notifications]);
 
   // Render function callbacks
@@ -311,7 +314,7 @@ export default function NotificationsScreen() {
         <View style={styles.iconContainer}>
           <Avatar
             uri={item.data?.senderPhotoURL || item.data?.targetUserPhoto}
-            name={item.data?.senderName || item.data?.targetName || item.title || 'ผู้ใช้'}
+            name={item.data?.senderName || item.data?.targetName || item.title || t('notifications.unknownUser')}
             size={48}
           />
         </View>
@@ -355,14 +358,14 @@ export default function NotificationsScreen() {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={headerTextColor} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: headerTextColor }]}>การแจ้งเตือน</Text>
+          <Text style={[styles.headerTitle, { color: headerTextColor }]}>{t('notifications.title')}</Text>
           <View style={{ width: 80 }} />
         </View>
         <EmptyState
           icon="notifications-outline"
-          title="เข้าสู่ระบบเพื่อดูการแจ้งเตือน"
-          subtitle="รับการแจ้งเตือนงานใหม่และข้อความ"
-          actionLabel="เข้าสู่ระบบ"
+          title={t('notifications.loginToView')}
+          subtitle={t('notifications.loginSubtitle')}
+          actionLabel={t('notifications.login')}
           onAction={() => (navigation as any).navigate('Auth')}
         />
       </SafeAreaView>
@@ -371,7 +374,7 @@ export default function NotificationsScreen() {
 
   // Early return for loading state
   if (isLoading) {
-    return <Loading message="กำลังโหลด..." />;
+    return <Loading message={t('notifications.loading')} />;
   }
 
   // ============================================
@@ -385,10 +388,10 @@ export default function NotificationsScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={headerTextColor} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: headerTextColor }]}>การแจ้งเตือน</Text>
+        <Text style={[styles.headerTitle, { color: headerTextColor }]}>{t('notifications.title')}</Text>
         {unreadCount > 0 ? (
           <TouchableOpacity onPress={handleMarkAllRead} style={styles.markAllButton}>
-            <Text style={[styles.markAllRead, { color: isDark ? colors.primary : 'rgba(255,255,255,0.9)' }]}>อ่านทั้งหมด</Text>
+            <Text style={[styles.markAllRead, { color: isDark ? colors.primary : 'rgba(255,255,255,0.9)' }]}>{t('notifications.markAllRead')}</Text>
           </TouchableOpacity>
         ) : (
           <View style={{ width: 80 }} />
@@ -416,8 +419,8 @@ export default function NotificationsScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="notifications-off-outline"
-            title="ไม่มีการแจ้งเตือน"
-            subtitle="เมื่อมีกิจกรรมใหม่ จะแสดงที่นี่"
+            title={t('notifications.empty')}
+            subtitle={t('notifications.emptySubtitle')}
           />
         }
       />

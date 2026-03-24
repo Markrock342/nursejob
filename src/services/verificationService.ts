@@ -290,8 +290,14 @@ export async function submitVerificationRequest(
       throw new Error('บัญชีของคุณได้รับการยืนยันแล้ว');
     }
     
+    // Clean undefined values — Firestore rejects undefined fields
+    const cleanRequest: Record<string, any> = {};
+    for (const [key, value] of Object.entries(request)) {
+      if (value !== undefined) cleanRequest[key] = value;
+    }
+    
     const docRef = await addDoc(collection(db, VERIFICATIONS_COLLECTION), {
-      ...request,
+      ...cleanRequest,
       status: 'pending',
       submittedAt: serverTimestamp(),
     });

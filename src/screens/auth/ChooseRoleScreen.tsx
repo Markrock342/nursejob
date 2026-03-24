@@ -25,6 +25,7 @@ import { AuthStackParamList } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { completeUserOnboarding } from '../../services/authService';
 import { trackEvent } from '../../services/analyticsService';
+import { useI18n } from '../../i18n';
 
 // ============================================
 // Role definitions
@@ -42,18 +43,18 @@ interface RoleOption {
   bullets: string[];
 }
 
-const ROLES: RoleOption[] = [
+const getRoles = (t: any): RoleOption[] => [
   {
     key: 'nurse',
     icon: 'heart-circle-outline',
     color: '#0EA5E9',
     bg: '#F0F9FF',
-    title: 'พยาบาล / บุคลากรทางการแพทย์',
-    subtitle: 'กำลังมองหางานเวร, งานพาร์ทไทม์',
+    title: t('chooseRole.nurseTitle'),
+    subtitle: t('chooseRole.nurseSubtitle'),
     bullets: [
-      'ค้นหางานเวร / งานพาร์ทไทม์',
-      'แจ้งเตือนงานใกล้ตัวอัตโนมัติ',
-      'แสดงใบประกอบวิชาชีพได้',
+      t('chooseRole.nurseBullet1'),
+      t('chooseRole.nurseBullet2'),
+      t('chooseRole.nurseBullet3'),
     ],
   },
   {
@@ -61,12 +62,12 @@ const ROLES: RoleOption[] = [
     icon: 'business-outline',
     color: '#8B5CF6',
     bg: '#F5F3FF',
-    title: 'โรงพยาบาล / คลินิก / เอเจนซี่',
-    subtitle: 'ต้องการโพสต์หาบุคลากร',
+    title: t('chooseRole.hospitalTitle'),
+    subtitle: t('chooseRole.hospitalSubtitle'),
     bullets: [
-      'โพสต์งานหาพยาบาล / CG',
-      'จัดการผู้สมัครได้',
-      'ดูสถิติ + ประวัติผู้สมัคร',
+      t('chooseRole.hospitalBullet1'),
+      t('chooseRole.hospitalBullet2'),
+      t('chooseRole.hospitalBullet3'),
     ],
   },
   {
@@ -74,12 +75,12 @@ const ROLES: RoleOption[] = [
     icon: 'people-outline',
     color: '#10B981',
     bg: '#ECFDF5',
-    title: 'คนทั่วไป / ญาติผู้ป่วย',
-    subtitle: 'กำลังหาคนดูแลผู้ป่วยที่บ้าน',
+    title: t('chooseRole.userTitle'),
+    subtitle: t('chooseRole.userSubtitle'),
     bullets: [
-      'หาผู้ดูแลผู้ป่วย / เฝ้าไข้',
-      'ดูรีวิว + ตรวจสอบตัวตนได้',
-      'แชทกับผู้ดูแลได้โดยตรง',
+      t('chooseRole.userBullet1'),
+      t('chooseRole.userBullet2'),
+      t('chooseRole.userBullet3'),
     ],
   },
 ];
@@ -87,21 +88,21 @@ const ROLES: RoleOption[] = [
 // ============================================
 // Sub-type options
 // ============================================
-const NURSE_STAFF_TYPES = [
-  { code: 'RN',    label: 'RN — พยาบาลวิชาชีพ' },
-  { code: 'PN',    label: 'PN — พยาบาลเทคนิค' },
-  { code: 'NA',    label: 'NA — ผู้ช่วยพยาบาล' },
-  { code: 'ANES',  label: 'ANES — วิสัญญีพยาบาล' },
-  { code: 'CG',    label: 'CG — ผู้ดูแลผู้ป่วย' },
-  { code: 'SITTER',label: 'เฝ้าไข้' },
-  { code: 'OTHER', label: 'อื่นๆ' },
+const getNurseStaffTypes = (t: any) => [
+  { code: 'RN',    label: t('chooseRole.staffRN') },
+  { code: 'PN',    label: t('chooseRole.staffPN') },
+  { code: 'NA',    label: t('chooseRole.staffNA') },
+  { code: 'ANES',  label: t('chooseRole.staffANES') },
+  { code: 'CG',    label: t('chooseRole.staffCG') },
+  { code: 'SITTER',label: t('chooseRole.staffSitter') },
+  { code: 'OTHER', label: t('chooseRole.staffOther') },
 ];
 
-const ORG_TYPES: { code: OrgType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { code: 'public_hospital',  label: 'โรงพยาบาลรัฐ',    icon: 'medkit-outline' },
-  { code: 'private_hospital', label: 'โรงพยาบาลเอกชน',  icon: 'business-outline' },
-  { code: 'clinic',           label: 'คลินิก',           icon: 'bandage-outline' },
-  { code: 'agency',           label: 'เอเจนซี่จัดหางาน', icon: 'briefcase-outline' },
+const getOrgTypes = (t: any): { code: OrgType; label: string; icon: keyof typeof Ionicons.glyphMap }[] => [
+  { code: 'public_hospital',  label: t('chooseRole.orgPublic'),    icon: 'medkit-outline' },
+  { code: 'private_hospital', label: t('chooseRole.orgPrivate'),  icon: 'business-outline' },
+  { code: 'clinic',           label: t('chooseRole.orgClinic'),           icon: 'bandage-outline' },
+  { code: 'agency',           label: t('chooseRole.orgAgency'), icon: 'briefcase-outline' },
 ];
 
 // ============================================
@@ -110,7 +111,12 @@ const ORG_TYPES: { code: OrgType; label: string; icon: keyof typeof Ionicons.gly
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'ChooseRole'>;
 type Route = RouteProp<AuthStackParamList, 'ChooseRole'>;
 
-export default function ChooseRoleScreen({ navigation, route }: { navigation: Nav; route: Route }) {
+export default function ChooseRoleScreen({
+  navigation, route }: { navigation: Nav; route: Route }) {
+  const { t } = useI18n();
+  const ROLES = useMemo(() => getRoles(t), [t]);
+  const NURSE_STAFF_TYPES = useMemo(() => getNurseStaffTypes(t), [t]);
+  const ORG_TYPES = useMemo(() => getOrgTypes(t), [t]);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { phone, registrationData, fromGoogle } = route.params;
@@ -148,7 +154,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
       setIsSaving(true);
       try {
         if (!user?.uid) {
-          throw new Error('ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
+          throw new Error(t('chooseRole.userNotFound'));
         }
         await completeUserOnboarding(user.uid, {
           role: selectedRole || 'user',
@@ -159,7 +165,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
         // Close the Auth modal (navigate up two levels: ChooseRole → AuthNavigator → RootStack)
         navigation.getParent()?.goBack();
       } catch {
-        Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกได้ กรุณาลองใหม่');
+        Alert.alert(t('chooseRole.errorTitle'), t('chooseRole.errorSave'));
       } finally {
         setIsSaving(false);
       }
@@ -189,7 +195,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
 
     if (fromGoogle) {
       if (!user?.uid) {
-        Alert.alert('เกิดข้อผิดพลาด', 'ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
+        Alert.alert(t('chooseRole.errorTitle'), t('chooseRole.userNotFound'));
         return;
       }
       setIsSaving(true);
@@ -199,7 +205,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
           navigation.getParent()?.goBack();
         })
         .catch(() => {
-          Alert.alert('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกได้ กรุณาลองใหม่');
+          Alert.alert(t('chooseRole.errorTitle'), t('chooseRole.errorSave'));
         })
         .finally(() => {
           setIsSaving(false);
@@ -240,9 +246,9 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
 
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.step}>ขั้นตอนที่ 2 / 3</Text>
-          <Text style={styles.title}>คุณเป็นใคร?</Text>
-          <Text style={styles.subtitle}>เลือกบทบาทเพื่อประสบการณ์ที่เหมาะกับคุณ</Text>
+          <Text style={styles.step}>{t('chooseRole.stepLabel')}</Text>
+          <Text style={styles.title}>{t('chooseRole.title')}</Text>
+          <Text style={styles.subtitle}>{t('chooseRole.subtitle')}</Text>
         </View>
 
         {/* Role Cards */}
@@ -293,7 +299,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
                 {/* Sub-type picker: Nurse → staffType */}
                 {selected && role.key === 'nurse' && (
                   <View style={styles.subSection}>
-                    <Text style={[styles.subLabel, { color: role.color }]}>คุณเป็นบุคลากรประเภทไหน? <Text style={styles.subOptional}>(ไม่บังคับ)</Text></Text>
+                    <Text style={[styles.subLabel, { color: role.color }]}>{t('chooseRole.staffTypeQuestion')} <Text style={styles.subOptional}>{t('chooseRole.optional')}</Text></Text>
                     <View style={styles.subChipGrid}>
                       {NURSE_STAFF_TYPES.map((st) => {
                         const active = selectedStaffType === st.code;
@@ -315,7 +321,7 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
                 {/* Sub-type picker: Hospital → orgType */}
                 {selected && role.key === 'hospital' && (
                   <View style={styles.subSection}>
-                    <Text style={[styles.subLabel, { color: role.color }]}>ประเภทองค์กรของคุณ? <Text style={styles.subOptional}>(ไม่บังคับ)</Text></Text>
+                    <Text style={[styles.subLabel, { color: role.color }]}>{t('chooseRole.orgTypeQuestion')} <Text style={styles.subOptional}>{t('chooseRole.optional')}</Text></Text>
                     <View style={styles.subOrgGrid}>
                       {ORG_TYPES.map((org) => {
                         const active = selectedOrgType === org.code;
@@ -341,14 +347,14 @@ export default function ChooseRoleScreen({ navigation, route }: { navigation: Na
 
         {/* Continue */}
         <Button
-          title={isSaving ? 'กำลังบันทึก...' : 'ดำเนินการต่อ'}
+          title={isSaving ? t('chooseRole.saving') : t('chooseRole.continue')}
           onPress={handleContinue}
           disabled={selectedRole === null || isSaving}
           loading={isSaving}
           style={styles.continueBtn}
         />
         <TouchableOpacity onPress={handleSkip} style={styles.skipBtn}>
-          <Text style={styles.skipText}>ข้ามไปก่อน</Text>
+          <Text style={styles.skipText}>{t('chooseRole.skip')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

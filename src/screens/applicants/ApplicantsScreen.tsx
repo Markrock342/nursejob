@@ -8,6 +8,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  SectionList,
   TouchableOpacity,
   RefreshControl,
   Linking,
@@ -42,38 +43,61 @@ import {
   getThaiLabels,
   getWorkStyleThaiLabel,
 } from '../../utils/profileLabels';
+import { useI18n } from '../../i18n';
 import { getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText } from '../../utils/verificationTag';
 
 type ApplicantsRouteParams = {
   jobId?: string;
+  applicantUserId?: string;
 };
 
-const STATUS_META: Record<ContactStatus, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  interested: { label: 'รับงาน', icon: 'hand-left-outline' },
-  confirmed: { label: 'เลือกแล้ว', icon: 'checkmark-circle-outline' },
-  cancelled: { label: 'ปฏิเสธ', icon: 'close-circle-outline' },
+type ApplicantsViewMode = 'all' | 'byPost';
+
+type ApplicantSection = {
+  key: string;
+  title: string;
+  job?: ApplicantDetails['job'];
+  data: ApplicantDetails[];
+  stats: {
+    total: number;
+    interested: number;
+    confirmed: number;
+    cancelled: number;
+  };
+  lastContactedAt: Date;
 };
+
+const createStatusMeta = (t: any) => ({
+  interested: { label: t('applicants.status.interested'), icon: 'hand-left-outline' as const },
+  confirmed: { label: t('applicants.status.confirmed'), icon: 'checkmark-circle-outline' as const },
+  cancelled: { label: t('applicants.status.cancelled'), icon: 'close-circle-outline' as const },
+});
 
 export default function ApplicantsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute();
   const { user } = useAuth();
   const { colors, isDark } = useTheme();
+  const { t } = useI18n();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
+  const statusMeta = useMemo(() => createStatusMeta(t), [t]);
 
   const routeParams = (route.params || {}) as ApplicantsRouteParams;
   const targetJobId = routeParams.jobId;
+  const targetApplicantUserId = routeParams.applicantUserId;
 
   const [contacts, setContacts] = useState<ApplicantDetails[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<ContactStatus | 'all'>('all');
+  const [viewMode, setViewMode] = useState<ApplicantsViewMode>('all');
   const [selectedContact, setSelectedContact] = useState<ApplicantDetails | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [isCompletingJob, setIsCompletingJob] = useState(false);
+  const [isStartingChat, setIsStartingChat] = useState(false);
   const [alert, setAlert] = useState<AlertState>(initialAlertState);
 
   const pageBackground = isDark ? colors.background : '#F4F7FB';
@@ -88,8 +112,8 @@ export default function ApplicantsScreen() {
   const getApplicantName = useCallback((contact: ApplicantDetails) => {
     const profile = contact.userProfile;
     const fullName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
-    return fullName || contact.userName || profile?.displayName || 'ไม่ระบุชื่อ';
-  }, []);
+    return fullName || contact.userName || profile?.displayName || t('applicants.card.unnamed');
+  }, [t]);
 
   const getApplicantProvince = useCallback((contact: ApplicantDetails) => {
     const profile = contact.userProfile;
@@ -146,7 +170,7 @@ export default function ApplicantsScreen() {
       setContacts(data);
     } catch (error) {
       console.error('Error loading applicants:', error);
-      setAlert(createAlert.error('โหลดข้อมูลไม่สำเร็จ', 'ไม่สามารถดึงข้อมูลผู้สมัครได้ กรุณาลองใหม่') as AlertState);
+      setAlert(createAlert.error(t('applicants.alerts.loadFailedTitle'), t('applicants.alerts.loadFailedMessage')) as AlertState);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -185,6 +209,14 @@ export default function ApplicantsScreen() {
     });
   }, [jobScopedContacts, searchQuery, selectedFilter]);
 
+  useEffect(() => {
+    if (!targetApplicantUserId || filteredContacts.length === 0 || showDetailModal) return;
+    const matchedContact = filteredContacts.find((contact) => contact.userId === targetApplicantUserId);
+    if (!matchedContact) return;
+    setSelectedContact(matchedContact);
+    setShowDetailModal(true);
+  }, [filteredContacts, showDetailModal, targetApplicantUserId]);
+
   const stats = useMemo(() => {
     const total = jobScopedContacts.length;
     const interested = jobScopedContacts.filter((contact) => contact.status === 'interested').length;
@@ -198,6 +230,48 @@ export default function ApplicantsScreen() {
     if (!targetJobId) return null;
     return jobScopedContacts.find((contact) => contact.jobId === targetJobId)?.job || null;
   }, [jobScopedContacts, targetJobId]);
+
+  const groupedSections = useMemo<ApplicantSection[]>(() => {
+    const sectionsMap = new Map<string, ApplicantSection>();
+
+    filteredContacts.forEach((contact) => {
+      const sectionKey = contact.jobId || contact.id;
+      const existing = sectionsMap.get(sectionKey);
+
+      if (!existing) {
+        sectionsMap.set(sectionKey, {
+          key: sectionKey,
+          title: contact.job?.title || t('applicants.card.untitledJob'),
+          job: contact.job,
+          data: [contact],
+          stats: {
+            total: 1,
+            interested: contact.status === 'interested' ? 1 : 0,
+            confirmed: contact.status === 'confirmed' ? 1 : 0,
+            cancelled: contact.status === 'cancelled' ? 1 : 0,
+          },
+          lastContactedAt: contact.contactedAt,
+        });
+        return;
+      }
+
+      existing.data.push(contact);
+      existing.stats.total += 1;
+      if (contact.status === 'interested') existing.stats.interested += 1;
+      if (contact.status === 'confirmed') existing.stats.confirmed += 1;
+      if (contact.status === 'cancelled') existing.stats.cancelled += 1;
+      if (contact.contactedAt.getTime() > existing.lastContactedAt.getTime()) {
+        existing.lastContactedAt = contact.contactedAt;
+      }
+      if (!existing.job && contact.job) {
+        existing.job = contact.job;
+      }
+    });
+
+    return Array.from(sectionsMap.values()).sort(
+      (left, right) => right.lastContactedAt.getTime() - left.lastContactedAt.getTime(),
+    );
+  }, [filteredContacts, t]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -214,10 +288,10 @@ export default function ApplicantsScreen() {
         contact.id === selectedContact.id ? { ...contact, status } : contact
       )));
       setSelectedContact((prev) => prev ? { ...prev, status } : prev);
-      setAlert(createAlert.success('อัปเดตแล้ว', `เปลี่ยนสถานะเป็น ${STATUS_META[status].label} เรียบร้อย`) as AlertState);
+      setAlert(createAlert.success(t('applicants.alerts.updatedTitle'), statusMeta[status].label) as AlertState);
     } catch (error) {
       console.error('Error updating applicant status:', error);
-      setAlert(createAlert.error('อัปเดตไม่สำเร็จ', 'ไม่สามารถเปลี่ยนสถานะผู้สมัครได้') as AlertState);
+      setAlert(createAlert.error(t('applicants.alerts.updateFailedTitle'), t('applicants.alerts.updateFailedMessage')) as AlertState);
     } finally {
       setStatusUpdating(false);
     }
@@ -227,15 +301,15 @@ export default function ApplicantsScreen() {
     if (!selectedContact || isCompletingJob) return;
 
     const applicantName = getApplicantName(selectedContact);
-    const jobTitle = selectedContact.job?.title || 'งานนี้';
+    const jobTitle = selectedContact.job?.title || t('applicants.card.untitledJob');
 
     Alert.alert(
-      'จบงานและเลือกผู้ถูกจ้าง',
-      `ระบบจะปิดประกาศ "${jobTitle}" เลือก ${applicantName} เป็นผู้ถูกจ้าง และอัปเดตผู้สมัครคนอื่นเป็นไม่ผ่านอัตโนมัติ`,
+      t('applicants.completeJob.title'),
+      t('applicants.completeJob.message', { jobTitle, applicantName }),
       [
-        { text: 'ยกเลิก', style: 'cancel' },
+        { text: t('common.actions.cancel'), style: 'cancel' },
         {
-          text: 'ยืนยันจบงาน',
+          text: t('applicants.completeJob.confirm'),
           onPress: async () => {
             try {
               setIsCompletingJob(true);
@@ -250,7 +324,7 @@ export default function ApplicantsScreen() {
               });
             } catch (error: any) {
               console.error('Error completing job:', error);
-              Alert.alert('จบงานไม่สำเร็จ', error?.message || 'ไม่สามารถปิดงานและเลือกผู้ถูกจ้างได้');
+              Alert.alert(t('applicants.completeJob.failedTitle'), error?.message || t('applicants.completeJob.failedMessage'));
             } finally {
               setIsCompletingJob(false);
             }
@@ -262,14 +336,14 @@ export default function ApplicantsScreen() {
 
   const handleCall = async (phone?: string) => {
     if (!phone) {
-      setAlert(createAlert.warning('ไม่มีเบอร์โทร', 'ผู้สมัครรายนี้ไม่ได้ระบุเบอร์โทรศัพท์') as AlertState);
+      setAlert(createAlert.warning(t('applicants.alerts.noPhoneTitle'), t('applicants.alerts.noPhoneMessage')) as AlertState);
       return;
     }
 
     try {
       await Linking.openURL(`tel:${phone}`);
     } catch {
-      setAlert(createAlert.error('โทรออกไม่ได้', 'อุปกรณ์ไม่สามารถเปิดหน้าการโทรได้') as AlertState);
+      setAlert(createAlert.error(t('applicants.alerts.callFailedTitle'), t('applicants.alerts.callFailedMessage')) as AlertState);
     }
   };
 
@@ -289,24 +363,32 @@ export default function ApplicantsScreen() {
   };
 
   const handleStartChat = async () => {
-    if (!selectedContact || !user?.uid) return;
+    if (!selectedContact || !user?.uid || isStartingChat) return;
+
+    const contact = selectedContact;
+    const recipientName = getApplicantName(contact);
 
     try {
+      setIsStartingChat(true);
       const chatUsage = await getFeatureUsageStatus(user.uid, 'chat_start');
       if (!chatUsage.canUse) {
-        setAlert(createAlert.info('ใช้สิทธิ์เริ่มแชทครบแล้ว', chatUsage.reason || 'บัญชีนี้ใช้สิทธิ์เริ่มแชทครบตามรอบเดือนนี้แล้ว') as AlertState);
+        setAlert(
+          createAlert.info(
+            t('applicants.alerts.chatQuotaTitle'),
+            chatUsage.reason || t('applicants.alerts.chatQuotaMessage'),
+          ) as AlertState,
+        );
         return;
       }
 
-      const recipientName = getApplicantName(selectedContact);
       const { conversationId, created } = await getOrCreateConversationWithStatus(
         user.uid,
-        user.displayName || 'ไม่ระบุชื่อ',
-        selectedContact.userId,
+        user.displayName || t('applicants.card.unnamed'),
+        contact.userId,
         recipientName,
-        selectedContact.jobId,
-        selectedContact.job?.title,
-        user.displayName || 'ไม่ระบุชื่อ',
+        contact.jobId,
+        contact.job?.title,
+        user.displayName || t('applicants.card.unnamed'),
       );
       if (created && chatUsage.limit != null) {
         await consumeFeatureUsage(user.uid, 'chat_start');
@@ -315,14 +397,17 @@ export default function ApplicantsScreen() {
       setShowDetailModal(false);
       navigation.navigate('ChatRoom', {
         conversationId,
-        recipientId: selectedContact.userId,
+        recipientId: contact.userId,
         recipientName,
-        recipientPhoto: selectedContact.userProfile?.photoURL,
-        jobTitle: selectedContact.job?.title,
+        recipientPhoto: contact.userProfile?.photoURL,
+        jobTitle: contact.job?.title,
+        jobId: contact.jobId,
       });
     } catch (error) {
       console.error('Error starting chat with applicant:', error);
-      setAlert(createAlert.error('เริ่มแชตไม่สำเร็จ', 'ไม่สามารถเปิดห้องแชตกับผู้สมัครได้') as AlertState);
+      setAlert(createAlert.error(t('applicants.alerts.chatFailedTitle'), t('applicants.alerts.chatFailedMessage')) as AlertState);
+    } finally {
+      setIsStartingChat(false);
     }
   };
 
@@ -333,6 +418,132 @@ export default function ApplicantsScreen() {
       </View>
       <Text style={[styles.statValue, { color: tone.text }]}>{value}</Text>
       <Text style={[styles.statLabel, { color: tone.text }]}>{label}</Text>
+    </View>
+  );
+
+  const renderCollectionHeader = () => (
+    <View style={styles.listHeader}> 
+      <View style={[styles.heroCard, { backgroundColor: heroBackground }]}> 
+        <Text style={[styles.heroEyebrow, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.8)' }]}>
+          {t('applicants.hero.eyebrow')}
+        </Text>
+        <Text style={[styles.heroTitle, { color: colors.white }]}> 
+          {focusedJob?.title || t('applicants.hero.titleFallback')}
+        </Text>
+        <Text style={[styles.heroSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.88)' }]}>
+          {targetJobId
+            ? t('applicants.hero.jobScopedCount', { count: stats.total })
+            : t('applicants.hero.allCount', { count: stats.total })}
+        </Text>
+
+        <View style={styles.heroStatsRow}> 
+          {renderStatCard(t('applicants.hero.waiting'), stats.interested, 'sparkles-outline', { background: 'rgba(255,255,255,0.14)', text: colors.white })}
+          {renderStatCard(t('applicants.hero.confirmed'), stats.confirmed, 'checkmark-circle-outline', { background: 'rgba(255,255,255,0.14)', text: colors.white })}
+          {renderStatCard(t('applicants.hero.cancelled'), stats.cancelled, 'close-circle-outline', { background: 'rgba(255,255,255,0.14)', text: colors.white })}
+        </View>
+      </View>
+
+      <View style={[styles.toolsCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
+        <View style={[styles.searchWrap, { backgroundColor: mutedCard, borderColor: colors.border }]}> 
+          <Ionicons name="search-outline" size={18} color={colors.textMuted} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.text }]}
+            placeholder={t('applicants.filters.searchPlaceholder')}
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery ? (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <View style={[styles.viewModeRow, { backgroundColor: mutedCard, borderColor: colors.border }]}> 
+          <TouchableOpacity
+            style={[
+              styles.viewModeTab,
+              { backgroundColor: viewMode === 'all' ? colors.surface : 'transparent' },
+            ]}
+            activeOpacity={0.85}
+            onPress={() => setViewMode('all')}
+          >
+            <Ionicons name="list-outline" size={16} color={viewMode === 'all' ? colors.primary : colors.textSecondary} />
+            <Text style={[styles.viewModeTabText, { color: viewMode === 'all' ? colors.primary : colors.textSecondary }]}>ทั้งหมด</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.viewModeTab,
+              { backgroundColor: viewMode === 'byPost' ? colors.surface : 'transparent' },
+            ]}
+            activeOpacity={0.85}
+            onPress={() => setViewMode('byPost')}
+          >
+            <Ionicons name="albums-outline" size={16} color={viewMode === 'byPost' ? colors.primary : colors.textSecondary} />
+            <Text style={[styles.viewModeTabText, { color: viewMode === 'byPost' ? colors.primary : colors.textSecondary }]}>ตามโพสต์</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}> 
+          <Chip label={t('applicants.filters.all', { count: stats.total })} selected={selectedFilter === 'all'} onPress={() => setSelectedFilter('all')} />
+          <Chip label={t('applicants.filters.interested', { count: stats.interested })} selected={selectedFilter === 'interested'} onPress={() => setSelectedFilter('interested')} />
+          <Chip label={t('applicants.filters.confirmed', { count: stats.confirmed })} selected={selectedFilter === 'confirmed'} onPress={() => setSelectedFilter('confirmed')} />
+          <Chip label={t('applicants.filters.cancelled', { count: stats.cancelled })} selected={selectedFilter === 'cancelled'} onPress={() => setSelectedFilter('cancelled')} />
+        </ScrollView>
+      </View>
+    </View>
+  );
+
+  const renderSectionHeader = ({ section }: { section: ApplicantSection }) => (
+    <View style={styles.sectionHeaderWrap}>
+      <View style={[styles.sectionHeaderCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
+        <View style={styles.sectionHeaderTopRow}>
+          <View style={styles.sectionHeaderTitleWrap}>
+            <Text style={[styles.sectionHeaderTitle, { color: colors.text }]} numberOfLines={1}>{section.title}</Text>
+            <Text style={[styles.sectionHeaderSubtitle, { color: colors.textSecondary }]}>
+              ผู้สมัคร {section.stats.total} คน • อัปเดตล่าสุด {formatRelativeTime(section.lastContactedAt)}
+            </Text>
+          </View>
+          <View style={[styles.inlineBadge, { backgroundColor: colors.primaryBackground }]}> 
+            <Ionicons name="briefcase-outline" size={12} color={colors.primary} />
+            <Text style={[styles.inlineBadgeText, { color: colors.primary }]} numberOfLines={1}>
+              {section.job?.department || 'โพสต์งาน'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionMetaRow}>
+          <View style={[styles.sectionMetaPill, { backgroundColor: mutedCard }]}> 
+            <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+            <Text style={[styles.sectionMetaPillText, { color: colors.textSecondary }]}> 
+              {section.job?.shiftDate ? formatDate(section.job.shiftDate) : t('applicants.card.unspecifiedDate')}
+            </Text>
+          </View>
+          <View style={[styles.sectionMetaPill, { backgroundColor: mutedCard }]}> 
+            <Ionicons name="time-outline" size={14} color={colors.primary} />
+            <Text style={[styles.sectionMetaPillText, { color: colors.textSecondary }]}> 
+              {section.job?.shiftTime || t('applicants.card.unspecifiedTime')}
+            </Text>
+          </View>
+          <View style={[styles.sectionMetaPill, { backgroundColor: colors.primaryBackground }]}> 
+            <Ionicons name="cash-outline" size={14} color={colors.primary} />
+            <Text style={[styles.sectionMetaPillText, { color: colors.primary }]}>฿{section.job?.shiftRate?.toLocaleString?.() || 0}</Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionStatsRow}>
+          <View style={[styles.sectionStatChip, { backgroundColor: colors.warningLight }]}> 
+            <Text style={[styles.sectionStatChipText, { color: colors.warning }]}>รอ {section.stats.interested}</Text>
+          </View>
+          <View style={[styles.sectionStatChip, { backgroundColor: colors.successLight }]}> 
+            <Text style={[styles.sectionStatChipText, { color: colors.success }]}>ยืนยัน {section.stats.confirmed}</Text>
+          </View>
+          <View style={[styles.sectionStatChip, { backgroundColor: colors.errorLight }]}> 
+            <Text style={[styles.sectionStatChipText, { color: colors.error }]}>ยกเลิก {section.stats.cancelled}</Text>
+          </View>
+        </View>
+      </View>
     </View>
   );
 
@@ -384,9 +595,9 @@ export default function ApplicantsScreen() {
                 ) : null}
               </View>
               <Text style={[styles.applicantMetaStrong, { color: colors.textSecondary }]} numberOfLines={1}>
-                {item.job?.title || 'ประกาศงานไม่ระบุชื่อ'}
+                {item.job?.title || t('applicants.card.untitledJob')}
               </Text>
-              <Text style={[styles.applicantMeta, { color: colors.textMuted }]}>ติดต่อเมื่อ {formatRelativeTime(item.contactedAt)}</Text>
+              <Text style={[styles.applicantMeta, { color: colors.textMuted }]}>{t('applicants.card.contactedAt', { time: formatRelativeTime(item.contactedAt) })}</Text>
             </View>
           </View>
 
@@ -394,19 +605,19 @@ export default function ApplicantsScreen() {
             style={[styles.statusPill, { backgroundColor: statusTone.background, borderColor: statusTone.border }]}
             onPress={() => openApplicantDetail(item)}
           >
-            <Ionicons name={STATUS_META[status].icon} size={13} color={statusTone.text} />
-            <Text style={[styles.statusPillText, { color: statusTone.text }]}>{STATUS_META[status].label}</Text>
+            <Ionicons name={statusMeta[status].icon} size={13} color={statusTone.text} />
+            <Text style={[styles.statusPillText, { color: statusTone.text }]}>{statusMeta[status].label}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.cardMetricsRow}> 
           <View style={[styles.metricBox, { backgroundColor: mutedCard }]}> 
             <Ionicons name="calendar-outline" size={14} color={colors.primary} />
-            <Text style={[styles.metricText, { color: colors.textSecondary }]}>{item.job?.shiftDate ? formatDate(item.job.shiftDate) : 'ไม่ระบุวันที่'}</Text>
+            <Text style={[styles.metricText, { color: colors.textSecondary }]}>{item.job?.shiftDate ? formatDate(item.job.shiftDate) : t('applicants.card.unspecifiedDate')}</Text>
           </View>
           <View style={[styles.metricBox, { backgroundColor: mutedCard }]}> 
             <Ionicons name="time-outline" size={14} color={colors.primary} />
-            <Text style={[styles.metricText, { color: colors.textSecondary }]}>{item.job?.shiftTime || 'ไม่ระบุเวลา'}</Text>
+            <Text style={[styles.metricText, { color: colors.textSecondary }]}>{item.job?.shiftTime || t('applicants.card.unspecifiedTime')}</Text>
           </View>
           <View style={[styles.metricBox, { backgroundColor: colors.primaryBackground }]}> 
             <Ionicons name="cash-outline" size={14} color={colors.primary} />
@@ -426,7 +637,7 @@ export default function ApplicantsScreen() {
 
         {item.message ? (
           <View style={[styles.messageCard, { backgroundColor: heroSubtle }]}> 
-            <Text style={[styles.messageLabel, { color: colors.textSecondary }]}>ข้อความจากผู้สมัคร</Text>
+            <Text style={[styles.messageLabel, { color: colors.textSecondary }]}>{t('applicants.card.applicantMessage')}</Text>
             <Text style={[styles.messageBody, { color: colors.text }]} numberOfLines={2}>{item.message}</Text>
           </View>
         ) : null}
@@ -435,7 +646,7 @@ export default function ApplicantsScreen() {
           {item.userProfile?.experience ? (
             <View style={styles.inlineInfo}> 
               <Ionicons name="briefcase-outline" size={14} color={colors.textSecondary} />
-              <Text style={[styles.inlineInfoText, { color: colors.textSecondary }]}>{item.userProfile.experience} ปี</Text>
+              <Text style={[styles.inlineInfoText, { color: colors.textSecondary }]}>{t('applicants.card.yearExperience', { count: item.userProfile.experience })}</Text>
             </View>
           ) : null}
           {phone ? (
@@ -459,11 +670,11 @@ export default function ApplicantsScreen() {
         <View style={[styles.cardActions, { borderTopColor: colors.border }]}> 
           <TouchableOpacity style={[styles.secondaryAction, { backgroundColor: mutedCard }]} onPress={() => openApplicantDetail(item)}>
             <Ionicons name="eye-outline" size={16} color={colors.primary} />
-            <Text style={[styles.secondaryActionText, { color: colors.primary }]}>ดูรายละเอียด</Text>
+            <Text style={[styles.secondaryActionText, { color: colors.primary }]}>{t('applicants.card.viewDetails')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.primaryAction, { backgroundColor: phone ? colors.success : colors.border }]} onPress={() => handleCall(phone)} disabled={!phone}>
             <Ionicons name="call-outline" size={16} color={colors.white} />
-            <Text style={styles.primaryActionText}>โทร</Text>
+            <Text style={styles.primaryActionText}>{t('applicants.card.call')}</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -479,12 +690,12 @@ export default function ApplicantsScreen() {
             <Ionicons name="arrow-back" size={22} color={colors.white} />
           </TouchableOpacity>
           <View style={styles.headerTextWrap}>
-            <Text style={[styles.headerTitle, { color: colors.white }]}>จัดการผู้สมัคร</Text>
-            <Text style={[styles.headerSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.82)' }]}>กำลังโหลดข้อมูลผู้สมัครงาน</Text>
+            <Text style={[styles.headerTitle, { color: colors.white }]}>{t('applicants.header.title')}</Text>
+            <Text style={[styles.headerSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.82)' }]}>{t('applicants.header.loadingSubtitle')}</Text>
           </View>
           <View style={styles.headerSpacer} />
         </View>
-        <Loading message="กำลังโหลดผู้สมัคร..." />
+        <Loading message={t('applicants.header.loadingMessage')} />
       </SafeAreaView>
     );
   }
@@ -500,94 +711,81 @@ export default function ApplicantsScreen() {
           <Ionicons name="arrow-back" size={22} color={colors.white} />
         </TouchableOpacity>
         <View style={styles.headerTextWrap}>
-          <Text style={[styles.headerTitle, { color: colors.white }]}>จัดการผู้สมัคร</Text>
+          <Text style={[styles.headerTitle, { color: colors.white }]}>{t('applicants.header.title')}</Text>
           <Text style={[styles.headerSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.82)' }]}>
-            {targetJobId ? 'ดูผู้สมัครของประกาศนี้' : 'รวมผู้สมัครทั้งหมดของคุณ'}
+            {targetJobId ? t('applicants.header.jobScopedSubtitle') : t('applicants.header.allSubtitle')}
           </Text>
         </View>
         <View style={styles.headerSpacer} />
       </View>
-      <FlatList
-        data={filteredContacts}
-        keyExtractor={(item) => item.id}
-        renderItem={renderApplicantCard}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            colors={[colors.primary]}
-            tintColor={colors.primary}
-          />
-        }
-        ListHeaderComponent={
-          <View style={styles.listHeader}> 
-            <View style={[styles.heroCard, { backgroundColor: heroBackground }]}> 
-              <Text style={[styles.heroEyebrow, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.8)' }]}>
-                จัดการผู้สมัคร
-              </Text>
-              <Text style={[styles.heroTitle, { color: colors.white }]}> 
-                {focusedJob?.title || 'ผู้สมัครงานของคุณ'}
-              </Text>
-              <Text style={[styles.heroSubtitle, { color: isDark ? colors.textSecondary : 'rgba(255,255,255,0.88)' }]}>
-                {targetJobId
-                  ? `ดูผู้สมัครเฉพาะประกาศนี้ ${stats.total} คน`
-                  : `รวมผู้สมัครทุกประกาศ ${stats.total} คน`}
-              </Text>
-
-              <View style={styles.heroStatsRow}> 
-                {renderStatCard('รอคัดเลือก', stats.interested, 'sparkles-outline', { background: 'rgba(255,255,255,0.14)', text: colors.white })}
-                {renderStatCard('ยืนยันแล้ว', stats.confirmed, 'checkmark-circle-outline', { background: 'rgba(255,255,255,0.14)', text: colors.white })}
-                {renderStatCard('ยกเลิก', stats.cancelled, 'close-circle-outline', { background: 'rgba(255,255,255,0.14)', text: colors.white })}
-              </View>
-            </View>
-
-            <View style={[styles.toolsCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
-              <View style={[styles.searchWrap, { backgroundColor: mutedCard, borderColor: colors.border }]}> 
-                <Ionicons name="search-outline" size={18} color={colors.textMuted} />
-                <TextInput
-                  style={[styles.searchInput, { color: colors.text }]}
-                  placeholder="ค้นหาชื่อผู้สมัคร ชื่องาน หรือข้อความ"
-                  placeholderTextColor={colors.textMuted}
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                />
-                {searchQuery ? (
-                  <TouchableOpacity onPress={() => setSearchQuery('')}>
-                    <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}> 
-                <Chip label={`ทั้งหมด ${stats.total}`} selected={selectedFilter === 'all'} onPress={() => setSelectedFilter('all')} />
-                <Chip label={`สนใจงาน ${stats.interested}`} selected={selectedFilter === 'interested'} onPress={() => setSelectedFilter('interested')} />
-                <Chip label={`ยืนยันแล้ว ${stats.confirmed}`} selected={selectedFilter === 'confirmed'} onPress={() => setSelectedFilter('confirmed')} />
-                <Chip label={`ยกเลิก ${stats.cancelled}`} selected={selectedFilter === 'cancelled'} onPress={() => setSelectedFilter('cancelled')} />
-              </ScrollView>
-            </View>
-          </View>
-        }
-        ListEmptyComponent={
-          <EmptyState
-            icon="people-outline"
-            title={searchQuery ? 'ไม่พบผู้สมัครที่ค้นหา' : 'ยังไม่มีผู้สมัคร'}
-            subtitle={
-              searchQuery
-                ? 'ลองเปลี่ยนคำค้น หรือสลับสถานะที่กำลังกรอง'
-                : targetJobId
-                  ? 'เมื่อมีคนแสดงความสนใจในประกาศนี้ รายชื่อจะขึ้นที่นี่ทันที'
-                  : 'เมื่อมีคนสนใจประกาศของคุณ รายชื่อจะขึ้นที่นี่เพื่อให้ติดตามต่อได้ง่าย'
-            }
-          />
-        }
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, SPACING.lg) + 120 }}
-        showsVerticalScrollIndicator={false}
-      />
+      {viewMode === 'all' ? (
+        <FlatList
+          data={filteredContacts}
+          keyExtractor={(item) => item.id}
+          renderItem={renderApplicantCard}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          ListHeaderComponent={renderCollectionHeader}
+          ListEmptyComponent={
+            <EmptyState
+              icon="people-outline"
+              title={searchQuery ? t('applicants.empty.searchTitle') : t('applicants.empty.defaultTitle')}
+              subtitle={
+                searchQuery
+                  ? t('applicants.empty.searchSubtitle')
+                  : targetJobId
+                    ? t('applicants.empty.jobScopedSubtitle')
+                    : t('applicants.empty.allSubtitle')
+              }
+            />
+          }
+          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, SPACING.lg) + 120 }}
+          showsVerticalScrollIndicator={false}
+        />
+      ) : (
+        <SectionList
+          sections={groupedSections}
+          keyExtractor={(item) => item.id}
+          renderItem={renderApplicantCard}
+          renderSectionHeader={renderSectionHeader}
+          stickySectionHeadersEnabled={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          ListHeaderComponent={renderCollectionHeader}
+          ListEmptyComponent={
+            <EmptyState
+              icon="albums-outline"
+              title={searchQuery ? t('applicants.empty.searchTitle') : t('applicants.empty.defaultTitle')}
+              subtitle={
+                searchQuery
+                  ? t('applicants.empty.searchSubtitle')
+                  : targetJobId
+                    ? t('applicants.empty.jobScopedSubtitle')
+                    : t('applicants.empty.allSubtitle')
+              }
+            />
+          }
+          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, SPACING.lg) + 120 }}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       <ModalContainer
         visible={showDetailModal}
         onClose={() => setShowDetailModal(false)}
-        title="รายละเอียดผู้สมัคร"
+        title={t('applicants.modal.title')}
         fullScreen
       >
         {selectedContact ? (() => {
@@ -627,8 +825,8 @@ export default function ApplicantsScreen() {
                       <Text style={[styles.inlineBadgeText, { color: roleTone.textColor }]}>{roleText}</Text>
                     </View>
                     <View style={[styles.statusPill, { backgroundColor: statusTone.background, borderColor: statusTone.border }]}> 
-                      <Ionicons name={STATUS_META[status].icon} size={14} color={statusTone.text} />
-                      <Text style={[styles.statusPillText, { color: statusTone.text }]}>{STATUS_META[status].label}</Text>
+                      <Ionicons name={statusMeta[status].icon} size={14} color={statusTone.text} />
+                      <Text style={[styles.statusPillText, { color: statusTone.text }]}>{statusMeta[status].label}</Text>
                     </View>
                     {verificationText ? (
                       <View style={[styles.inlineBadge, { backgroundColor: colors.successLight }]}> 
@@ -646,14 +844,14 @@ export default function ApplicantsScreen() {
 
                 <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
                   {[
-                    { icon: 'briefcase-outline', label: 'งานที่รับสมัคร', value: selectedContact.job?.title || '-' },
-                    { icon: 'calendar-outline', label: 'วันที่งาน', value: selectedContact.job?.shiftDate ? formatDate(selectedContact.job.shiftDate) : '-' },
-                    { icon: 'time-outline', label: 'เวลา', value: selectedContact.job?.shiftTime || '-' },
-                    { icon: 'cash-outline', label: 'ค่าตอบแทน', value: `฿${selectedContact.job?.shiftRate?.toLocaleString?.() || 0}` },
-                    { icon: 'call-outline', label: 'เบอร์โทร', value: phone || '-' },
-                    { icon: 'mail-outline', label: 'อีเมล', value: profile?.email || '-' },
-                    { icon: 'ribbon-outline', label: 'ใบประกอบวิชาชีพ', value: profile?.licenseNumber || 'ยังไม่ระบุ' },
-                    { icon: 'briefcase-outline', label: 'ประสบการณ์', value: profile?.experience ? `${profile.experience} ปี` : 'ยังไม่ระบุ' },
+                    { icon: 'briefcase-outline', label: t('applicants.rows.jobTitle'), value: selectedContact.job?.title || '-' },
+                    { icon: 'calendar-outline', label: t('applicants.rows.shiftDate'), value: selectedContact.job?.shiftDate ? formatDate(selectedContact.job.shiftDate) : '-' },
+                    { icon: 'time-outline', label: t('applicants.rows.time'), value: selectedContact.job?.shiftTime || '-' },
+                    { icon: 'cash-outline', label: t('applicants.rows.compensation'), value: `฿${selectedContact.job?.shiftRate?.toLocaleString?.() || 0}` },
+                    { icon: 'call-outline', label: t('applicants.rows.phone'), value: phone || '-' },
+                    { icon: 'mail-outline', label: t('applicants.rows.email'), value: profile?.email || '-' },
+                    { icon: 'ribbon-outline', label: t('applicants.rows.license'), value: profile?.licenseNumber || t('applicants.rows.licenseMissing') },
+                    { icon: 'briefcase-outline', label: t('applicants.rows.experience'), value: profile?.experience ? t('applicants.rows.experienceYears', { count: profile.experience }) : t('applicants.rows.experienceMissing') },
                   ].map((row, index) => (
                     <View key={`${row.label}-${index}`} style={[styles.detailRow, index > 0 && { borderTopColor: colors.border }]}> 
                       <View style={styles.detailRowLabelWrap}> 
@@ -667,13 +865,13 @@ export default function ApplicantsScreen() {
 
                 {profile ? (
                   <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
-                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>ข้อมูลโปรไฟล์ผู้สมัคร</Text>
+                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>{t('applicants.modal.profileSection')}</Text>
                     <View style={styles.roleDetailGrid}> 
                       {profile.role === 'nurse' ? (
                         <>
                           {staffTypeLabels.length > 0 ? (
                             <View style={styles.roleDetailBlock}> 
-                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>สายงาน / ใบประกอบ</Text>
+                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>{t('applicants.rows.profession')}</Text>
                               <View style={styles.skillsRow}>
                                 {staffTypeLabels.map((label) => (
                                   <View key={label} style={[styles.subtleTag, { backgroundColor: elevatedCard, borderColor: colors.border }]}> 
@@ -685,7 +883,7 @@ export default function ApplicantsScreen() {
                           ) : null}
                           {workStyleLabels.length > 0 ? (
                             <View style={styles.roleDetailBlock}> 
-                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>รูปแบบงานที่สะดวก</Text>
+                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>{t('applicants.rows.workStyle')}</Text>
                               <View style={styles.skillsRow}>
                                 {workStyleLabels.map((label) => (
                                   <View key={label} style={[styles.subtleTag, { backgroundColor: elevatedCard, borderColor: colors.border }]}> 
@@ -702,13 +900,13 @@ export default function ApplicantsScreen() {
                         <>
                           {profile.orgType ? (
                             <View style={styles.roleDetailBlock}> 
-                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>ประเภทองค์กร</Text>
+                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>{t('applicants.rows.organizationType')}</Text>
                               <Text style={[styles.roleDetailValue, { color: colors.text }]}>{getOrgTypeThaiLabel(profile.orgType)}</Text>
                             </View>
                           ) : null}
                           {interestedStaffLabels.length > 0 ? (
                             <View style={styles.roleDetailBlock}> 
-                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>กำลังมองหาบุคลากร</Text>
+                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>{t('applicants.rows.staffNeeded')}</Text>
                               <View style={styles.skillsRow}>
                                 {interestedStaffLabels.map((label) => (
                                   <View key={label} style={[styles.subtleTag, { backgroundColor: elevatedCard, borderColor: colors.border }]}> 
@@ -720,7 +918,7 @@ export default function ApplicantsScreen() {
                           ) : null}
                           {profile.hiringUrgency ? (
                             <View style={styles.roleDetailBlock}> 
-                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>ความเร่งด่วนในการจ้าง</Text>
+                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>{t('applicants.rows.urgency')}</Text>
                               <Text style={[styles.roleDetailValue, { color: colors.text }]}>{getHiringUrgencyThaiLabel(profile.hiringUrgency)}</Text>
                             </View>
                           ) : null}
@@ -731,7 +929,7 @@ export default function ApplicantsScreen() {
                         <>
                           {careLabels.length > 0 ? (
                             <View style={styles.roleDetailBlock}> 
-                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>ประเภทการดูแลที่ต้องการ</Text>
+                              <Text style={[styles.roleDetailLabel, { color: colors.textSecondary }]}>{t('applicants.rows.careNeeds')}</Text>
                               <View style={styles.skillsRow}>
                                 {careLabels.map((label) => (
                                   <View key={label} style={[styles.subtleTag, { backgroundColor: elevatedCard, borderColor: colors.border }]}> 
@@ -749,21 +947,21 @@ export default function ApplicantsScreen() {
 
                 {selectedContact.message ? (
                   <View style={[styles.detailSectionCard, { backgroundColor: heroSubtle, borderColor: colors.border }]}> 
-                    <Text style={[styles.detailBoxTitle, { color: colors.primary }]}>ข้อความจากผู้สมัคร</Text>
+                    <Text style={[styles.detailBoxTitle, { color: colors.primary }]}>{t('applicants.modal.applicantMessage')}</Text>
                     <Text style={[styles.detailBoxBody, { color: colors.text }]}>{selectedContact.message}</Text>
                   </View>
                 ) : null}
 
                 {profile?.bio ? (
                   <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
-                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>เกี่ยวกับผู้สมัคร</Text>
+                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>{t('applicants.modal.aboutApplicant')}</Text>
                     <Text style={[styles.detailBoxBody, { color: colors.textSecondary }]}>{profile.bio}</Text>
                   </View>
                 ) : null}
 
                 {profile?.skills && profile.skills.length > 0 ? (
                   <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
-                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>ทักษะ</Text>
+                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>{t('applicants.modal.skills')}</Text>
                     <View style={styles.skillsRow}> 
                       {profile.skills.map((skill) => (
                         <View key={skill} style={[styles.skillTag, { backgroundColor: colors.primaryBackground }]}> 
@@ -777,7 +975,7 @@ export default function ApplicantsScreen() {
                 {/* Action buttons based on current status */}
                 {selectedContact.job?.status !== 'closed' && (
                 <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
-                  <Text style={[styles.detailBoxTitle, { color: colors.text }]}>จัดการผู้สมัคร</Text>
+                  <Text style={[styles.detailBoxTitle, { color: colors.text }]}>{t('applicants.modal.manageApplicant')}</Text>
 
                   {status === 'interested' && (
                     <View style={styles.statusOptionWrap}>
@@ -787,7 +985,7 @@ export default function ApplicantsScreen() {
                         onPress={() => handleStatusChange('confirmed')}
                       >
                         <Ionicons name="checkmark-circle-outline" size={16} color={colors.white} />
-                        <Text style={[styles.statusOptionBtnText, { color: colors.white }]}>เลือกคนนี้</Text>
+                        <Text style={[styles.statusOptionBtnText, { color: colors.white }]}>{t('applicants.actions.selectThis')}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.statusOptionBtn, { backgroundColor: colors.surface, borderColor: colors.border, flex: 1, opacity: statusUpdating ? 0.6 : 1 }]}
@@ -795,7 +993,7 @@ export default function ApplicantsScreen() {
                         onPress={() => handleStatusChange('cancelled')}
                       >
                         <Ionicons name="close-circle-outline" size={16} color={colors.textSecondary} />
-                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>ปฏิเสธ</Text>
+                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>{t('applicants.actions.reject')}</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -804,7 +1002,7 @@ export default function ApplicantsScreen() {
                     <View>
                       <View style={[styles.statusBadgeRow, { backgroundColor: '#E8F5E9', borderRadius: BORDER_RADIUS.md, padding: SPACING.sm, marginBottom: SPACING.sm }]}>
                         <Ionicons name="checkmark-circle" size={18} color="#2E7D32" />
-                        <Text style={{ color: '#2E7D32', fontWeight: '600', marginLeft: SPACING.xs }}>เลือกแล้ว — รอวันทำงานผ่านไปแล้วจึงจะปิดงานได้</Text>
+                        <Text style={{ color: '#2E7D32', fontWeight: '600', marginLeft: SPACING.xs }}>{t('applicants.actions.selectedHint')}</Text>
                       </View>
                       <TouchableOpacity
                         style={[styles.statusOptionBtn, { backgroundColor: colors.surface, borderColor: colors.border, opacity: statusUpdating ? 0.6 : 1 }]}
@@ -812,7 +1010,7 @@ export default function ApplicantsScreen() {
                         onPress={() => handleStatusChange('interested')}
                       >
                         <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
-                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>ยกเลิกการเลือก</Text>
+                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>{t('applicants.actions.undoSelection')}</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -821,7 +1019,7 @@ export default function ApplicantsScreen() {
                     <View>
                       <View style={[styles.statusBadgeRow, { backgroundColor: '#FFEBEE', borderRadius: BORDER_RADIUS.md, padding: SPACING.sm, marginBottom: SPACING.sm }]}>
                         <Ionicons name="close-circle" size={18} color="#C62828" />
-                        <Text style={{ color: '#C62828', fontWeight: '600', marginLeft: SPACING.xs }}>ปฏิเสธแล้ว</Text>
+                        <Text style={{ color: '#C62828', fontWeight: '600', marginLeft: SPACING.xs }}>{t('applicants.actions.rejected')}</Text>
                       </View>
                       <TouchableOpacity
                         style={[styles.statusOptionBtn, { backgroundColor: colors.surface, borderColor: colors.border, opacity: statusUpdating ? 0.6 : 1 }]}
@@ -829,7 +1027,7 @@ export default function ApplicantsScreen() {
                         onPress={() => handleStatusChange('interested')}
                       >
                         <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
-                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>เปลี่ยนใจ — กลับมารับงาน</Text>
+                        <Text style={[styles.statusOptionBtnText, { color: colors.textSecondary }]}>{t('applicants.actions.reconsider')}</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -838,8 +1036,8 @@ export default function ApplicantsScreen() {
 
                 {selectedContact.job?.status !== 'closed' && status === 'confirmed' ? (
                   <View style={[styles.detailSectionCard, { backgroundColor: cardBackground, borderColor: colors.border }]}> 
-                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>จบงานและเปิดรีวิว</Text>
-                    <Text style={[styles.detailBoxBody, { color: colors.textSecondary }]}>ปิดงานได้หลังวันทำงานผ่านไปแล้ว ระบบจะปิดโพสต์ ปฏิเสธผู้สมัครอื่นอัตโนมัติ และเปิดให้ทั้งสองฝ่ายรีวิว</Text>
+                    <Text style={[styles.detailBoxTitle, { color: colors.text }]}>{t('applicants.modal.completeReviewTitle')}</Text>
+                    <Text style={[styles.detailBoxBody, { color: colors.textSecondary }]}>{t('applicants.modal.completeReviewBody')}</Text>
                     <TouchableOpacity
                       style={[
                         styles.primaryAction,
@@ -849,7 +1047,7 @@ export default function ApplicantsScreen() {
                       disabled={isCompletingJob}
                     >
                       <Ionicons name="checkmark-done-outline" size={18} color={colors.white} />
-                      <Text style={styles.primaryActionText}>{isCompletingJob ? 'กำลังดำเนินการ...' : 'จบงานและรีวิว'}</Text>
+                      <Text style={styles.primaryActionText}>{isCompletingJob ? t('applicants.actions.completing') : t('applicants.actions.completeReview')}</Text>
                     </TouchableOpacity>
                   </View>
                 ) : null}
@@ -861,14 +1059,15 @@ export default function ApplicantsScreen() {
                   onPress={navigateToApplicantProfile}
                 >
                   <Ionicons name="person-outline" size={16} color={colors.primary} />
-                  <Text style={[styles.detailSecondaryActionText, { color: colors.primary }]}>โปรไฟล์</Text>
+                  <Text style={[styles.detailSecondaryActionText, { color: colors.primary }]}>{t('applicants.modal.profile')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.detailChatAction, { backgroundColor: colors.primary }]}
+                  style={[styles.detailChatAction, { backgroundColor: isStartingChat ? colors.border : colors.primary }]}
                   onPress={handleStartChat}
+                  disabled={isStartingChat}
                 >
                   <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.white} />
-                  <Text style={styles.detailPrimaryActionText}>คุย</Text>
+                  <Text style={styles.detailPrimaryActionText}>{t('applicants.modal.chat')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.detailPrimaryAction, { backgroundColor: phone ? colors.success : colors.border }]}
@@ -876,7 +1075,7 @@ export default function ApplicantsScreen() {
                   disabled={!phone}
                 >
                   <Ionicons name="call-outline" size={16} color={colors.white} />
-                  <Text style={styles.detailPrimaryActionText}>โทร</Text>
+                  <Text style={styles.detailPrimaryActionText}>{t('applicants.modal.call')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -999,10 +1198,94 @@ const createStyles = (COLORS: any) => StyleSheet.create({
     marginLeft: 8,
     paddingVertical: 0,
   },
+  viewModeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 4,
+    marginTop: SPACING.md,
+    gap: 4,
+  },
+  viewModeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  viewModeTabText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '700',
+  },
   filterRow: {
     gap: SPACING.xs,
     paddingTop: SPACING.md,
     paddingBottom: 2,
+  },
+  sectionHeaderWrap: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.xs,
+  },
+  sectionHeaderCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: SPACING.lg,
+    marginBottom: SPACING.sm,
+    ...SHADOWS.sm,
+  },
+  sectionHeaderTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+  },
+  sectionHeaderTitleWrap: {
+    flex: 1,
+  },
+  sectionHeaderTitle: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '800',
+  },
+  sectionHeaderSubtitle: {
+    fontSize: FONT_SIZES.sm,
+    marginTop: 4,
+  },
+  sectionMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+  },
+  sectionMetaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  sectionMetaPillText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '700',
+  },
+  sectionStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.xs,
+    marginTop: SPACING.md,
+  },
+  sectionStatChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  sectionStatChipText: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '800',
   },
   applicantCard: {
     marginHorizontal: SPACING.md,

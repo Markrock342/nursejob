@@ -59,6 +59,7 @@ export default function AdminReportsScreen() {
       setReports(data);
     } catch (error) {
       console.error('Error loading reports:', error);
+      Alert.alert('โหลดข้อมูลไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);

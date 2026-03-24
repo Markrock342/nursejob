@@ -28,6 +28,8 @@ import { getUserPosts } from '../../services/jobService';
 import { canUserReviewTarget, getReviewsForTarget, getTargetRating, Review } from '../../services/reviewsService';
 import { getRoleIconName, getRoleLabel, getRoleTagColors, getVerificationTagText } from '../../utils/verificationTag';
 import { getPremiumTagColors, getPremiumTagText, hasPremiumTag, hasRoleTag } from '../../utils/verificationTag';
+import { useI18n } from '../../i18n';
+import { getDepartmentDisplayName } from '../../constants/jobOptions';
 import {
   getCareTypeThaiLabel,
   getHiringUrgencyThaiLabel,
@@ -99,6 +101,7 @@ export default function UserProfileScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { user } = useAuth();
+  const { t, resolvedLanguage } = useI18n();
   const { userId, userName, userPhoto } = route.params;
   const surfaceBackground = isDark ? colors.surface : colors.white;
   const elevatedBackground = isDark ? colors.card : colors.white;
@@ -129,14 +132,14 @@ export default function UserProfileScreen() {
         
         // Check privacy settings
         if (data.privacy?.profileVisible === false) {
-          setError('ผู้ใช้นี้ตั้งค่าโปรไฟล์เป็นส่วนตัว');
+          setError(t('userProfile.privateProfile'));
           setUserData(null);
           return;
         }
         
         setUserData({
           uid: userId,
-          displayName: data.displayName || userName || 'ไม่ระบุชื่อ',
+          displayName: data.displayName || userName || t('userProfile.unnamed'),
           photoURL: data.photoURL || userPhoto,
           bio: data.bio,
           role: data.role,
@@ -169,7 +172,7 @@ export default function UserProfileScreen() {
         // If user not found in Firestore, use passed data
         setUserData({
           uid: userId,
-          displayName: userName || 'ไม่ระบุชื่อ',
+          displayName: userName || t('userProfile.unnamed'),
           photoURL: userPhoto,
         });
       }
@@ -180,11 +183,11 @@ export default function UserProfileScreen() {
       // Fallback to passed data
       setUserData({
         uid: userId,
-        displayName: userName || 'ไม่ระบุชื่อ',
+        displayName: userName || t('userProfile.unnamed'),
         photoURL: userPhoto,
       });
     }
-  }, [userId, userName, userPhoto]);
+  }, [t, userId, userName, userPhoto]);
 
   // Fetch user's posts
   const fetchUserPosts = useCallback(async () => {
@@ -251,8 +254,8 @@ export default function UserProfileScreen() {
 
   // Format date
   const formatDate = (date: Date | undefined) => {
-    if (!date) return 'ไม่ระบุ';
-    return date.toLocaleDateString('th-TH', {
+    if (!date) return t('userProfile.notSpecified');
+    return date.toLocaleDateString(resolvedLanguage === 'th' ? 'th-TH' : 'en-US', {
       year: 'numeric',
       month: 'long',
     });
@@ -267,10 +270,10 @@ export default function UserProfileScreen() {
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-    if (minutes < 5) return 'เพิ่งใช้งาน';
-    if (minutes < 60) return `ใช้งานเมื่อ ${minutes} นาทีที่แล้ว`;
-    if (hours < 24) return `ใช้งานเมื่อ ${hours} ชั่วโมงที่แล้ว`;
-    return `ใช้งานเมื่อ ${days} วันที่แล้ว`;
+    if (minutes < 5) return t('userProfile.justNow');
+    if (minutes < 60) return t('userProfile.minutesAgo', { count: minutes });
+    if (hours < 24) return t('userProfile.hoursAgo', { count: hours });
+    return t('userProfile.daysAgo', { count: days });
   };
 
   const handleOpenReviews = () => {
@@ -295,7 +298,7 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="medkit-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>วิชาชีพ</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.mainProfession')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{getStaffTypeThaiLabel(userData.staffType)}</Text>
               </View>
             </View>
@@ -304,8 +307,8 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="medical-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>แผนกที่ถนัด</Text>
-                <Text style={[styles.infoValue, { color: colors.text }]}>{userData.department}</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('userProfile.specialtyDepartment')}</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{getDepartmentDisplayName(userData.department)}</Text>
               </View>
             </View>
           )}
@@ -313,8 +316,8 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="time-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประสบการณ์</Text>
-                <Text style={[styles.infoValue, { color: colors.text }]}>{userData.experience} ปี</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.experience')}</Text>
+                <Text style={[styles.infoValue, { color: colors.text }]}>{t('userProfile.experienceYears', { count: userData.experience })}</Text>
               </View>
             </View>
           )}
@@ -322,7 +325,7 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="card-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>เลขใบประกอบวิชาชีพ</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.licenseNumber')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{userData.licenseNumber.slice(0, 4)}****</Text>
               </View>
             </View>
@@ -331,14 +334,14 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
               <Ionicons name="options-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>รูปแบบงานที่สนใจ</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.interestedWorkStyle')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{workStyleLabels.join(', ')}</Text>
               </View>
             </View>
           )}
           {userData.skills && userData.skills.length > 0 && (
             <View style={[styles.skillsSection, { borderBottomColor: colors.borderLight }]}>
-              <Text style={[styles.skillsTitle, { color: colors.textSecondary }]}>ทักษะ</Text>
+              <Text style={[styles.skillsTitle, { color: colors.textSecondary }]}>{t('userProfile.skills')}</Text>
               <View style={styles.skillsTags}>
                 {userData.skills.map((skill, index) => (
                   <View key={index} style={[styles.skillTag, { backgroundColor: colors.primaryBackground }]}> 
@@ -358,7 +361,7 @@ export default function UserProfileScreen() {
           <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
             <Ionicons name="business-outline" size={20} color={colors.primary} />
             <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประเภทองค์กร</Text>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.organizationType')}</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{getOrgTypeThaiLabel(userData.orgType) || roleLabel}</Text>
             </View>
           </View>
@@ -366,7 +369,7 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="home-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ชื่อสถานพยาบาล</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('userProfile.facilityName')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{userData.hospital}</Text>
               </View>
             </View>
@@ -375,7 +378,7 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="location-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>พื้นที่รับสมัคร</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('userProfile.hiringArea')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{userData.province}</Text>
               </View>
             </View>
@@ -384,7 +387,7 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
               <Ionicons name="people-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>บุคลากรที่กำลังมองหา</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.staffNeeded')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{interestedStaffTypeLabels.join(', ')}</Text>
               </View>
             </View>
@@ -393,7 +396,7 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
               <Ionicons name="flash-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ความเร่งด่วน</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.urgency')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{getHiringUrgencyThaiLabel(userData.hiringUrgency)}</Text>
               </View>
             </View>
@@ -401,8 +404,8 @@ export default function UserProfileScreen() {
           <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
             <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
             <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประกาศที่เปิดอยู่</Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>{userPosts.length} รายการ</Text>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('userProfile.activePosts')}</Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>{userPosts.length} {t('common.units.item')}</Text>
             </View>
           </View>
         </>
@@ -415,7 +418,7 @@ export default function UserProfileScreen() {
           <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
             <Ionicons name="people-outline" size={20} color={colors.primary} />
             <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>บุคลากรที่ต้องการติดต่อ</Text>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.contactTarget')}</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{interestedStaffTypeLabels.join(', ')}</Text>
             </View>
           </View>
@@ -424,7 +427,7 @@ export default function UserProfileScreen() {
           <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}> 
             <Ionicons name="heart-outline" size={20} color={colors.primary} />
             <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ลักษณะการดูแลที่ต้องการ</Text>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.careNeeds')}</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{careNeedLabels.join(', ')}</Text>
             </View>
           </View>
@@ -433,7 +436,7 @@ export default function UserProfileScreen() {
           <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
             <Ionicons name="location-outline" size={20} color={colors.primary} />
             <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>จังหวัด</Text>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('profile.info.province')}</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{userData.province}</Text>
             </View>
           </View>
@@ -441,8 +444,8 @@ export default function UserProfileScreen() {
         <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
           <Ionicons name="document-text-outline" size={20} color={colors.primary} />
           <View style={styles.infoContent}>
-            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>ประกาศที่เปิดอยู่</Text>
-            <Text style={[styles.infoValue, { color: colors.text }]}>{userPosts.length} รายการ</Text>
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('userProfile.activePosts')}</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]}>{userPosts.length} {t('common.units.item')}</Text>
           </View>
         </View>
       </>
@@ -474,13 +477,13 @@ export default function UserProfileScreen() {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>โปรไฟล์</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{t('userProfile.headerTitle')}</Text>
           <View style={{ width: 40 }} />
         </View>
         
         <EmptyState
           icon="lock-closed"
-          title="โปรไฟล์ส่วนตัว"
+          title={t('userProfile.privateTitle')}
           description={error}
         />
       </SafeAreaView>
@@ -494,7 +497,7 @@ export default function UserProfileScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>โปรไฟล์</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('userProfile.headerTitle')}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -557,7 +560,7 @@ export default function UserProfileScreen() {
           {/* Online status text */}
           {userData?.privacy?.showOnlineStatus !== false && (
             <Text style={[styles.lastActiveText, { color: colors.textSecondary }]}>
-              {userData?.isOnline ? '🟢 ออนไลน์' : formatLastActive(userData?.lastActiveAt)}
+              {userData?.isOnline ? t('userProfile.online') : formatLastActive(userData?.lastActiveAt)}
             </Text>
           )}
 
@@ -578,7 +581,7 @@ export default function UserProfileScreen() {
               color={activeTab === 'info' ? colors.primary : colors.textSecondary} 
             />
             <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'info' && styles.tabTextActive, activeTab === 'info' && { color: colors.primary }]}>
-              ข้อมูล
+              {t('userProfile.tabs.info')}
             </Text>
           </TouchableOpacity>
           
@@ -592,7 +595,7 @@ export default function UserProfileScreen() {
               color={activeTab === 'posts' ? colors.primary : colors.textSecondary} 
             />
             <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'posts' && styles.tabTextActive, activeTab === 'posts' && { color: colors.primary }]}>
-              ประกาศ({userPosts.length})
+              {t('userProfile.tabs.posts', { count: userPosts.length })}
             </Text>
           </TouchableOpacity>
         </View>
@@ -606,19 +609,19 @@ export default function UserProfileScreen() {
                 <Text style={[styles.statValue, { color: statsTones.posts.text }]}> 
                   {userPosts.length}
                 </Text>
-                <Text style={[styles.statLabel, { color: statsTones.posts.text }]}>ประกาศ</Text>
+                <Text style={[styles.statLabel, { color: statsTones.posts.text }]}>{t('userProfile.stats.posts')}</Text>
               </View>
               <View style={[styles.statCard, { backgroundColor: statsTones.rating.background }]}> 
                 <Text style={[styles.statValue, { color: statsTones.rating.text }]}> 
                   {userData?.avgRating ? userData.avgRating.toFixed(1) : '-'}
                 </Text>
-                <Text style={[styles.statLabel, { color: statsTones.rating.text }]}>คะแนน ({userData?.reviewCount || 0})</Text>
+                <Text style={[styles.statLabel, { color: statsTones.rating.text }]}>{t('userProfile.stats.rating', { count: userData?.reviewCount || 0 })}</Text>
               </View>
               <View style={[styles.statCard, { backgroundColor: statsTones.response.background }]}> 
                 <Text style={[styles.statValue, { color: statsTones.response.text }]}> 
                   {userData?.responseRate ? `${userData.responseRate}%` : '-'}
                 </Text>
-                <Text style={[styles.statLabel, { color: statsTones.response.text }]}>ตอบกลับ</Text>
+                <Text style={[styles.statLabel, { color: statsTones.response.text }]}>{t('userProfile.stats.responseRate')}</Text>
               </View>
             </View>
             
@@ -627,19 +630,19 @@ export default function UserProfileScreen() {
             <View style={styles.reviewActionsRow}>
               <TouchableOpacity style={[styles.reviewActionButton, { backgroundColor: colors.primaryBackground }]} onPress={handleOpenReviews}>
                 <Ionicons name="star-outline" size={18} color={colors.primary} />
-                <Text style={[styles.reviewActionText, { color: colors.primary }]}>ดูรีวิวทั้งหมด</Text>
+                <Text style={[styles.reviewActionText, { color: colors.primary }]}>{t('userProfile.actions.viewAllReviews')}</Text>
               </TouchableOpacity>
               {user?.uid && user.uid !== userId && canReview ? (
                 <TouchableOpacity style={[styles.reviewActionButton, { backgroundColor: reviewWriteTone.background }]} onPress={handleOpenReviews}>
                   <Ionicons name="create-outline" size={18} color={reviewWriteTone.text} />
-                  <Text style={[styles.reviewActionText, { color: reviewWriteTone.text }]}>เขียนรีวิว</Text>
+                  <Text style={[styles.reviewActionText, { color: reviewWriteTone.text }]}>{t('userProfile.actions.writeReview')}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
 
             {receivedReviews.length > 0 ? (
               <View style={styles.reviewsPreviewSection}>
-                <Text style={[styles.skillsTitle, { color: colors.textSecondary }]}>รีวิวล่าสุด</Text>
+                <Text style={[styles.skillsTitle, { color: colors.textSecondary }]}>{t('userProfile.latestReviews')}</Text>
                 {receivedReviews.slice(0, 2).map((review) => (
                   <View key={review.id} style={[styles.reviewPreviewCard, { backgroundColor: elevatedBackground, borderColor: colors.borderLight }]}> 
                     <View style={styles.reviewPreviewHeader}>
@@ -657,7 +660,7 @@ export default function UserProfileScreen() {
             <View style={[styles.infoRow, { borderBottomColor: colors.borderLight }]}>
               <Ionicons name="calendar" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>เป็นสมาชิกตั้งแต่</Text>
+                <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{t('userProfile.memberSince')}</Text>
                 <Text style={[styles.infoValue, { color: colors.text }]}>{formatDate(userData?.createdAt)}</Text>
               </View>
             </View>
@@ -667,8 +670,8 @@ export default function UserProfileScreen() {
             {userPosts.length === 0 ? (
               <EmptyState
                 icon="document-text-outline"
-                title="ยังไม่มีประกาศ"
-                description="ผู้ใช้นี้ยังไม่มีประกาศที่เปิดอยู่"
+                title={t('userProfile.postsEmptyTitle')}
+                description={t('userProfile.postsEmptyDescription')}
               />
             ) : (
               userPosts.map((post) => (
